@@ -26,6 +26,12 @@ import webbrowser
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
+TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
+TRANSLATION_MODEL_CANDIDATES = [
+    "qwen2.5:3b",
+    "phi3:latest",
+    "llama3:latest",
+]
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 DEFAULT_SYSTEM_PROMPT = (
@@ -44,6 +50,7 @@ MAX_CONTEXT_CHARS = 80_000
 MAX_IMAGES_PER_MESSAGE = 4
 MAX_IMAGE_BASE64_CHARS = 12_000_000
 COMFYUI_DEFAULT_PREFIX = "Gemma4UI"
+_OLLAMA_MODELS_CACHE: dict[str, object] = {"at": 0.0, "models": set()}
 IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -132,6 +139,40 @@ def ollama_json(path: str, payload: dict | None = None, timeout: int = 120) -> d
     request = urllib.request.Request(url, data=data, headers=headers, method="POST" if payload else "GET")
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def installed_ollama_models() -> set[str]:
+    now = time.time()
+    if now - float(_OLLAMA_MODELS_CACHE["at"]) < 60:
+        return set(_OLLAMA_MODELS_CACHE["models"])
+    tags = ollama_json("/api/tags", timeout=3).get("models", [])
+    models = {str(item.get("name", "")) for item in tags if item.get("name")}
+    _OLLAMA_MODELS_CACHE["at"] = now
+    _OLLAMA_MODELS_CACHE["models"] = models
+    return models
+
+
+def select_translation_model() -> str:
+    models = installed_ollama_models()
+    if TRANSLATION_MODEL and TRANSLATION_MODEL in models:
+        return TRANSLATION_MODEL
+    for candidate in TRANSLATION_MODEL_CANDIDATES:
+        if candidate in models:
+            return candidate
+    return MODEL
+
+
+def clean_translation_output(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(
+        r"^(?:english\s+translation|translation|translated\s+text|訳|英訳|和訳|翻訳)\s*[:：]\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
 
 
 def comfyui_json(path: str, payload: dict | None = None, timeout: int = 30) -> dict:
@@ -755,13 +796,14 @@ def sanitize_chat_messages(messages: list[dict]) -> list[dict]:
 def health_payload() -> dict:
     try:
         version = ollama_json("/api/version", timeout=3).get("version", "unknown")
-        tags = ollama_json("/api/tags", timeout=3).get("models", [])
-        installed = any(item.get("name") == MODEL for item in tags)
+        models = installed_ollama_models()
+        installed = MODEL in models
         return {
             "ok": True,
             "ollama": "running",
             "version": version,
             "model": MODEL,
+            "translationModel": select_translation_model(),
             "modelInstalled": installed,
         }
     except Exception as exc:
@@ -836,11 +878,13 @@ class Handler(BaseHTTPRequestHandler):
             if not messages or not isinstance(messages, list):
                 json_response(self, 400, {"ok": False, "error": "messages must be a non-empty list"})
                 return
+            is_translation_task = body.get("task") == "translation"
             history_turns = max(1, min(int(body.get("history_turns", 4)), 20))
-            recent_messages = sanitize_chat_messages(messages[-(history_turns * 2) :])
+            recent_messages = sanitize_chat_messages(messages[-1:] if is_translation_task else messages[-(history_turns * 2) :])
             search_results: list[dict[str, str]] = []
             search_error = ""
-            if bool(body.get("web_search", False)):
+            use_web_search = bool(body.get("web_search", False)) and not is_translation_task
+            if use_web_search:
                 query = str(body.get("search_query") or messages[-1].get("content", ""))
                 try:
                     search_results = search_web(query, int(body.get("search_results", 4)))
@@ -848,12 +892,12 @@ class Handler(BaseHTTPRequestHandler):
                     search_error = str(exc)
 
             prompt_messages = [{"role": "system", "content": system_prompt}]
-            if body.get("web_search", False):
+            if use_web_search:
                 search_context = build_search_context(search_results)
                 if search_error:
                     search_context += f"\n\nSearch error: {search_error}"
                 prompt_messages.append({"role": "system", "content": search_context})
-            if body.get("workspace"):
+            if body.get("workspace") and not is_translation_task:
                 try:
                     workspace_context = build_workspace_context(body.get("workspace", {}))
                     if workspace_context:
@@ -861,9 +905,10 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     prompt_messages.append({"role": "system", "content": f"Workspace context error: {exc}"})
             prompt_messages.extend(recent_messages)
+            selected_model = select_translation_model() if is_translation_task else body.get("model") or MODEL
 
             payload = {
-                "model": body.get("model") or MODEL,
+                "model": selected_model,
                 "stream": False,
                 "think": bool(body.get("think", False)),
                 "keep_alive": body.get("keep_alive", "5m"),
@@ -877,16 +922,20 @@ class Handler(BaseHTTPRequestHandler):
                 },
             }
             response = ollama_json("/api/chat", payload=payload, timeout=600)
+            message = response.get("message", {})
+            if is_translation_task and isinstance(message, dict):
+                message = {**message, "content": clean_translation_output(str(message.get("content", "")))}
             json_response(
                 self,
                 200,
                 {
                     "ok": True,
-                    "message": response.get("message", {}),
+                    "message": message,
                     "model": response.get("model", payload["model"]),
+                    "task": "translation" if is_translation_task else "chat",
                     "done": response.get("done", True),
                     "search": {
-                        "enabled": bool(body.get("web_search", False)),
+                        "enabled": use_web_search,
                         "results": search_results,
                         "error": search_error,
                     },

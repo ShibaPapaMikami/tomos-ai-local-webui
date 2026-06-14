@@ -892,7 +892,7 @@ function chatRequestOptions(text) {
       temperature: 0.1,
       topP: 0.7,
       topK: 10,
-      numPredict: Math.min(Math.max(maxTokens, 192), 384),
+      numPredict: Math.min(Math.max(maxTokens, 128), 192),
       numCtx: 2048,
       historyTurns: 1,
       keepAlive: "30m",
@@ -1192,6 +1192,7 @@ async function sendMessage(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        task: requestOptions.translationMode ? "translation" : "chat",
         system: requestSystem,
         messages: requestMessages,
         temperature: requestOptions.temperature,
@@ -1204,10 +1205,12 @@ async function sendMessage(text) {
         keep_alive: requestOptions.keepAlive,
         web_search: requestOptions.codingMode ? false : requestOptions.webSearch,
         search_results: 4,
-        workspace: {
-          root: state.workspaceRoot,
-          files: [...state.selectedFiles],
-        },
+        workspace: requestOptions.translationMode
+          ? null
+          : {
+              root: state.workspaceRoot,
+              files: [...state.selectedFiles],
+            },
       }),
     });
     const data = await response.json();
