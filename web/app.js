@@ -1017,7 +1017,19 @@ function validationText(validation) {
     .join("\n");
 }
 
-async function requestWorkspaceFiles(userText, previousFiles = [], validation = null) {
+function combinedAbortSignal(primarySignal, timeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), timeoutMs);
+  const abort = () => {
+    window.clearTimeout(timeoutId);
+    controller.abort(primarySignal?.reason || new DOMException("aborted", "AbortError"));
+  };
+  if (primarySignal?.aborted) abort();
+  else primarySignal?.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}
+
+async function requestWorkspaceFiles(userText, previousFiles = [], validation = null, signal = null) {
   const correction = validation && !validation.ok
     ? `\n\n前回の生成には以下の検証エラーがあります。全ファイルを修正版として再出力してください。\n${validationText(validation)}\n\n前回ファイル:\n${JSON.stringify(previousFiles).slice(0, 60000)}`
     : "";
@@ -1046,6 +1058,7 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
         files: [...state.selectedFiles],
       },
     }),
+    signal: combinedAbortSignal(signal, 180000),
   });
   const data = await response.json();
   if (!response.ok || !data.ok) {
@@ -1122,7 +1135,14 @@ async function handleWorkspaceBuild(text) {
   session.messages.push({ role: "user", content: text });
   updateSessionTitle(session, text);
   state.busy = true;
+  state.abortController = new AbortController();
   startProgressTimer("生成・検証中");
+  const progressMessage = {
+    role: "assistant",
+    content: "作業を開始しました。\n- 要件を整理中",
+    streaming: true,
+  };
+  session.messages.push(progressMessage);
   saveSessions();
   render();
 
@@ -1130,15 +1150,44 @@ async function handleWorkspaceBuild(text) {
   let savedFiles = [];
   let validation = null;
   let attempts = 0;
+  const setBuildProgress = (lines) => {
+    progressMessage.content = lines.join("\n");
+    saveSessions();
+    render();
+  };
 
   try {
     for (attempts = 1; attempts <= 3; attempts += 1) {
       state.progressLabel = attempts === 1 ? "生成・保存中" : `自動修正中 ${attempts - 1}/2`;
       updateProgressTimer();
-      generated = await requestWorkspaceFiles(text, generated?.files || [], validation);
+      setBuildProgress([
+        `作業中: ${state.progressLabel}`,
+        `- 試行 ${attempts}/3`,
+        "- Gemmaにファイル内容を生成させています",
+        "- 生成後に保存と検証を行います",
+      ]);
+      generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
+      setBuildProgress([
+        `作業中: ${state.progressLabel}`,
+        `- 試行 ${attempts}/3`,
+        `- ${generated.files.length}件のファイルを受信`,
+        "- ローカルフォルダーへ保存中",
+      ]);
       savedFiles = await saveGeneratedFiles(generated.files);
+      setBuildProgress([
+        `作業中: ${state.progressLabel}`,
+        `- 試行 ${attempts}/3`,
+        `- ${savedFiles.length}件のファイルを保存`,
+        "- 構文と未完成表現を検証中",
+      ]);
       validation = await validateGeneratedFiles(savedFiles);
       if (validation.ok) break;
+      setBuildProgress([
+        "検証で問題を検出しました。",
+        `- 試行 ${attempts}/3`,
+        "- Gemmaに修正を依頼します",
+        validationText(validation),
+      ].filter(Boolean));
     }
     await loadWorkspace();
     for (const file of savedFiles) {
@@ -1146,20 +1195,27 @@ async function handleWorkspaceBuild(text) {
     }
     saveWorkspacePrefs();
     const durationSeconds = (Date.now() - state.startedAt) / 1000;
-    session.messages.push({
-      role: "assistant",
-      content: buildWorkspaceResultMessage(savedFiles, validation, attempts, generated?.notes || []),
-      sources: workspacePreviewSources(savedFiles),
-      durationSeconds,
-    });
+    progressMessage.content = buildWorkspaceResultMessage(savedFiles, validation, attempts, generated?.notes || []);
+    progressMessage.sources = workspacePreviewSources(savedFiles);
+    progressMessage.durationSeconds = durationSeconds;
+    delete progressMessage.streaming;
   } catch (error) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
-    session.messages.push({
-      role: "assistant",
-      content: `生成エラー: ${error.message}`,
-      durationSeconds,
-    });
+    if (error.name === "AbortError") {
+      progressMessage.content = "生成を停止しました。";
+    } else if (error.name === "TimeoutError" || /timed out/i.test(error.message)) {
+      progressMessage.content = [
+        "生成が3分以内に完了しなかったため停止しました。",
+        "- 依頼を少し小さく分けると成功しやすくなります",
+        "- 例: まず index.html だけ作る → 次に見た目を改善する",
+      ].join("\n");
+    } else {
+      progressMessage.content = `生成エラー: ${error.message}`;
+    }
+    progressMessage.durationSeconds = durationSeconds;
+    delete progressMessage.streaming;
   } finally {
+    state.abortController = null;
     state.busy = false;
     stopProgressTimer();
     saveSessions();
