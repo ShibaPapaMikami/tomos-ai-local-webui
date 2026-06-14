@@ -815,6 +815,18 @@ function translationSystemSuffix(enabled) {
   return "\n\n翻訳モード: ユーザーが翻訳を求めた場合は、翻訳文だけを返してください。解説、前置き、箇条書き、候補の列挙は不要です。原文が箇条書きなら箇条書きを保ち、それ以外は自然な文章として訳してください。";
 }
 
+function translationSystemPrompt() {
+  return [
+    "You are a precise translation engine.",
+    "Return only the translated text.",
+    "Do not add explanations, bullets, labels, alternatives, or notes.",
+    "Preserve the source structure when it is a list or multiline text.",
+    "If the request says 英訳, translate into natural English.",
+    "If the request says 和訳, translate into natural Japanese.",
+    "If no target language is explicit, infer it from the request.",
+  ].join("\n");
+}
+
 function buildSystemPrompt(basePrompt, codingMode, responseMode = "balanced", thinkingMode = "medium", translationMode = false) {
   const prompt = `${basePrompt}${modeSystemSuffix(responseMode)}${thinkingSystemSuffix(thinkingMode)}${translationSystemSuffix(translationMode)}`;
   if (!codingMode) return prompt;
@@ -877,11 +889,11 @@ function chatRequestOptions(text) {
       responseMode: "fast",
       thinkingMode: "low",
       progressLabel: "翻訳中",
-      temperature: 0.2,
-      topP: 0.8,
-      topK: 20,
-      numPredict: Math.min(Math.max(maxTokens, 256), 768),
-      numCtx: Math.min(Math.max(contextSize, 2048), 4096),
+      temperature: 0.1,
+      topP: 0.7,
+      topK: 10,
+      numPredict: Math.min(Math.max(maxTokens, 192), 384),
+      numCtx: 2048,
       historyTurns: 1,
       keepAlive: "30m",
       think: false,
@@ -1166,18 +1178,22 @@ async function sendMessage(text) {
   render();
 
   try {
-    const response = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system: buildSystemPrompt(
+    const requestSystem = requestOptions.translationMode
+      ? translationSystemPrompt()
+      : buildSystemPrompt(
           els.systemPrompt.value,
           requestOptions.codingMode,
           requestOptions.responseMode,
           requestOptions.thinkingMode,
           requestOptions.translationMode,
-        ),
-        messages: session.messages,
+        );
+    const requestMessages = requestOptions.translationMode ? [userMessage] : session.messages;
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system: requestSystem,
+        messages: requestMessages,
         temperature: requestOptions.temperature,
         top_p: requestOptions.topP,
         top_k: requestOptions.topK,
