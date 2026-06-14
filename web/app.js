@@ -1353,6 +1353,59 @@ function formatDuration(seconds) {
   return `${Math.round(seconds)}秒`;
 }
 
+function isLocalDateTimeRequest(text) {
+  const normalized = text.replace(/\s+/g, "").toLowerCase();
+  if (!normalized) return false;
+  return (
+    /(いま|今|現在|今の).{0,6}(時間|時刻)|何時/.test(normalized) ||
+    /(今日|本日|現在).{0,6}(日付|何日|曜日)|何曜日/.test(normalized) ||
+    /^(time|date|today|whattime|whatday)\??$/i.test(normalized)
+  );
+}
+
+function localDateTimeAnswer(text) {
+  const now = new Date();
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  const date = new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+  const weekday = new Intl.DateTimeFormat("ja-JP", { weekday: "long" }).format(now);
+  const time = new Intl.DateTimeFormat("ja-JP", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(now);
+  const normalized = text.replace(/\s+/g, "");
+  if (/曜日/.test(normalized) && !/(時間|時刻|何時)/.test(normalized)) {
+    return `今日は${date}（${weekday}）です。`;
+  }
+  if (/(日付|何日|today|date)/i.test(normalized) && !/(時間|時刻|何時|time)/i.test(normalized)) {
+    return `今日は${date}（${weekday}）です。`;
+  }
+  return `現在時刻は ${date}（${weekday}） ${time}（${timeZone}）です。`;
+}
+
+function handleLocalUtilityRequest(text) {
+  if (!isLocalDateTimeRequest(text)) return false;
+  let session = activeSession();
+  if (!session) {
+    newSession();
+    session = activeSession();
+  }
+  session.messages.push({ role: "user", content: text });
+  updateSessionTitle(session, text);
+  session.messages.push({
+    role: "assistant",
+    content: localDateTimeAnswer(text),
+    durationSeconds: 0,
+  });
+  saveSessions();
+  render();
+  return true;
+}
+
 async function pickWorkspaceFolder() {
   els.workspaceStatus.textContent = "フォルダー選択を待機中...";
   try {
@@ -1693,6 +1746,7 @@ els.composer.addEventListener("submit", async (event) => {
   if ((!text && state.pendingImages.length === 0) || state.busy) return;
   els.prompt.value = "";
   resizePrompt();
+  if (text && state.pendingImages.length === 0 && handleLocalUtilityRequest(text)) return;
   if (text && state.pendingImages.length === 0 && isImageGenerationRequest(text)) {
     await generateImageFromChat(text);
     return;
