@@ -21,6 +21,7 @@ const state = {
   theme: localStorage.getItem("gemma4.theme") || "dark",
   responseMode: localStorage.getItem("gemma4.responseMode") || "auto",
   thinkingMode: localStorage.getItem("gemma4.thinkingMode") || "auto",
+  enterToSend: localStorage.getItem("gemma4.enterToSend") === "true",
   lastDeleted: null,
   pendingImages: [],
 };
@@ -79,6 +80,7 @@ const els = {
   numPredict: document.querySelector("#num-predict"),
   numCtx: document.querySelector("#num-ctx"),
   historyTurns: document.querySelector("#history-turns"),
+  enterToSend: document.querySelector("#enter-to-send"),
 };
 
 if (window.matchMedia("(max-width: 760px)").matches && localStorage.getItem("gemma4.sidebarHidden") === null) {
@@ -245,6 +247,12 @@ function setThinkingMode(mode) {
   state.thinkingMode = ["auto", "low", "medium", "high"].includes(mode) ? mode : "auto";
   localStorage.setItem("gemma4.thinkingMode", state.thinkingMode);
   if (els.thinkingMode) els.thinkingMode.value = state.thinkingMode;
+}
+
+function setEnterToSend(enabled) {
+  state.enterToSend = Boolean(enabled);
+  localStorage.setItem("gemma4.enterToSend", String(state.enterToSend));
+  if (els.enterToSend) els.enterToSend.checked = state.enterToSend;
 }
 
 function openFolderEditor(folder) {
@@ -1772,6 +1780,14 @@ function resizePrompt() {
 }
 
 els.prompt.addEventListener("input", resizePrompt);
+els.prompt.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing) return;
+  const shortcutSend = event.metaKey || event.ctrlKey;
+  const plainEnterSend = state.enterToSend && !event.shiftKey && !event.altKey;
+  if (!shortcutSend && !plainEnterSend) return;
+  event.preventDefault();
+  els.composer.requestSubmit();
+});
 
 els.attachImage.addEventListener("click", () => {
   els.imageInput.click();
@@ -1869,12 +1885,14 @@ els.themeSelect.addEventListener("change", () => setTheme(els.themeSelect.value)
 els.responseMode.addEventListener("change", () => setResponseMode(els.responseMode.value));
 els.composerResponseMode.addEventListener("change", () => setResponseMode(els.composerResponseMode.value));
 els.thinkingMode.addEventListener("change", () => setThinkingMode(els.thinkingMode.value));
+els.enterToSend.addEventListener("change", () => setEnterToSend(els.enterToSend.checked));
 
 ensureFolderData();
 syncWorkspaceFromActiveFolder();
 setTheme(state.theme);
 setResponseMode(state.responseMode);
 setThinkingMode(state.thinkingMode);
+setEnterToSend(state.enterToSend);
 resizePrompt();
 
 if (state.folders.length > 0 && sessionsForActiveFolder().length === 0) {
