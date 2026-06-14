@@ -1617,7 +1617,7 @@ async function handleWeatherRequest(text) {
     const response = await fetch("/api/weather", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ location }),
+      body: JSON.stringify({ query: text, location }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {

@@ -151,6 +151,9 @@ WEATHER_LOCATION_ALIASES = {
     "京都": "Kyoto",
     "京都府": "Kyoto",
     "名古屋": "Nagoya",
+    "新潟": "Niigata",
+    "新潟市": "Niigata",
+    "新潟県": "Niigata",
     "横浜": "Yokohama",
     "神奈川": "Yokohama",
     "札幌": "Sapporo",
@@ -397,6 +400,30 @@ def weather_description(code: object) -> str:
         return "不明"
 
 
+def weather_day_offset_from_text(text: str) -> int:
+    return 1 if re.search(r"明日|tomorrow", text, flags=re.IGNORECASE) else 0
+
+
+def weather_location_from_query(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"[?？。!！]", "", cleaned)
+    cleaned = re.sub(r"(教えて|おしえて|ください|下さい|どう|ですか|は)$", "", cleaned)
+    cleaned = re.sub(r"(今日|本日|現在|今|いま|明日|tomorrow|today)(?:の)?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(天気|気温|降水|雨|晴れ|曇り|weather|temperature|forecast).*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^(の|で|における|at|in|for)\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*(の|で|における|at|in|for)$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip()
+    return cleaned if cleaned else ""
+
+
+def weather_request_parts(query: str, location: str) -> tuple[str, int]:
+    source = query or location
+    day_offset = weather_day_offset_from_text(source)
+    parsed_location = weather_location_from_query(source) if query else ""
+    selected_location = parsed_location or location.strip() or DEFAULT_WEATHER_LOCATION
+    return selected_location, day_offset
+
+
 def geocode_location(location: str) -> dict:
     requested_name = location.strip() or DEFAULT_WEATHER_LOCATION
     name = WEATHER_LOCATION_ALIASES.get(requested_name, requested_name)
@@ -422,7 +449,8 @@ def geocode_location(location: str) -> dict:
     }
 
 
-def fetch_weather(location: str) -> dict:
+def fetch_weather(location: str, day_offset: int = 0) -> dict:
+    day_offset = max(0, min(day_offset, 1))
     place = geocode_location(location)
     query = urllib.parse.urlencode(
         {
@@ -440,7 +468,7 @@ def fetch_weather(location: str) -> dict:
             ),
             "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
             "timezone": place["timezone"],
-            "forecast_days": 1,
+            "forecast_days": day_offset + 1,
         }
     )
     request = urllib.request.Request(
@@ -454,9 +482,15 @@ def fetch_weather(location: str) -> dict:
     current_units = forecast.get("current_units") or {}
     daily = forecast.get("daily") or {}
     location_label = " / ".join([item for item in [place["name"], place["admin1"], place["country"]] if item])
+    daily_weather = daily.get("weather_code") or []
+    daily_max = daily.get("temperature_2m_max") or []
+    daily_min = daily.get("temperature_2m_min") or []
+    daily_precipitation = daily.get("precipitation_probability_max") or []
+    daily_time = daily.get("time") or []
     return {
         "location": location_label,
         "timezone": forecast.get("timezone") or place["timezone"],
+        "dayOffset": day_offset,
         "current": {
             "time": current.get("time"),
             "weather": weather_description(current.get("weather_code")),
@@ -467,11 +501,13 @@ def fetch_weather(location: str) -> dict:
             "precipitation": current.get("precipitation"),
             "windSpeed": current.get("wind_speed_10m"),
         },
-        "today": {
-            "weather": weather_description((daily.get("weather_code") or [None])[0]),
-            "temperatureMax": (daily.get("temperature_2m_max") or [None])[0],
-            "temperatureMin": (daily.get("temperature_2m_min") or [None])[0],
-            "precipitationProbability": (daily.get("precipitation_probability_max") or [None])[0],
+        "target": {
+            "date": daily_time[day_offset] if len(daily_time) > day_offset else None,
+            "label": "明日" if day_offset == 1 else "今日",
+            "weather": weather_description(daily_weather[day_offset] if len(daily_weather) > day_offset else None),
+            "temperatureMax": daily_max[day_offset] if len(daily_max) > day_offset else None,
+            "temperatureMin": daily_min[day_offset] if len(daily_min) > day_offset else None,
+            "precipitationProbability": daily_precipitation[day_offset] if len(daily_precipitation) > day_offset else None,
         },
         "source": "Open-Meteo",
     }
@@ -479,15 +515,23 @@ def fetch_weather(location: str) -> dict:
 
 def build_weather_answer(weather: dict) -> str:
     current = weather["current"]
-    today = weather["today"]
+    target = weather["target"]
     unit = current.get("temperatureUnit") or "°C"
-    lines = [
-        f"{weather['location']}の現在の天気は{current['weather']}です。",
-        f"気温は{current['temperature']}{unit}、体感は{current['apparentTemperature']}{unit}、湿度は{current['humidity']}%です。",
-        f"今日の予報は{today['weather']}、最高{today['temperatureMax']}{unit} / 最低{today['temperatureMin']}{unit}、降水確率は最大{today['precipitationProbability']}%です。",
-        f"風速は{current['windSpeed']} km/h、降水量は{current['precipitation']} mmです。",
-        f"更新時刻: {current['time']}（{weather['timezone']}） / 出典: {weather['source']}",
-    ]
+    if weather.get("dayOffset") == 1:
+        lines = [
+            f"{weather['location']}の明日（{target['date']}）の予報は{target['weather']}です。",
+            f"最高{target['temperatureMax']}{unit} / 最低{target['temperatureMin']}{unit}、降水確率は最大{target['precipitationProbability']}%です。",
+            f"参考として現在は{current['weather']}、気温{current['temperature']}{unit}、湿度{current['humidity']}%です。",
+            f"更新時刻: {current['time']}（{weather['timezone']}） / 出典: {weather['source']}",
+        ]
+    else:
+        lines = [
+            f"{weather['location']}の現在の天気は{current['weather']}です。",
+            f"気温は{current['temperature']}{unit}、体感は{current['apparentTemperature']}{unit}、湿度は{current['humidity']}%です。",
+            f"今日の予報は{target['weather']}、最高{target['temperatureMax']}{unit} / 最低{target['temperatureMin']}{unit}、降水確率は最大{target['precipitationProbability']}%です。",
+            f"風速は{current['windSpeed']} km/h、降水量は{current['precipitation']} mmです。",
+            f"更新時刻: {current['time']}（{weather['timezone']}） / 出典: {weather['source']}",
+        ]
     return "\n".join(lines)
 
 
@@ -1253,8 +1297,9 @@ class Handler(BaseHTTPRequestHandler):
     def handle_weather(self) -> None:
         try:
             body = read_json_body(self)
-            location = str(body.get("location") or DEFAULT_WEATHER_LOCATION)
-            weather = fetch_weather(location)
+            query = str(body.get("query") or "")
+            location, day_offset = weather_request_parts(query, str(body.get("location") or ""))
+            weather = fetch_weather(location, day_offset)
             json_response(self, 200, {"ok": True, "answer": build_weather_answer(weather), "weather": weather})
         except Exception as exc:
             json_response(self, 500, {"ok": False, "error": str(exc)})
