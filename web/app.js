@@ -1102,6 +1102,16 @@ function buildWorkspaceResultMessage(savedFiles, validation, attempts, notes = [
   return lines.join("\n");
 }
 
+function workspacePreviewSources(files) {
+  if (!state.workspaceRoot) return [];
+  return files
+    .filter((file) => /\.html?$/i.test(file.path))
+    .map((file) => ({
+      title: `${file.path} をプレビュー`,
+      url: `/api/workspace/preview?root=${encodeURIComponent(state.workspaceRoot)}&path=${encodeURIComponent(file.path)}`,
+    }));
+}
+
 async function handleWorkspaceBuild(text) {
   let session = activeSession();
   if (!session) {
@@ -1139,6 +1149,7 @@ async function handleWorkspaceBuild(text) {
     session.messages.push({
       role: "assistant",
       content: buildWorkspaceResultMessage(savedFiles, validation, attempts, generated?.notes || []),
+      sources: workspacePreviewSources(savedFiles),
       durationSeconds,
     });
   } catch (error) {
@@ -1312,7 +1323,7 @@ async function sendMessage(text) {
           ? `\n\n自動保存エラー: ${saveError}`
           : "";
       assistantMessage.content = requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`;
-      assistantMessage.sources = requestOptions.codingMode ? [] : streamSearchResults;
+      assistantMessage.sources = requestOptions.codingMode ? workspacePreviewSources(savedFiles) : streamSearchResults;
       assistantMessage.durationSeconds = durationSeconds;
       delete assistantMessage.streaming;
       return;
@@ -1341,7 +1352,7 @@ async function sendMessage(text) {
     session.messages.push({
       role: "assistant",
       content: requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`,
-      sources: requestOptions.codingMode ? [] : data.search?.results || [],
+      sources: requestOptions.codingMode ? workspacePreviewSources(savedFiles) : data.search?.results || [],
       durationSeconds,
     });
   } catch (error) {
@@ -1978,6 +1989,7 @@ async function handleSaveCommand(text) {
     session.messages.push({
       role: "assistant",
       content: `${data.path} に保存しました（${data.size}バイト）。`,
+      sources: workspacePreviewSources([{ path: data.path, size: data.size }]),
       durationSeconds,
     });
     await loadWorkspace();

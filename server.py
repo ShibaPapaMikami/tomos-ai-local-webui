@@ -662,6 +662,14 @@ def write_workspace_file(root: str, relative_path: str, content: str) -> dict:
 
 
 SCRIPT_RE = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script>", re.IGNORECASE | re.DOTALL)
+EXTERNAL_ASSET_RE = re.compile(
+    r"<(?:script|link|img|iframe|audio|video|source)\b[^>]*(?:src|href)\s*=\s*[\"']https?://",
+    re.IGNORECASE,
+)
+PLACEHOLDER_RE = re.compile(
+    r"(?:TODO|FIXME|ここに|省略|以下省略|同様に|実装してください|\\.\\.\\.|…)",
+    re.IGNORECASE,
+)
 
 
 def node_check(source: str, suffix: str = ".js") -> list[str]:
@@ -695,6 +703,10 @@ def node_check(source: str, suffix: str = ".js") -> list[str]:
 def validate_text_content(relative_path: str, content: str) -> list[str]:
     suffix = Path(relative_path).suffix.lower()
     errors: list[str] = []
+    if content.lstrip().startswith(relative_path):
+        errors.append("File path appears inside the file content.")
+    if PLACEHOLDER_RE.search(content):
+        errors.append("Content appears to include TODO, omitted code, or placeholder text.")
     if suffix in {".js", ".mjs", ".cjs"}:
         errors.extend(node_check(content, suffix=".js"))
     elif suffix == ".json":
@@ -705,6 +717,12 @@ def validate_text_content(relative_path: str, content: str) -> list[str]:
     elif suffix == ".html":
         if "<html" not in content.lower() and "<!doctype html" not in content.lower():
             errors.append("HTML document is missing <html> or <!doctype html>.")
+        if EXTERNAL_ASSET_RE.search(content):
+            errors.append("HTML uses external assets. Use a self-contained file unless the user explicitly asks otherwise.")
+        if content.lower().count("<script") != content.lower().count("</script>"):
+            errors.append("HTML script tag count does not match.")
+        if content.lower().count("<style") != content.lower().count("</style>"):
+            errors.append("HTML style tag count does not match.")
         if content.lower().count("<canvas") > content.lower().count("</canvas>"):
             errors.append("HTML has an unclosed <canvas> tag.")
         for index, script in enumerate(SCRIPT_RE.findall(content), start=1):
@@ -1086,6 +1104,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/image/view":
             self.handle_image_view(parsed.query)
             return
+        if parsed.path == "/api/workspace/preview":
+            self.handle_workspace_preview(parsed.query)
+            return
 
         path = parsed.path
         if path == "/":
@@ -1284,6 +1305,29 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except Exception as exc:
             json_response(self, 502, {"ok": False, "error": str(exc)})
+
+    def handle_workspace_preview(self, query: str) -> None:
+        try:
+            params = urllib.parse.parse_qs(query)
+            root = params.get("root", [""])[0]
+            relative_path = params.get("path", [""])[0]
+            path = resolve_workspace_file(root, relative_path)
+            if not path.exists() or not path.is_file():
+                self.send_error(404)
+                return
+            if not is_probably_text(path):
+                self.send_error(415)
+                return
+            content_type = mimetypes.guess_type(str(path))[0] or "text/plain"
+            body = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", f"{content_type}; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            json_response(self, 500, {"ok": False, "error": str(exc)})
 
     def handle_search(self) -> None:
         try:
