@@ -121,6 +121,12 @@ def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -
     handler.wfile.write(body)
 
 
+def stream_json_event(handler: BaseHTTPRequestHandler, payload: dict) -> None:
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
+    handler.wfile.write(body)
+    handler.wfile.flush()
+
+
 def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length", "0"))
     if length <= 0:
@@ -139,6 +145,18 @@ def ollama_json(path: str, payload: dict | None = None, timeout: int = 120) -> d
     request = urllib.request.Request(url, data=data, headers=headers, method="POST" if payload else "GET")
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def ollama_stream(path: str, payload: dict, timeout: int = 600):
+    url = f"{OLLAMA_URL}{path}"
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Accept": "application/x-ndjson", "Content-Type": "application/json"},
+        method="POST",
+    )
+    return urllib.request.urlopen(request, timeout=timeout)
 
 
 def installed_ollama_models() -> set[str]:
@@ -950,7 +968,7 @@ class Handler(BaseHTTPRequestHandler):
 
             payload = {
                 "model": selected_model,
-                "stream": False,
+                "stream": bool(body.get("stream", False)),
                 "think": bool(body.get("think", False)),
                 "keep_alive": body.get("keep_alive", "5m"),
                 "messages": prompt_messages,
@@ -962,6 +980,60 @@ class Handler(BaseHTTPRequestHandler):
                     "num_ctx": max(512, min(int(body.get("num_ctx", 2048)), 32768)),
                 },
             }
+            if payload["stream"]:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                stream_json_event(
+                    self,
+                    {
+                        "ok": True,
+                        "type": "start",
+                        "model": payload["model"],
+                        "task": "translation" if is_translation_task else "chat",
+                        "search": {
+                            "enabled": use_web_search,
+                            "results": search_results,
+                            "error": search_error,
+                        },
+                    },
+                )
+                content_parts: list[str] = []
+                with ollama_stream("/api/chat", payload=payload, timeout=600) as stream:
+                    for raw_line in stream:
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            continue
+                        chunk_data = json.loads(line)
+                        chunk = str(chunk_data.get("message", {}).get("content", ""))
+                        if chunk:
+                            content_parts.append(chunk)
+                            stream_json_event(self, {"ok": True, "type": "chunk", "content": chunk})
+                        if chunk_data.get("done"):
+                            break
+                content = "".join(content_parts)
+                if is_translation_task:
+                    content = clean_translation_output(content)
+                stream_json_event(
+                    self,
+                    {
+                        "ok": True,
+                        "type": "done",
+                        "message": {"role": "assistant", "content": content},
+                        "model": payload["model"],
+                        "task": "translation" if is_translation_task else "chat",
+                        "done": True,
+                        "search": {
+                            "enabled": use_web_search,
+                            "results": search_results,
+                            "error": search_error,
+                        },
+                    },
+                )
+                return
+
+            payload["stream"] = False
             response = ollama_json("/api/chat", payload=payload, timeout=600)
             message = response.get("message", {})
             if is_translation_task and isinstance(message, dict):
@@ -982,6 +1054,8 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 },
             )
+        except (BrokenPipeError, ConnectionResetError):
+            return
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
             json_response(self, exc.code, {"ok": False, "error": error_body})

@@ -7,6 +7,7 @@ const state = {
   webSearch: false,
   startedAt: 0,
   timerId: null,
+  abortController: null,
   progressLabel: "生成中",
   workspaceOpen: false,
   workspaceRoot: "",
@@ -41,6 +42,7 @@ const els = {
   imageInput: document.querySelector("#image-input"),
   attachImage: document.querySelector("#attach-image"),
   send: document.querySelector("#send"),
+  stop: document.querySelector("#stop"),
   newFolder: document.querySelector("#new-folder"),
   folderList: document.querySelector("#folder-list"),
   sessionList: document.querySelector("#session-list"),
@@ -675,7 +677,10 @@ function render() {
   renderFolders();
   renderMessages();
   renderWorkspace();
-  els.send.disabled = state.busy;
+  els.send.disabled = false;
+  els.send.hidden = state.busy;
+  els.stop.hidden = !state.busy;
+  els.stop.disabled = !state.abortController;
   renderPendingImages();
   els.webSearchToggle.classList.toggle("active", state.webSearch);
   els.webSearchToggle.setAttribute("aria-pressed", String(state.webSearch));
@@ -1158,6 +1163,27 @@ async function checkHealth() {
   }
 }
 
+async function readChatStream(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      onEvent(JSON.parse(trimmed));
+    }
+  }
+  buffer += decoder.decode();
+  const trimmed = buffer.trim();
+  if (trimmed) onEvent(JSON.parse(trimmed));
+}
+
 async function sendMessage(text) {
   let session = activeSession();
   if (!session) {
@@ -1177,6 +1203,18 @@ async function sendMessage(text) {
   saveSessions();
   render();
 
+  let assistantMessage = null;
+  let renderScheduled = false;
+  const scheduleStreamRender = () => {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    window.requestAnimationFrame(() => {
+      renderScheduled = false;
+      saveSessions();
+      render();
+    });
+  };
+
   try {
     const requestSystem = requestOptions.translationMode
       ? translationSystemPrompt()
@@ -1187,32 +1225,93 @@ async function sendMessage(text) {
           requestOptions.thinkingMode,
           requestOptions.translationMode,
         );
-    const requestMessages = requestOptions.translationMode ? [userMessage] : session.messages;
+    const requestMessages = requestOptions.translationMode ? [userMessage] : [...session.messages];
+    const stream = !requestOptions.translationMode;
+    const payload = {
+      task: requestOptions.translationMode ? "translation" : "chat",
+      stream,
+      system: requestSystem,
+      messages: requestMessages,
+      temperature: requestOptions.temperature,
+      top_p: requestOptions.topP,
+      top_k: requestOptions.topK,
+      num_predict: requestOptions.numPredict,
+      num_ctx: requestOptions.numCtx,
+      history_turns: requestOptions.historyTurns,
+      think: requestOptions.think,
+      keep_alive: requestOptions.keepAlive,
+      web_search: requestOptions.codingMode ? false : requestOptions.webSearch,
+      search_results: 4,
+      workspace: requestOptions.translationMode
+        ? null
+        : {
+            root: state.workspaceRoot,
+            files: [...state.selectedFiles],
+          },
+    };
+    state.abortController = new AbortController();
+    if (stream) {
+      assistantMessage = {
+        role: "assistant",
+        content: "",
+        sources: [],
+        streaming: true,
+      };
+      session.messages.push(assistantMessage);
+      saveSessions();
+      render();
+    }
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task: requestOptions.translationMode ? "translation" : "chat",
-        system: requestSystem,
-        messages: requestMessages,
-        temperature: requestOptions.temperature,
-        top_p: requestOptions.topP,
-        top_k: requestOptions.topK,
-        num_predict: requestOptions.numPredict,
-        num_ctx: requestOptions.numCtx,
-        history_turns: requestOptions.historyTurns,
-        think: requestOptions.think,
-        keep_alive: requestOptions.keepAlive,
-        web_search: requestOptions.codingMode ? false : requestOptions.webSearch,
-        search_results: 4,
-        workspace: requestOptions.translationMode
-          ? null
-          : {
-              root: state.workspaceRoot,
-              files: [...state.selectedFiles],
-            },
-      }),
+      body: JSON.stringify(payload),
+      signal: state.abortController.signal,
     });
+
+    if (stream && response.body) {
+      if (!response.ok) {
+        throw new Error("Request failed");
+      }
+      let streamSearchResults = [];
+      await readChatStream(response, (event) => {
+        if (!event.ok) {
+          throw new Error(event.error || "Request failed");
+        }
+        if (event.search?.results) {
+          streamSearchResults = event.search.results;
+        }
+        if (event.type === "chunk" && event.content) {
+          assistantMessage.content += event.content;
+          scheduleStreamRender();
+        }
+        if (event.type === "done") {
+          assistantMessage.content = event.message?.content || assistantMessage.content;
+          streamSearchResults = event.search?.results || streamSearchResults;
+        }
+      });
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      const content = assistantMessage.content || "";
+      let savedFiles = [];
+      let saveError = "";
+      if (requestOptions.codingMode) {
+        try {
+          savedFiles = await autoSaveGeneratedFiles(text, content);
+        } catch (error) {
+          saveError = error.message;
+        }
+      }
+      const savedNote = savedFiles.length > 0
+        ? `保存しました。\n${savedFiles.map((file) => `- ${file.path} (${file.size}バイト)`).join("\n")}`
+        : saveError
+          ? `\n\n自動保存エラー: ${saveError}`
+          : "";
+      assistantMessage.content = requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`;
+      assistantMessage.sources = requestOptions.codingMode ? [] : streamSearchResults;
+      assistantMessage.durationSeconds = durationSeconds;
+      delete assistantMessage.streaming;
+      return;
+    }
+
     const data = await response.json();
     if (!response.ok || !data.ok) {
       throw new Error(data.error || "Request failed");
@@ -1241,12 +1340,35 @@ async function sendMessage(text) {
     });
   } catch (error) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
-    session.messages.push({
-      role: "assistant",
-      content: `エラー: ${error.message}`,
-      durationSeconds,
-    });
+    if (error.name === "AbortError") {
+      if (assistantMessage) {
+        assistantMessage.content = assistantMessage.content
+          ? `${assistantMessage.content}\n\n（停止しました）`
+          : "停止しました。";
+        assistantMessage.durationSeconds = durationSeconds;
+        delete assistantMessage.streaming;
+      } else {
+        session.messages.push({
+          role: "assistant",
+          content: "停止しました。",
+          durationSeconds,
+        });
+      }
+    } else if (assistantMessage) {
+      assistantMessage.content = assistantMessage.content
+        ? `${assistantMessage.content}\n\nエラー: ${error.message}`
+        : `エラー: ${error.message}`;
+      assistantMessage.durationSeconds = durationSeconds;
+      delete assistantMessage.streaming;
+    } else {
+      session.messages.push({
+        role: "assistant",
+        content: `エラー: ${error.message}`,
+        durationSeconds,
+      });
+    }
   } finally {
+    state.abortController = null;
     state.busy = false;
     stopProgressTimer();
     saveSessions();
@@ -1822,6 +1944,13 @@ els.composer.addEventListener("submit", async (event) => {
     return;
   }
   sendMessage(text || "この画像を説明してください。");
+});
+
+els.stop.addEventListener("click", () => {
+  if (!state.abortController) return;
+  state.progressLabel = "停止中";
+  updateProgressTimer();
+  state.abortController.abort();
 });
 
 const PROMPT_MIN_HEIGHT = 34;
