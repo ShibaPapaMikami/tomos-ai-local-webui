@@ -770,10 +770,15 @@ function isSimpleReplyRequest(text) {
   return /^(おはよ|おはよう|こんにちは|こんばんは|ありがとう|ありがと|どうも|了解|はい|うん|ok|OK|hi|hello|thanks|thankyou|goodmorning)/i.test(normalized);
 }
 
+function isTranslationRequest(text) {
+  return /英訳|和訳|翻訳|訳して|translate/i.test(text);
+}
+
 function effectiveResponseMode(text, codingMode) {
   if (codingMode) return "quality";
   const selected = state.responseMode;
   if (selected !== "auto") return selected;
+  if (isTranslationRequest(text)) return "fast";
   return isSimpleReplyRequest(text) ? "fast" : "balanced";
 }
 
@@ -805,8 +810,13 @@ function thinkingSystemSuffix(mode) {
   return "\n\n思考量: 標準。速度と正確さのバランスを取り、必要な範囲で確認して答えてください。";
 }
 
-function buildSystemPrompt(basePrompt, codingMode, responseMode = "balanced", thinkingMode = "medium") {
-  const prompt = `${basePrompt}${modeSystemSuffix(responseMode)}${thinkingSystemSuffix(thinkingMode)}`;
+function translationSystemSuffix(enabled) {
+  if (!enabled) return "";
+  return "\n\n翻訳モード: ユーザーが翻訳を求めた場合は、翻訳文だけを返してください。解説、前置き、箇条書き、候補の列挙は不要です。原文が箇条書きなら箇条書きを保ち、それ以外は自然な文章として訳してください。";
+}
+
+function buildSystemPrompt(basePrompt, codingMode, responseMode = "balanced", thinkingMode = "medium", translationMode = false) {
+  const prompt = `${basePrompt}${modeSystemSuffix(responseMode)}${thinkingSystemSuffix(thinkingMode)}${translationSystemSuffix(translationMode)}`;
   if (!codingMode) return prompt;
   return `${prompt}
 
@@ -854,14 +864,34 @@ function applyThinkingBudget(options) {
 
 function chatRequestOptions(text) {
   const codingMode = isWorkspaceBuildRequest(text);
+  const translationMode = isTranslationRequest(text) && !codingMode;
   const mode = effectiveResponseMode(text, codingMode);
   const thinkingMode = effectiveThinkingMode(text, codingMode, mode);
   const maxTokens = numberValue(els.numPredict, 96);
   const contextSize = numberValue(els.numCtx, 2048);
   const historyTurns = numberValue(els.historyTurns, 4);
+  if (translationMode) {
+    return {
+      codingMode,
+      translationMode,
+      responseMode: "fast",
+      thinkingMode: "low",
+      progressLabel: "翻訳中",
+      temperature: 0.2,
+      topP: 0.8,
+      topK: 20,
+      numPredict: Math.min(Math.max(maxTokens, 256), 768),
+      numCtx: Math.min(Math.max(contextSize, 2048), 4096),
+      historyTurns: 1,
+      keepAlive: "30m",
+      think: false,
+      webSearch: false,
+    };
+  }
   if (mode === "fast") {
     return applyThinkingBudget({
       codingMode,
+      translationMode,
       responseMode: mode,
       thinkingMode,
       progressLabel: "高速生成中",
@@ -879,6 +909,7 @@ function chatRequestOptions(text) {
   if (mode === "quality") {
     return applyThinkingBudget({
       codingMode,
+      translationMode,
       responseMode: mode,
       thinkingMode,
       progressLabel: codingMode ? "コード生成中" : "精度優先で生成中",
@@ -895,6 +926,7 @@ function chatRequestOptions(text) {
   }
   return applyThinkingBudget({
     codingMode,
+    translationMode,
     responseMode: mode,
     thinkingMode,
     progressLabel: codingMode ? "コード生成中" : state.webSearch ? "検索 + 生成中" : "生成中",
@@ -1138,7 +1170,13 @@ async function sendMessage(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        system: buildSystemPrompt(els.systemPrompt.value, requestOptions.codingMode, requestOptions.responseMode, requestOptions.thinkingMode),
+        system: buildSystemPrompt(
+          els.systemPrompt.value,
+          requestOptions.codingMode,
+          requestOptions.responseMode,
+          requestOptions.thinkingMode,
+          requestOptions.translationMode,
+        ),
         messages: session.messages,
         temperature: requestOptions.temperature,
         top_p: requestOptions.topP,
