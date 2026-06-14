@@ -162,14 +162,50 @@ def select_translation_model() -> str:
     return MODEL
 
 
-def clean_translation_output(text: str) -> str:
+def translation_target_from_text(text: str) -> str:
+    if re.search(r"英訳|英語に|英語へ|to\s+english|into\s+english", text, flags=re.IGNORECASE):
+        return "English"
+    if re.search(r"和訳|日本語に|日本語へ|to\s+japanese|into\s+japanese", text, flags=re.IGNORECASE):
+        return "Japanese"
+    return ""
+
+
+def strip_translation_instruction(text: str) -> str:
     cleaned = text.strip()
     cleaned = re.sub(
-        r"^(?:english\s+translation|translation|translated\s+text|訳|英訳|和訳|翻訳)\s*[:：]\s*",
+        r"^\s*(?:英訳|和訳|翻訳|訳)(?:して|してください|して下さい|お願いします|してほしい)?"
+        r"\s*[。.!！?？]*\s*(?:[:：\-]\s*)?",
+        "",
+        cleaned,
+    ).strip()
+    cleaned = re.sub(
+        r"^\s*(?:please\s+)?translate(?:\s+(?:this|it|the\s+following|to\s+\w+|into\s+\w+))*"
+        r"\s*[.!?]*\s*(?:[:：\-]\s*)?",
         "",
         cleaned,
         flags=re.IGNORECASE,
     ).strip()
+    return cleaned or text.strip()
+
+
+def clean_translation_output(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(
+        r"^(?:english\s+translations?|japanese\s+translations?|translation|translated\s+text|訳|英訳|和訳|翻訳)\s*[:：]\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    lines = cleaned.splitlines()
+    while lines and re.match(
+        r"^\s*(?:english\s+translations?|japanese\s+translations?|translation|translated\s+text|訳|英訳|和訳|翻訳)\s*[:：]\s*$",
+        lines[0],
+        flags=re.IGNORECASE,
+    ):
+        lines.pop(0)
+    while len(lines) > 1 and re.match(r"^\s*(?:japanese\s+greetings?|english\s+translations?)\s*[:：]\s*$", lines[-1], flags=re.IGNORECASE):
+        lines.pop()
+    cleaned = "\n".join(lines).strip()
     if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
         cleaned = cleaned[1:-1].strip()
     return cleaned
@@ -879,8 +915,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, 400, {"ok": False, "error": "messages must be a non-empty list"})
                 return
             is_translation_task = body.get("task") == "translation"
+            translation_target = translation_target_from_text(str(messages[-1].get("content", ""))) if is_translation_task else ""
             history_turns = max(1, min(int(body.get("history_turns", 4)), 20))
             recent_messages = sanitize_chat_messages(messages[-1:] if is_translation_task else messages[-(history_turns * 2) :])
+            if is_translation_task and recent_messages:
+                recent_messages[-1]["content"] = strip_translation_instruction(str(recent_messages[-1].get("content", "")))
             search_results: list[dict[str, str]] = []
             search_error = ""
             use_web_search = bool(body.get("web_search", False)) and not is_translation_task
@@ -892,6 +931,8 @@ class Handler(BaseHTTPRequestHandler):
                     search_error = str(exc)
 
             prompt_messages = [{"role": "system", "content": system_prompt}]
+            if is_translation_task and translation_target:
+                prompt_messages.append({"role": "system", "content": f"Translate the user's text into {translation_target}. Return only the translation."})
             if use_web_search:
                 search_context = build_search_context(search_results)
                 if search_error:
