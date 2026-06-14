@@ -1,0 +1,39 @@
+# Local runtime state
+__pycache__/
+*.py[cod]
+.DS_Store
+*.log
+*.pid
+
+# Local ComfyUI install and generated assets
+ComfyUI/
+comfyui/
+outputs/
+output/
+input/
+temp/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Local model/checkpoint files
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.gguf
+models/
+
+# Local editor/project state
+.idea/
+.vscode/
+
+# Temporary downloads
+downloads/
+tmp/
+*.zip
+*.tar
+*.tar.gz

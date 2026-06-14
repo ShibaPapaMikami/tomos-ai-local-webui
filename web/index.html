@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gemma 4 12B</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <div class="mark">G4</div>
+          <div>
+            <div class="brand-title">Gemma 4</div>
+            <div class="brand-subtitle">12B ローカル</div>
+          </div>
+        </div>
+
+        <div class="sidebar-actions">
+          <button class="new-chat" id="new-folder" type="button">
+            <span>+</span>
+            <span>フォルダー</span>
+          </button>
+        </div>
+
+        <label class="sidebar-search">
+          <span>検索</span>
+          <input id="sidebar-search" type="search" placeholder="フォルダー / チャットを検索" />
+        </label>
+
+        <section class="sidebar-section tree-section">
+          <div class="section-header">
+            <span>フォルダーとチャット</span>
+          </div>
+          <nav class="folder-list folder-tree" id="folder-list" aria-label="フォルダーとチャット"></nav>
+        </section>
+
+        <div class="sidebar-footer">
+          <div class="status-row">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-text">確認中</span>
+          </div>
+          <button class="ghost-button" id="sidebar-collapse" type="button">サイドバーを隠す</button>
+          <button class="ghost-button" id="settings-toggle" type="button">設定</button>
+        </div>
+        <div class="sidebar-resizer" id="sidebar-resizer" aria-hidden="true"></div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button">サイドバー</button>
+          <div>
+            <h1 id="chat-title">新規チャット</h1>
+            <p id="chat-meta">gemma4:12b</p>
+          </div>
+          <div class="top-actions">
+            <button class="icon-button search-button" id="web-search-toggle" type="button" title="Web検索を使う" aria-pressed="false">Web検索</button>
+            <button class="icon-button" id="clear-chat" type="button" title="チャットをクリア">クリア</button>
+          </div>
+        </header>
+
+        <section class="settings-panel" id="settings-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong>設定</strong>
+              <span>応答の速さ、精度、文脈量を調整します。</span>
+            </div>
+            <button class="ghost-button" id="settings-close" type="button">閉じる</button>
+          </div>
+          <label class="setting-field setting-wide">
+            <span>システム指示</span>
+            <textarea id="system-prompt" rows="3">あなたは簡潔で有用なアシスタントです。前置きなしで直接答えてください。詳しい説明を求められない限り、1〜3個の短い箇条書きで回答してください。</textarea>
+            <small>全ての返信に共通して効く基本ルールです。長くすると応答が少し重くなります。</small>
+          </label>
+          <div class="settings-grid">
+            <label class="setting-field">
+              <span>テーマ</span>
+              <select id="theme-select">
+                <option value="dark">ダーク</option>
+                <option value="light">ライト</option>
+                <option value="green">グリーン</option>
+              </select>
+              <small>画面の配色を切り替えます。</small>
+            </label>
+            <label class="setting-field">
+              <span>応答モード</span>
+              <select id="response-mode">
+                <option value="auto">自動</option>
+                <option value="fast">高速</option>
+                <option value="balanced">標準</option>
+                <option value="quality">精度優先</option>
+              </select>
+              <small>高速は短文向け、精度優先は設計や調査向けです。自動では内容で切り替えます。</small>
+            </label>
+            <label class="setting-field">
+              <span>思考量</span>
+              <select id="thinking-mode">
+                <option value="auto">自動</option>
+                <option value="low">軽め</option>
+                <option value="medium">標準</option>
+                <option value="high">深く</option>
+              </select>
+              <small>コード作成や修正では深めにすると破綻しにくくなりますが、時間は増えます。</small>
+            </label>
+            <label class="setting-field">
+              <span>温度</span>
+              <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.7" />
+              <small>低いほど安定、高いほど表現に幅が出ます。</small>
+            </label>
+            <label class="setting-field">
+              <span>Top P</span>
+              <input id="top-p" type="number" min="0" max="1" step="0.05" value="0.9" />
+              <small>候補語の広がりを確率で絞ります。通常は0.8〜0.95で十分です。</small>
+            </label>
+            <label class="setting-field">
+              <span>Top K</span>
+              <input id="top-k" type="number" min="1" max="200" step="1" value="40" />
+              <small>候補語の数を制限します。小さいほど安定しやすくなります。</small>
+            </label>
+            <label class="setting-field">
+              <span>最大トークン</span>
+              <input id="num-predict" type="number" min="16" max="8192" step="16" value="96" />
+              <small>1回の返信で生成できる長さです。コード生成では自動で増やします。</small>
+            </label>
+            <label class="setting-field">
+              <span>コンテキスト</span>
+              <input id="num-ctx" type="number" min="512" max="32768" step="512" value="2048" />
+              <small>モデルが一度に見られる文脈量です。大きいほど重くなります。</small>
+            </label>
+            <label class="setting-field">
+              <span>記憶ターン</span>
+              <input id="history-turns" type="number" min="1" max="20" step="1" value="4" />
+              <small>過去の会話を何往復ぶん送るかです。増やすと文脈は保てますが遅くなります。</small>
+            </label>
+          </div>
+        </section>
+
+        <aside class="workspace-panel" id="workspace-panel" hidden>
+          <div class="panel-title">
+            <div>
+              <strong>フォルダー編集</strong>
+              <span id="workspace-folder-name">選択中フォルダー</span>
+            </div>
+            <button class="ghost-button" id="workspace-close" type="button">閉じる</button>
+          </div>
+          <label class="folder-name-editor">
+            <span>フォルダー名</span>
+            <input id="workspace-folder-title" type="text" placeholder="フォルダー名" />
+          </label>
+          <div class="workspace-picker">
+            <label>
+              <span>参照するローカルフォルダー</span>
+              <input id="workspace-root" type="text" placeholder="フォルダーを選択してください" readonly />
+            </label>
+            <button class="ghost-button" id="workspace-pick" type="button">フォルダーを選択</button>
+            <button class="ghost-button" id="workspace-load" type="button">再読込</button>
+          </div>
+          <div class="workspace-status" id="workspace-status">フォルダー未選択</div>
+          <div class="workspace-body">
+            <div class="workspace-files" id="workspace-files"></div>
+            <div class="workspace-write">
+              <label>
+                <span>保存先ファイル</span>
+                <input id="write-path" type="text" placeholder="src/example.py" />
+              </label>
+              <textarea id="write-content" rows="7" placeholder="生成されたコードを貼り付けてから保存してください。"></textarea>
+              <button class="ghost-button" id="write-file" type="button">ファイルを保存</button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="messages" id="messages" aria-live="polite"></section>
+
+        <div class="progress-line" id="progress-line" hidden>
+          <span class="progress-pulse"></span>
+          <span id="progress-text">生成中... 0秒</span>
+        </div>
+
+        <form class="composer" id="composer">
+          <div class="image-strip" id="image-strip" hidden></div>
+          <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
+          <div class="composer-box">
+            <button class="attach-button" id="attach-image" type="button" title="画像を添付" aria-label="画像を添付">+</button>
+            <select class="composer-mode-select" id="composer-response-mode" title="応答モード" aria-label="応答モード">
+              <option value="auto">自動</option>
+              <option value="fast">高速</option>
+              <option value="balanced">標準</option>
+              <option value="quality">精度</option>
+            </select>
+            <textarea id="prompt" rows="1" placeholder="Gemma 4 12B に送信。例: 赤いリンゴの画像を生成して"></textarea>
+            <button class="send-button" id="send" type="submit" title="送信" aria-label="送信">↑</button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <div class="undo-toast" id="undo-toast" hidden>
+      <span id="undo-text"></span>
+      <button id="undo-delete" type="button">元に戻す</button>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
