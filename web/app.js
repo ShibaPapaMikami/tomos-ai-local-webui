@@ -64,6 +64,7 @@ const els = {
   undoToast: document.querySelector("#undo-toast"),
   undoText: document.querySelector("#undo-text"),
   undoDelete: document.querySelector("#undo-delete"),
+  undoClose: document.querySelector("#undo-close"),
   settingsToggle: document.querySelector("#settings-toggle"),
   settingsClose: document.querySelector("#settings-close"),
   settingsPanel: document.querySelector("#settings-panel"),
@@ -1752,6 +1753,7 @@ els.sidebarResizer.addEventListener("pointerdown", (event) => {
 els.sidebarToggle.addEventListener("click", () => setSidebarHidden(false));
 els.sidebarCollapse.addEventListener("click", () => setSidebarHidden(!state.sidebarHidden));
 els.undoDelete.addEventListener("click", restoreLastDeleted);
+els.undoClose.addEventListener("click", hideUndo);
 
 els.newFolder.addEventListener("click", async () => {
   createFolder("新規フォルダー");

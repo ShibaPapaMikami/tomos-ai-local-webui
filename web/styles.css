@@ -740,6 +740,24 @@ select:focus {
   font-weight: 650;
 }
 
+.undo-toast .undo-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.undo-toast .undo-close:hover {
+  background: var(--panel-soft);
+  color: var(--text);
+}
+
 .messages {
   display: flex;
   flex-direction: column;
