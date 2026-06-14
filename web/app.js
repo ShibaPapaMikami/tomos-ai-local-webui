@@ -1009,6 +1009,205 @@ function normalizeGeneratedFiles(payload) {
   return files;
 }
 
+function localTetrisFiles() {
+  return [
+    {
+      path: "index.html",
+      content: `<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>シンプルWebテトリス</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #101417; color: #edf5ef; }
+    main { display: grid; grid-template-columns: auto 180px; gap: 20px; align-items: start; padding: 20px; }
+    canvas { background: #070a0c; border: 1px solid #2c3834; box-shadow: 0 18px 50px #0008; }
+    aside { display: grid; gap: 14px; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    .panel { border: 1px solid #2c3834; border-radius: 8px; background: #18201d; padding: 14px; }
+    .score { font-size: 30px; font-weight: 800; }
+    button { border: 0; border-radius: 8px; padding: 10px 12px; background: #46d88b; color: #062015; font-weight: 800; cursor: pointer; }
+    p { margin: 6px 0; color: #a9b8b0; line-height: 1.5; }
+    @media (max-width: 720px) { main { grid-template-columns: 1fr; } canvas { width: min(92vw, 320px); height: auto; } }
+  </style>
+</head>
+<body>
+  <main>
+    <canvas id="board" width="300" height="600" aria-label="テトリス盤"></canvas>
+    <aside>
+      <section class="panel">
+        <h1>Webテトリス</h1>
+        <p>左右: ← →</p>
+        <p>回転: ↑ / X</p>
+        <p>落下: ↓ / Space</p>
+      </section>
+      <section class="panel">
+        <p>スコア</p>
+        <div class="score" id="score">0</div>
+      </section>
+      <button id="restart">リスタート</button>
+    </aside>
+  </main>
+  <script>
+    const canvas = document.getElementById("board");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const cols = 10;
+    const rows = 20;
+    const size = 30;
+    const colors = {
+      I: "#67e8f9", O: "#fde047", T: "#c084fc", S: "#4ade80",
+      Z: "#fb7185", J: "#60a5fa", L: "#fb923c"
+    };
+    const shapes = {
+      I: [[1, 1, 1, 1]],
+      O: [[1, 1], [1, 1]],
+      T: [[0, 1, 0], [1, 1, 1]],
+      S: [[0, 1, 1], [1, 1, 0]],
+      Z: [[1, 1, 0], [0, 1, 1]],
+      J: [[1, 0, 0], [1, 1, 1]],
+      L: [[0, 0, 1], [1, 1, 1]]
+    };
+    let board, piece, score, dropTimer, lastTime, gameOver;
+
+    function reset() {
+      board = Array.from({ length: rows }, () => Array(cols).fill(""));
+      score = 0;
+      gameOver = false;
+      scoreEl.textContent = score;
+      piece = nextPiece();
+      lastTime = 0;
+      dropTimer = 0;
+      requestAnimationFrame(loop);
+    }
+
+    function nextPiece() {
+      const keys = Object.keys(shapes);
+      const type = keys[Math.floor(Math.random() * keys.length)];
+      return { type, shape: shapes[type].map(row => [...row]), x: 3, y: 0 };
+    }
+
+    function rotate(matrix) {
+      return matrix[0].map((_, i) => matrix.map(row => row[i]).reverse());
+    }
+
+    function collides(test = piece) {
+      for (let y = 0; y < test.shape.length; y++) {
+        for (let x = 0; x < test.shape[y].length; x++) {
+          if (!test.shape[y][x]) continue;
+          const bx = test.x + x;
+          const by = test.y + y;
+          if (bx < 0 || bx >= cols || by >= rows || (by >= 0 && board[by][bx])) return true;
+        }
+      }
+      return false;
+    }
+
+    function merge() {
+      piece.shape.forEach((row, y) => row.forEach((cell, x) => {
+        if (cell && piece.y + y >= 0) board[piece.y + y][piece.x + x] = piece.type;
+      }));
+    }
+
+    function clearLines() {
+      let cleared = 0;
+      board = board.filter(row => {
+        if (row.every(Boolean)) { cleared++; return false; }
+        return true;
+      });
+      while (board.length < rows) board.unshift(Array(cols).fill(""));
+      if (cleared) {
+        score += [0, 100, 300, 500, 800][cleared];
+        scoreEl.textContent = score;
+      }
+    }
+
+    function drop() {
+      piece.y++;
+      if (collides()) {
+        piece.y--;
+        merge();
+        clearLines();
+        piece = nextPiece();
+        if (collides()) gameOver = true;
+      }
+    }
+
+    function drawCell(x, y, color) {
+      ctx.fillStyle = color;
+      ctx.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      board.forEach((row, y) => row.forEach((type, x) => type && drawCell(x, y, colors[type])));
+      piece.shape.forEach((row, y) => row.forEach((cell, x) => {
+        if (cell) drawCell(piece.x + x, piece.y + y, colors[piece.type]);
+      }));
+      if (gameOver) {
+        ctx.fillStyle = "#000b";
+        ctx.fillRect(0, 250, canvas.width, 100);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 28px system-ui";
+        ctx.textAlign = "center";
+        ctx.fillText("GAME OVER", canvas.width / 2, 310);
+      }
+    }
+
+    function loop(time = 0) {
+      if (gameOver) { draw(); return; }
+      const delta = time - lastTime;
+      lastTime = time;
+      dropTimer += delta;
+      if (dropTimer > 700) { drop(); dropTimer = 0; }
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    document.addEventListener("keydown", event => {
+      if (gameOver) return;
+      if (event.key === "ArrowLeft") {
+        piece.x--;
+        if (collides()) piece.x++;
+      } else if (event.key === "ArrowRight") {
+        piece.x++;
+        if (collides()) piece.x--;
+      } else if (event.key === "ArrowDown") {
+        drop();
+      } else if (event.key === "ArrowUp" || event.key.toLowerCase() === "x") {
+        const next = { ...piece, shape: rotate(piece.shape) };
+        if (!collides(next)) piece.shape = next.shape;
+      } else if (event.code === "Space") {
+        event.preventDefault();
+        while (!collides()) piece.y++;
+        piece.y--;
+        drop();
+      }
+      draw();
+    });
+    document.getElementById("restart").addEventListener("click", reset);
+    reset();
+  </script>
+</body>
+</html>
+`,
+    },
+  ];
+}
+
+function localWorkspaceTemplate(text) {
+  if (/テトリス|tetris/i.test(text)) {
+    return {
+      summary: "ローカルテンプレートでWebテトリスを生成しました。",
+      notes: ["Gemma生成を待たずに、自己完結のindex.htmlを保存します。"],
+      files: localTetrisFiles(),
+    };
+  }
+  return null;
+}
+
 function validationText(validation) {
   if (!validation || !Array.isArray(validation.results)) return "";
   return validation.results
@@ -1157,37 +1356,58 @@ async function handleWorkspaceBuild(text) {
   };
 
   try {
-    for (attempts = 1; attempts <= 3; attempts += 1) {
-      state.progressLabel = attempts === 1 ? "生成・保存中" : `自動修正中 ${attempts - 1}/2`;
+    const template = localWorkspaceTemplate(text);
+    if (template) {
+      attempts = 1;
+      generated = template;
+      state.progressLabel = "ローカル生成中";
       updateProgressTimer();
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
-        `- 試行 ${attempts}/3`,
-        "- Gemmaにファイル内容を生成させています",
-        "- 生成後に保存と検証を行います",
-      ]);
-      generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
-      setBuildProgress([
-        `作業中: ${state.progressLabel}`,
-        `- 試行 ${attempts}/3`,
-        `- ${generated.files.length}件のファイルを受信`,
+        "- 定番テンプレートを選択",
+        `- ${generated.files.length}件のファイルを準備`,
         "- ローカルフォルダーへ保存中",
       ]);
       savedFiles = await saveGeneratedFiles(generated.files);
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
-        `- 試行 ${attempts}/3`,
         `- ${savedFiles.length}件のファイルを保存`,
         "- 構文と未完成表現を検証中",
       ]);
       validation = await validateGeneratedFiles(savedFiles);
-      if (validation.ok) break;
-      setBuildProgress([
-        "検証で問題を検出しました。",
-        `- 試行 ${attempts}/3`,
-        "- Gemmaに修正を依頼します",
-        validationText(validation),
-      ].filter(Boolean));
+    } else {
+      for (attempts = 1; attempts <= 3; attempts += 1) {
+        state.progressLabel = attempts === 1 ? "生成・保存中" : `自動修正中 ${attempts - 1}/2`;
+        updateProgressTimer();
+        setBuildProgress([
+          `作業中: ${state.progressLabel}`,
+          `- 試行 ${attempts}/3`,
+          "- Gemmaにファイル内容を生成させています",
+          "- 生成後に保存と検証を行います",
+        ]);
+        generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
+        setBuildProgress([
+          `作業中: ${state.progressLabel}`,
+          `- 試行 ${attempts}/3`,
+          `- ${generated.files.length}件のファイルを受信`,
+          "- ローカルフォルダーへ保存中",
+        ]);
+        savedFiles = await saveGeneratedFiles(generated.files);
+        setBuildProgress([
+          `作業中: ${state.progressLabel}`,
+          `- 試行 ${attempts}/3`,
+          `- ${savedFiles.length}件のファイルを保存`,
+          "- 構文と未完成表現を検証中",
+        ]);
+        validation = await validateGeneratedFiles(savedFiles);
+        if (validation.ok) break;
+        setBuildProgress([
+          "検証で問題を検出しました。",
+          `- 試行 ${attempts}/3`,
+          "- Gemmaに修正を依頼します",
+          validationText(validation),
+        ].filter(Boolean));
+      }
     }
     await loadWorkspace();
     for (const file of savedFiles) {
