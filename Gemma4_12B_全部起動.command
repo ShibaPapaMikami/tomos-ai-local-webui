@@ -6,8 +6,16 @@ cd "$(dirname "$0")"
 WEB_HOST="${GEMMA_WEB_HOST:-127.0.0.1}"
 WEB_PORT="${GEMMA_WEB_PORT:-54876}"
 WEB_URL="http://$WEB_HOST:$WEB_PORT"
+APP_VERSION="${GEMMA_APP_VERSION:-0.4.0}"
+CHAT_MODEL="${GEMMA_MODEL:-gemma4:12b}"
+CODING_MODEL="${GEMMA_CODING_MODEL:-$CHAT_MODEL}"
+TRANSLATION_MODEL="${GEMMA_TRANSLATION_MODEL:-auto}"
 
 echo "Gemma 4 12B + ComfyUI を起動します。"
+echo "App version: $APP_VERSION"
+echo "Chat model: $CHAT_MODEL"
+echo "Coding model: $CODING_MODEL"
+echo "Translation model: $TRANSLATION_MODEL"
 echo
 
 if ! command -v python3 >/dev/null 2>&1; then

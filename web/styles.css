@@ -540,6 +540,19 @@ h1 {
   font-size: 12px;
 }
 
+.settings-meta {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted-strong);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 10px;
+  word-break: break-all;
+}
+
 .workspace-panel {
   position: fixed;
   top: 0;

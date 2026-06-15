@@ -49,6 +49,14 @@ Gemma 4 12B の初回ダウンロードは数GBあります。学校のネット
 
 または `Start_Mac.command` をダブルクリックします。
 
+ターミナルがホーム `~` を開いている場合は、先にこのフォルダーへ移動してから実行します。
+
+```sh
+cd ~/Documents/desktop/Gemma4_12B
+export GEMMA_CODING_MODEL="hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M"
+./Gemma4_12B_全部起動.command
+```
+
 ### Windows
 
 1. [Python](https://www.python.org/downloads/) をインストールします。

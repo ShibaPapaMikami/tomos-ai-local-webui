@@ -6,8 +6,16 @@ cd /d "%~dp0"
 set WEB_HOST=127.0.0.1
 set WEB_PORT=54876
 set WEB_URL=http://%WEB_HOST%:%WEB_PORT%
+if "%GEMMA_APP_VERSION%"=="" set GEMMA_APP_VERSION=0.4.0
+if "%GEMMA_MODEL%"=="" set GEMMA_MODEL=gemma4:12b
+if "%GEMMA_CODING_MODEL%"=="" set GEMMA_CODING_MODEL=%GEMMA_MODEL%
+if "%GEMMA_TRANSLATION_MODEL%"=="" set GEMMA_TRANSLATION_MODEL=auto
 
 echo Starting Gemma 4 12B + ComfyUI...
+echo App version: %GEMMA_APP_VERSION%
+echo Chat model: %GEMMA_MODEL%
+echo Coding model: %GEMMA_CODING_MODEL%
+echo Translation model: %GEMMA_TRANSLATION_MODEL%
 echo.
 
 where python >nul 2>nul

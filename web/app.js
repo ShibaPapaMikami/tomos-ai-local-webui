@@ -33,6 +33,10 @@ const state = {
     translation: "gemma4:12b",
     available: [],
   },
+  appInfo: {
+    version: "",
+    commit: "",
+  },
   enterToSend: localStorage.getItem("gemma4.enterToSend") === "true",
   lastDeleted: null,
   pendingImages: [],
@@ -82,6 +86,7 @@ const els = {
   settingsToggle: document.querySelector("#settings-toggle"),
   settingsClose: document.querySelector("#settings-close"),
   settingsPanel: document.querySelector("#settings-panel"),
+  settingsMeta: document.querySelector("#settings-meta"),
   themeSelect: document.querySelector("#theme-select"),
   responseMode: document.querySelector("#response-mode"),
   composerResponseMode: document.querySelector("#composer-response-mode"),
@@ -281,6 +286,18 @@ function syncModelInputs() {
   if (els.chatModel) els.chatModel.value = state.modelOverrides.chat;
   if (els.codingModel) els.codingModel.value = state.modelOverrides.coding;
   if (els.translationModel) els.translationModel.value = state.modelOverrides.translation;
+}
+
+function renderSettingsMeta() {
+  if (!els.settingsMeta) return;
+  const version = state.appInfo.version || "不明";
+  const commit = state.appInfo.commit || "不明";
+  els.settingsMeta.innerHTML = [
+    `<div>アプリ版: ${escapeHtml(version)} / commit ${escapeHtml(commit)}</div>`,
+    `<div>通常: ${escapeHtml(modelForTask("chat"))}</div>`,
+    `<div>コード: ${escapeHtml(modelForTask("coding"))}</div>`,
+    `<div>翻訳: ${escapeHtml(modelForTask("translation"))}</div>`,
+  ].join("");
 }
 
 function setEnterToSend(enabled) {
@@ -1461,6 +1478,8 @@ async function checkHealth() {
   try {
     const response = await fetch("/api/health");
     const data = await response.json();
+    state.appInfo.version = data.appVersion || state.appInfo.version;
+    state.appInfo.commit = data.appCommit || state.appInfo.commit;
     if (data.models) {
       state.serverModels.chat = data.models.chat || data.model || state.serverModels.chat;
       state.serverModels.coding = data.models.coding || data.codingModel || state.serverModels.coding;
@@ -1485,6 +1504,7 @@ async function checkHealth() {
     els.statusText.textContent = data.ok && data.modelInstalled
       ? codingMissing ? "コード用モデル未取得" : "使用可能"
       : "モデル未取得";
+    renderSettingsMeta();
     if (!state.busy) renderMessages();
   } catch {
     els.statusDot.className = "status-dot error";
@@ -2461,6 +2481,7 @@ els.writeFile.addEventListener("click", saveWorkspaceFile);
 
 els.settingsToggle.addEventListener("click", () => {
   els.settingsPanel.hidden = !els.settingsPanel.hidden;
+  renderSettingsMeta();
 });
 els.settingsClose.addEventListener("click", () => {
   els.settingsPanel.hidden = true;
@@ -2472,13 +2493,18 @@ els.composerResponseMode.addEventListener("change", () => setResponseMode(els.co
 els.thinkingMode.addEventListener("change", () => setThinkingMode(els.thinkingMode.value));
 els.chatModel.addEventListener("change", () => {
   setModelOverride("chat", els.chatModel.value);
+  renderSettingsMeta();
   renderMessages();
 });
 els.codingModel.addEventListener("change", () => {
   setModelOverride("coding", els.codingModel.value);
+  renderSettingsMeta();
   renderMessages();
 });
-els.translationModel.addEventListener("change", () => setModelOverride("translation", els.translationModel.value));
+els.translationModel.addEventListener("change", () => {
+  setModelOverride("translation", els.translationModel.value);
+  renderSettingsMeta();
+});
 els.enterToSend.addEventListener("change", () => setEnterToSend(els.enterToSend.checked));
 
 ensureFolderData();
@@ -2487,6 +2513,7 @@ setTheme(state.theme);
 setResponseMode(state.responseMode);
 setThinkingMode(state.thinkingMode);
 syncModelInputs();
+renderSettingsMeta();
 setEnterToSend(state.enterToSend);
 resizePrompt();
 

@@ -25,6 +25,7 @@ import webbrowser
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.4.0")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -55,6 +56,7 @@ MAX_IMAGES_PER_MESSAGE = 4
 MAX_IMAGE_BASE64_CHARS = 12_000_000
 COMFYUI_DEFAULT_PREFIX = "Gemma4UI"
 _OLLAMA_MODELS_CACHE: dict[str, object] = {"at": 0.0, "models": set()}
+_GIT_COMMIT_CACHE: str | None = None
 IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -238,6 +240,25 @@ def select_translation_model() -> str:
 
 def select_coding_model() -> str:
     return CODING_MODEL or MODEL
+
+
+def app_commit() -> str:
+    global _GIT_COMMIT_CACHE
+    if _GIT_COMMIT_CACHE is not None:
+        return _GIT_COMMIT_CACHE
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        _GIT_COMMIT_CACHE = result.stdout.strip()
+    except Exception:
+        _GIT_COMMIT_CACHE = ""
+    return _GIT_COMMIT_CACHE
 
 
 def translation_target_from_text(text: str) -> str:
@@ -1078,6 +1099,8 @@ def health_payload() -> dict:
             "ok": True,
             "ollama": "running",
             "version": version,
+            "appVersion": APP_VERSION,
+            "appCommit": app_commit(),
             "model": MODEL,
             "codingModel": coding_model,
             "translationModel": translation_model,
@@ -1095,6 +1118,8 @@ def health_payload() -> dict:
         return {
             "ok": False,
             "ollama": "offline",
+            "appVersion": APP_VERSION,
+            "appCommit": app_commit(),
             "model": MODEL,
             "codingModel": select_coding_model(),
             "translationModel": TRANSLATION_MODEL or MODEL,
@@ -1415,6 +1440,7 @@ def main() -> None:
     httpd = ThreadingHTTPServer(address, Handler)
     url = f"http://{args.host}:{args.port}"
     print(f"Gemma 4 12B Web UI: {url}")
+    print(f"App version: {APP_VERSION} ({app_commit() or 'no-git'})")
     print(f"Ollama: {OLLAMA_URL}")
     print(f"ComfyUI: {COMFYUI_URL}")
     print(f"Model: {MODEL}")
