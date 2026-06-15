@@ -285,6 +285,10 @@ function modelForTask(task) {
   return state.serverModels[task] || state.serverModels.chat || "";
 }
 
+function fallbackCodingModel() {
+  return state.serverModels.chat || "gemma4:12b";
+}
+
 function modelIsInstalled(model) {
   return state.serverModels.available.includes(model);
 }
@@ -1437,7 +1441,7 @@ function combinedAbortSignal(primarySignal, timeoutMs) {
   return controller.signal;
 }
 
-async function requestWorkspaceFiles(userText, previousFiles = [], validation = null, signal = null) {
+async function requestWorkspaceFiles(userText, previousFiles = [], validation = null, signal = null, model = modelForTask("coding")) {
   const correction = validation && !validation.ok
     ? `\n\n前回の生成には以下の検証エラーがあります。全ファイルを修正版として再出力してください。\n${validationText(validation)}\n\n前回ファイル:\n${JSON.stringify(previousFiles).slice(0, 60000)}`
     : "";
@@ -1449,7 +1453,7 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       task: "coding",
-      model: modelForTask("coding"),
+      model,
       system: workspaceBuilderSystemPrompt(),
       messages: [
         {
@@ -1558,6 +1562,8 @@ async function handleWorkspaceBuild(text) {
   let savedFiles = [];
   let validation = null;
   let attempts = 0;
+  let activeCodingModel = modelForTask("coding");
+  let usedFallbackModel = false;
   const setBuildProgress = (lines) => {
     progressMessage.content = lines.join("\n");
     saveSessions();
@@ -1571,13 +1577,35 @@ async function handleWorkspaceBuild(text) {
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
         `- 試行 ${attempts}/3`,
-        `- ${modelForTask("coding")} でファイル内容を生成中`,
+        `- ${activeCodingModel} でファイル内容を生成中`,
+        usedFallbackModel ? "- Coderが遅いため標準モデルへ自動切替済み" : null,
         "- 初回はモデル読み込みで数分かかることがあります",
         "- 生成後に保存と検証を行います",
-      ]);
+      ].filter(Boolean));
       try {
-        generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
+        generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal, activeCodingModel);
       } catch (error) {
+        const fallback = fallbackCodingModel();
+        if (
+          error.name === "TimeoutError" &&
+          attempts < 3 &&
+          !usedFallbackModel &&
+          activeCodingModel !== fallback
+        ) {
+          activeCodingModel = fallback;
+          usedFallbackModel = true;
+          validation = {
+            ok: false,
+            results: [],
+            parseError: "前回のコード生成モデルが時間内に完了しませんでした。標準モデルで短い完成版を再生成してください。",
+          };
+          setBuildProgress([
+            "コード生成モデルが時間内に完了しませんでした。",
+            `- 試行 ${attempts}/3`,
+            `- ${fallback} に自動切替して再試行します`,
+          ]);
+          continue;
+        }
         if (attempts < 3 && /生成結果を読み取れませんでした|JSON|コードブロック/.test(error.message)) {
           validation = { ok: false, results: [], parseError: error.message };
           setBuildProgress([
@@ -1622,8 +1650,8 @@ async function handleWorkspaceBuild(text) {
     progressMessage.sources = workspacePreviewSources(savedFiles);
     progressMessage.durationSeconds = durationSeconds;
     progressMessage.runMeta = {
-      model: modelForTask("coding"),
-      modelLabel: shortModelName(modelForTask("coding"), "coding"),
+      model: activeCodingModel,
+      modelLabel: shortModelName(activeCodingModel, "coding"),
       task: "coding",
       taskLabel: "コード生成",
       responseMode: "quality",
@@ -1638,16 +1666,16 @@ async function handleWorkspaceBuild(text) {
     } else if (error.name === "TimeoutError" || /timed out/i.test(error.message)) {
       progressMessage.content = [
         "生成が6分以内に完了しなかったため停止しました。",
-        "- 初回のCoderモデル読み込みが長い場合は、同じ依頼をもう一度試すと成功しやすくなります",
-        "- それでも止まる場合は、コード生成モデルを Gemma 4 12B（標準・すぐ使える）に戻してください",
+        "- Coderが遅い場合は標準モデルへの自動切替を試します",
+        "- それでも止まる場合は、依頼をさらに小さくしてください。例: まず index.html だけ作る",
       ].join("\n");
     } else {
       progressMessage.content = `生成エラー: ${error.message}`;
     }
     progressMessage.durationSeconds = durationSeconds;
     progressMessage.runMeta = {
-      model: modelForTask("coding"),
-      modelLabel: shortModelName(modelForTask("coding"), "coding"),
+      model: activeCodingModel,
+      modelLabel: shortModelName(activeCodingModel, "coding"),
       task: "coding",
       taskLabel: "コード生成",
       responseMode: "quality",
