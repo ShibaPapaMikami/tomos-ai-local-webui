@@ -308,6 +308,33 @@ function displayModelName(model, task = "chat") {
   return `${model}${installed ? "" : "（未取得）"}`;
 }
 
+function shortModelName(model, task = "chat") {
+  return displayModelName(model, task).replace(/（[^）]*）/g, "");
+}
+
+function taskLabel(task) {
+  if (task === "translation") return "翻訳";
+  if (task === "coding") return "コード生成";
+  return "チャット";
+}
+
+function responseModeLabel(mode) {
+  return { auto: "自動", fast: "高速", balanced: "標準", quality: "精度優先" }[mode] || mode;
+}
+
+function messageRunMeta(requestOptions, model) {
+  const task = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
+  return {
+    model: model || modelForTask(task),
+    modelLabel: shortModelName(model || modelForTask(task), task),
+    task,
+    taskLabel: taskLabel(task),
+    responseMode: requestOptions.responseMode,
+    responseModeLabel: responseModeLabel(requestOptions.responseMode),
+    thinkingMode: requestOptions.thinkingMode,
+  };
+}
+
 function renderModelSelect(select, task, models) {
   if (!select) return;
   const current = state.modelOverrides[task] || "";
@@ -785,7 +812,11 @@ function renderMessages() {
     if (message.role === "assistant" && typeof message.durationSeconds === "number") {
       const duration = document.createElement("div");
       duration.className = "message-duration";
-      duration.textContent = `所要時間: ${formatDuration(message.durationSeconds)}`;
+      const details = [`所要時間: ${formatDuration(message.durationSeconds)}`];
+      if (message.runMeta?.modelLabel) details.push(`モデル: ${message.runMeta.modelLabel}`);
+      if (message.runMeta?.taskLabel) details.push(`用途: ${message.runMeta.taskLabel}`);
+      if (message.runMeta?.responseModeLabel) details.push(`モード: ${message.runMeta.responseModeLabel}`);
+      duration.textContent = details.join(" / ");
       wrapper.append(duration);
     }
     els.messages.append(wrapper);
@@ -1527,6 +1558,15 @@ async function handleWorkspaceBuild(text) {
     progressMessage.content = buildWorkspaceResultMessage(savedFiles, validation, attempts, generated?.notes || []);
     progressMessage.sources = workspacePreviewSources(savedFiles);
     progressMessage.durationSeconds = durationSeconds;
+    progressMessage.runMeta = {
+      model: modelForTask("coding"),
+      modelLabel: shortModelName(modelForTask("coding"), "coding"),
+      task: "coding",
+      taskLabel: "コード生成",
+      responseMode: "quality",
+      responseModeLabel: "精度優先",
+      thinkingMode: "high",
+    };
     delete progressMessage.streaming;
   } catch (error) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
@@ -1542,6 +1582,15 @@ async function handleWorkspaceBuild(text) {
       progressMessage.content = `生成エラー: ${error.message}`;
     }
     progressMessage.durationSeconds = durationSeconds;
+    progressMessage.runMeta = {
+      model: modelForTask("coding"),
+      modelLabel: shortModelName(modelForTask("coding"), "coding"),
+      task: "coding",
+      taskLabel: "コード生成",
+      responseMode: "quality",
+      responseModeLabel: "精度優先",
+      thinkingMode: "high",
+    };
     delete progressMessage.streaming;
   } finally {
     state.abortController = null;
@@ -1735,6 +1784,7 @@ async function sendMessage(text) {
       assistantMessage.content = requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`;
       assistantMessage.sources = requestOptions.codingMode ? workspacePreviewSources(savedFiles) : streamSearchResults;
       assistantMessage.durationSeconds = durationSeconds;
+      assistantMessage.runMeta = messageRunMeta(requestOptions, modelForTask(requestTask));
       delete assistantMessage.streaming;
       return;
     }
@@ -1764,6 +1814,7 @@ async function sendMessage(text) {
       content: requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`,
       sources: requestOptions.codingMode ? workspacePreviewSources(savedFiles) : data.search?.results || [],
       durationSeconds,
+      runMeta: messageRunMeta(requestOptions, data.model || modelForTask(requestTask)),
     });
   } catch (error) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
@@ -1773,12 +1824,14 @@ async function sendMessage(text) {
           ? `${assistantMessage.content}\n\n（停止しました）`
           : "停止しました。";
         assistantMessage.durationSeconds = durationSeconds;
+        assistantMessage.runMeta = messageRunMeta(requestOptions, modelForTask(requestTask));
         delete assistantMessage.streaming;
       } else {
         session.messages.push({
           role: "assistant",
           content: "停止しました。",
           durationSeconds,
+          runMeta: messageRunMeta(requestOptions, modelForTask(requestTask)),
         });
       }
     } else if (assistantMessage) {
@@ -1786,12 +1839,14 @@ async function sendMessage(text) {
         ? `${assistantMessage.content}\n\nエラー: ${error.message}`
         : `エラー: ${error.message}`;
       assistantMessage.durationSeconds = durationSeconds;
+      assistantMessage.runMeta = messageRunMeta(requestOptions, modelForTask(requestTask));
       delete assistantMessage.streaming;
     } else {
       session.messages.push({
         role: "assistant",
         content: `エラー: ${error.message}`,
         durationSeconds,
+        runMeta: messageRunMeta(requestOptions, modelForTask(requestTask)),
       });
     }
   } finally {

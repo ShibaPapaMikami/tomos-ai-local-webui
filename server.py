@@ -264,6 +264,23 @@ def app_commit() -> str:
     return _GIT_COMMIT_CACHE
 
 
+def friendly_ollama_error(error_body: str) -> str:
+    try:
+        data = json.loads(error_body)
+        message = str(data.get("error") or error_body)
+    except Exception:
+        message = error_body
+    match = re.search(r"model ['\"]?([^'\"\s]+)['\"]? not found", message, flags=re.IGNORECASE)
+    if match:
+        model = match.group(1)
+        return (
+            f"モデルが未取得です: {model}\n"
+            f"使うにはターミナルで次を実行してください。\n"
+            f"ollama pull {model}"
+        )
+    return message
+
+
 def translation_target_from_text(text: str) -> str:
     if re.search(r"英訳|英語に|英語へ|to\s+english|into\s+english", text, flags=re.IGNORECASE):
         return "English"
@@ -1338,7 +1355,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
-            json_response(self, exc.code, {"ok": False, "error": error_body})
+            json_response(self, exc.code, {"ok": False, "error": friendly_ollama_error(error_body)})
         except Exception as exc:
             json_response(self, 500, {"ok": False, "error": str(exc)})
 
