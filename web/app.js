@@ -1126,8 +1126,9 @@ function chatRequestOptions(text) {
 
 function workspaceBuilderSystemPrompt() {
   return `あなたはローカルフォルダー内にWebアプリを実装するコーディングエージェントです。
-返答はJSONオブジェクトだけにしてください。Markdown、説明、コードフェンスは禁止です。
-スキーマ:
+返答は次のどちらかの形式だけにしてください。説明文や参考リンクは禁止です。
+
+形式A: JSONオブジェクト
 {
   "summary": "短い作業概要",
   "files": [
@@ -1135,6 +1136,14 @@ function workspaceBuilderSystemPrompt() {
   ],
   "notes": ["任意の短い注意"]
 }
+
+形式B: ファイルパス行 + 完全なコードブロック
+index.html
+\`\`\`html
+<!doctype html>
+...
+\`\`\`
+
 要件:
 - 小さなWebゲームやデモは、ユーザー指定がなければ自己完結のHTML 1ファイルを優先してください。
 - HTMLにはCSSとJavaScriptを含め、保存後にそのままブラウザーで開ける完成品にしてください。
@@ -1150,6 +1159,42 @@ function extractJsonObject(text) {
     throw new Error("GemmaがJSONを返しませんでした。");
   }
   return JSON.parse(trimmed.slice(first, last + 1));
+}
+
+function extractFilesFromCodeBlocks(text) {
+  const files = [];
+  const pattern = /(?:^|\n)\s*([A-Za-z0-9_.\/-]+\.[A-Za-z0-9]+)\s*\n```[A-Za-z0-9_-]*\n([\s\S]*?)```/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const path = cleanCandidatePath(match[1]);
+    const content = match[2].replace(/\s+$/g, "\n");
+    if (path && content.trim()) files.push({ path, content });
+  }
+  if (files.length === 0) {
+    throw new Error("保存できるコードブロックが見つかりませんでした。");
+  }
+  return {
+    summary: "コードブロックからファイルを生成しました。",
+    notes: ["JSONが不完全な場合は、コードブロック形式から保存します。"],
+    files,
+  };
+}
+
+function parseWorkspaceGeneration(text) {
+  try {
+    const payload = extractJsonObject(text);
+    return {
+      summary: String(payload.summary || "生成しました。"),
+      notes: Array.isArray(payload.notes) ? payload.notes.map(String) : [],
+      files: normalizeGeneratedFiles(payload),
+    };
+  } catch (jsonError) {
+    try {
+      return extractFilesFromCodeBlocks(text);
+    } catch {
+      throw new Error(`生成結果を読み取れませんでした: ${jsonError.message}`);
+    }
+  }
 }
 
 function normalizeGeneratedFiles(payload) {
@@ -1391,6 +1436,9 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
   const correction = validation && !validation.ok
     ? `\n\n前回の生成には以下の検証エラーがあります。全ファイルを修正版として再出力してください。\n${validationText(validation)}\n\n前回ファイル:\n${JSON.stringify(previousFiles).slice(0, 60000)}`
     : "";
+  const parseCorrection = validation?.parseError
+    ? `\n\n前回の出力は保存形式として読み取れませんでした。\nエラー: ${validation.parseError}\nJSONにする場合は全ての改行と引用符を正しくエスケープしてください。難しい場合は、ファイルパス行と完全なコードブロック形式で再出力してください。`
+    : "";
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1401,7 +1449,7 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
       messages: [
         {
           role: "user",
-          content: `${userText}${correction}`,
+          content: `${userText}${correction}${parseCorrection}`,
         },
       ],
       temperature: 0.2,
@@ -1424,12 +1472,7 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
   if (!response.ok || !data.ok) {
     throw new Error(data.error || "コード生成に失敗しました。");
   }
-  const payload = extractJsonObject(data.message?.content || "");
-  return {
-    summary: String(payload.summary || "生成しました。"),
-    notes: Array.isArray(payload.notes) ? payload.notes.map(String) : [],
-    files: normalizeGeneratedFiles(payload),
-  };
+  return parseWorkspaceGeneration(data.message?.content || "");
 }
 
 async function saveGeneratedFiles(files) {
@@ -1526,7 +1569,21 @@ async function handleWorkspaceBuild(text) {
         `- ${modelForTask("coding")} でファイル内容を生成中`,
         "- 生成後に保存と検証を行います",
       ]);
-      generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
+      try {
+        generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
+      } catch (error) {
+        if (attempts < 3 && /生成結果を読み取れませんでした|JSON|コードブロック/.test(error.message)) {
+          validation = { ok: false, results: [], parseError: error.message };
+          setBuildProgress([
+            "生成結果の形式を読み取れませんでした。",
+            `- 試行 ${attempts}/3`,
+            "- コード用モデルに保存可能な形式で再出力を依頼します",
+            error.message,
+          ]);
+          continue;
+        }
+        throw error;
+      }
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
         `- 試行 ${attempts}/3`,
