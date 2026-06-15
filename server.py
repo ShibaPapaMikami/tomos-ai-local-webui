@@ -34,6 +34,9 @@ TRANSLATION_MODEL_CANDIDATES = [
     "phi3:latest",
     "llama3:latest",
 ]
+CODING_MODEL_CANDIDATES = [
+    "hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M",
+]
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 DEFAULT_SYSTEM_PROMPT = (
@@ -1110,6 +1113,10 @@ def health_payload() -> dict:
                 "translation": translation_model,
             },
             "availableModels": sorted(models),
+            "recommendedCodingModels": [
+                model for model in [CODING_MODEL, *CODING_MODEL_CANDIDATES]
+                if model
+            ],
             "modelInstalled": installed,
             "codingModelInstalled": coding_model in models,
             "translationModelInstalled": translation_model in models,

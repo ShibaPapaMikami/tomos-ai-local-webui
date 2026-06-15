@@ -32,6 +32,8 @@ const state = {
     coding: "gemma4:12b",
     translation: "gemma4:12b",
     available: [],
+    recommendedCoding: [],
+    codingInstalled: true,
   },
   appInfo: {
     version: "",
@@ -292,10 +294,11 @@ function renderSettingsMeta() {
   if (!els.settingsMeta) return;
   const version = state.appInfo.version || "不明";
   const commit = state.appInfo.commit || "不明";
+  const codingStatus = state.serverModels.codingInstalled ? "" : "（未取得）";
   els.settingsMeta.innerHTML = [
     `<div>アプリ版: ${escapeHtml(version)} / commit ${escapeHtml(commit)}</div>`,
     `<div>通常: ${escapeHtml(modelForTask("chat"))}</div>`,
-    `<div>コード: ${escapeHtml(modelForTask("coding"))}</div>`,
+    `<div>コード: ${escapeHtml(modelForTask("coding"))}${escapeHtml(codingStatus)}</div>`,
     `<div>翻訳: ${escapeHtml(modelForTask("translation"))}</div>`,
   ].join("");
 }
@@ -1497,13 +1500,21 @@ async function checkHealth() {
       if (els.codingModel) els.codingModel.placeholder = state.serverModels.coding;
       if (els.translationModel) els.translationModel.placeholder = state.serverModels.translation;
     }
-    if (Array.isArray(data.availableModels)) {
-      state.serverModels.available = data.availableModels;
+    state.serverModels.codingInstalled = data.codingModelInstalled !== false;
+    if (Array.isArray(data.recommendedCodingModels)) {
+      state.serverModels.recommendedCoding = data.recommendedCodingModels;
+    }
+    if (Array.isArray(data.availableModels) || state.serverModels.recommendedCoding.length > 0) {
+      state.serverModels.available = data.availableModels || state.serverModels.available;
       if (els.modelOptions) {
         els.modelOptions.innerHTML = "";
-        for (const model of data.availableModels) {
+        const models = [...new Set([...state.serverModels.available, ...state.serverModels.recommendedCoding])];
+        for (const model of models) {
           const option = document.createElement("option");
           option.value = model;
+          if (state.serverModels.recommendedCoding.includes(model) && !state.serverModels.available.includes(model)) {
+            option.label = `${model}（推奨・未取得）`;
+          }
           els.modelOptions.append(option);
         }
       }
