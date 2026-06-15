@@ -44,6 +44,8 @@ const state = {
   pendingImages: [],
 };
 
+const WORKSPACE_GENERATION_TIMEOUT_MS = 360000;
+
 const els = {
   sidebar: document.querySelector("#sidebar"),
   sidebarResizer: document.querySelector("#sidebar-resizer"),
@@ -1145,10 +1147,13 @@ index.html
 \`\`\`
 
 要件:
-- 小さなWebゲームやデモは、ユーザー指定がなければ自己完結のHTML 1ファイルを優先してください。
+- 小さなWebゲームやデモは、ユーザー指定がなければ index.html だけを生成してください。
+- まず動く最小完成版を優先してください。見た目や演出を盛りすぎないでください。
+- 1ファイルは原則250行以内にしてください。
 - HTMLにはCSSとJavaScriptを含め、保存後にそのままブラウザーで開ける完成品にしてください。
 - 未完成の省略、TODO、途中で切れたコード、外部ライブラリCDN依存は禁止です。
-- ファイルパスは相対パスだけにしてください。`;
+- ファイルパスは相対パスだけにしてください。
+- JSONのエスケープに自信がない場合は、形式Bのコードブロック形式を優先してください。`;
 }
 
 function extractJsonObject(text) {
@@ -1452,21 +1457,21 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
           content: `${userText}${correction}${parseCorrection}`,
         },
       ],
-      temperature: 0.2,
-      top_p: 0.85,
-      top_k: 30,
-      num_predict: 8192,
-      num_ctx: 12288,
+      temperature: 0.15,
+      top_p: 0.8,
+      top_k: 20,
+      num_predict: 4096,
+      num_ctx: 8192,
       history_turns: 1,
       think: false,
-      keep_alive: "10m",
+      keep_alive: "20m",
       web_search: false,
       workspace: {
         root: state.workspaceRoot,
         files: [...state.selectedFiles],
       },
     }),
-    signal: combinedAbortSignal(signal, 180000),
+    signal: combinedAbortSignal(signal, WORKSPACE_GENERATION_TIMEOUT_MS),
   });
   const data = await response.json();
   if (!response.ok || !data.ok) {
@@ -1567,6 +1572,7 @@ async function handleWorkspaceBuild(text) {
         `作業中: ${state.progressLabel}`,
         `- 試行 ${attempts}/3`,
         `- ${modelForTask("coding")} でファイル内容を生成中`,
+        "- 初回はモデル読み込みで数分かかることがあります",
         "- 生成後に保存と検証を行います",
       ]);
       try {
@@ -1631,9 +1637,9 @@ async function handleWorkspaceBuild(text) {
       progressMessage.content = "生成を停止しました。";
     } else if (error.name === "TimeoutError" || /timed out/i.test(error.message)) {
       progressMessage.content = [
-        "生成が3分以内に完了しなかったため停止しました。",
-        "- 依頼を少し小さく分けると成功しやすくなります",
-        "- 例: まず index.html だけ作る → 次に見た目を改善する",
+        "生成が6分以内に完了しなかったため停止しました。",
+        "- 初回のCoderモデル読み込みが長い場合は、同じ依頼をもう一度試すと成功しやすくなります",
+        "- それでも止まる場合は、コード生成モデルを Gemma 4 12B（標準・すぐ使える）に戻してください",
       ].join("\n");
     } else {
       progressMessage.content = `生成エラー: ${error.message}`;
