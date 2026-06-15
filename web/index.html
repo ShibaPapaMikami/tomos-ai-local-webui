@@ -106,20 +106,19 @@
             </label>
             <label class="setting-field">
               <span>通常チャットモデル</span>
-              <input id="chat-model" list="model-options" type="text" placeholder="サーバー既定" />
+              <select id="chat-model"></select>
               <small>空欄なら `GEMMA_MODEL` を使います。普段の会話や質問に使うモデルです。</small>
             </label>
             <label class="setting-field">
               <span>コード生成モデル</span>
-              <input id="coding-model" list="model-options" type="text" placeholder="サーバー既定" />
+              <select id="coding-model"></select>
               <small>空欄なら `GEMMA_CODING_MODEL`、未設定なら `GEMMA_MODEL` を使います。フォルダー作業に使います。</small>
             </label>
             <label class="setting-field">
               <span>翻訳モデル</span>
-              <input id="translation-model" list="model-options" type="text" placeholder="サーバー自動" />
+              <select id="translation-model"></select>
               <small>空欄なら `GEMMA_TRANSLATION_MODEL` または軽量候補を自動で使います。</small>
             </label>
-            <datalist id="model-options"></datalist>
             <label class="setting-field">
               <span>温度</span>
               <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.7" />

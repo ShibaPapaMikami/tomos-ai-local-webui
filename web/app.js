@@ -96,7 +96,6 @@ const els = {
   chatModel: document.querySelector("#chat-model"),
   codingModel: document.querySelector("#coding-model"),
   translationModel: document.querySelector("#translation-model"),
-  modelOptions: document.querySelector("#model-options"),
   systemPrompt: document.querySelector("#system-prompt"),
   temperature: document.querySelector("#temperature"),
   topP: document.querySelector("#top-p"),
@@ -284,10 +283,43 @@ function modelForTask(task) {
   return state.serverModels[task] || state.serverModels.chat || "";
 }
 
+function displayModelName(model, task = "chat") {
+  if (!model) return "サーバー既定";
+  const installed = state.serverModels.available.includes(model);
+  if (model.includes("gemma-4-12B-coder-fable5")) {
+    return `Gemma 4 Coder 12B Q4${installed ? "" : "（推奨・未取得）"}`;
+  }
+  if (model === state.serverModels.chat && task === "chat") return `${model}（通常既定）`;
+  if (model === state.serverModels.coding && task === "coding") return `${model}（コード既定）`;
+  if (model === state.serverModels.translation && task === "translation") return `${model}（翻訳既定）`;
+  return model;
+}
+
+function renderModelSelect(select, task, models) {
+  if (!select) return;
+  const current = state.modelOverrides[task] || "";
+  select.innerHTML = "";
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = task === "translation" ? "サーバー自動" : "サーバー既定";
+  select.append(defaultOption);
+  const uniqueModels = [...new Set(models.filter(Boolean))];
+  if (current && !uniqueModels.includes(current)) uniqueModels.unshift(current);
+  for (const model of uniqueModels) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = displayModelName(model, task);
+    option.title = model;
+    select.append(option);
+  }
+  select.value = current;
+}
+
 function syncModelInputs() {
-  if (els.chatModel) els.chatModel.value = state.modelOverrides.chat;
-  if (els.codingModel) els.codingModel.value = state.modelOverrides.coding;
-  if (els.translationModel) els.translationModel.value = state.modelOverrides.translation;
+  const available = state.serverModels.available;
+  renderModelSelect(els.chatModel, "chat", [state.serverModels.chat, ...available]);
+  renderModelSelect(els.codingModel, "coding", [state.serverModels.coding, ...state.serverModels.recommendedCoding, ...available]);
+  renderModelSelect(els.translationModel, "translation", [state.serverModels.translation, ...available]);
 }
 
 function renderSettingsMeta() {
@@ -1496,9 +1528,6 @@ async function checkHealth() {
       state.serverModels.chat = data.models.chat || data.model || state.serverModels.chat;
       state.serverModels.coding = data.models.coding || data.codingModel || state.serverModels.coding;
       state.serverModels.translation = data.models.translation || data.translationModel || state.serverModels.translation;
-      if (els.chatModel) els.chatModel.placeholder = state.serverModels.chat;
-      if (els.codingModel) els.codingModel.placeholder = state.serverModels.coding;
-      if (els.translationModel) els.translationModel.placeholder = state.serverModels.translation;
     }
     state.serverModels.codingInstalled = data.codingModelInstalled !== false;
     if (Array.isArray(data.recommendedCodingModels)) {
@@ -1506,18 +1535,7 @@ async function checkHealth() {
     }
     if (Array.isArray(data.availableModels) || state.serverModels.recommendedCoding.length > 0) {
       state.serverModels.available = data.availableModels || state.serverModels.available;
-      if (els.modelOptions) {
-        els.modelOptions.innerHTML = "";
-        const models = [...new Set([...state.serverModels.available, ...state.serverModels.recommendedCoding])];
-        for (const model of models) {
-          const option = document.createElement("option");
-          option.value = model;
-          if (state.serverModels.recommendedCoding.includes(model) && !state.serverModels.available.includes(model)) {
-            option.label = `${model}（推奨・未取得）`;
-          }
-          els.modelOptions.append(option);
-        }
-      }
+      syncModelInputs();
     }
     els.statusDot.className = `status-dot ${data.ok && data.modelInstalled ? "ok" : "error"}`;
     const codingMissing = data.ok && data.codingModel && data.codingModelInstalled === false;
