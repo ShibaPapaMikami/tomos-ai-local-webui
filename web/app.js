@@ -816,6 +816,15 @@ function numberValue(input, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function isWorkspaceBuildRequest(text) {
   if (!state.workspaceRoot) return false;
   return /テトリス|ゲーム|サイト|アプリ|ページ|ツール|作って|つくって|作成|生成|構築|実装|修正|変更|保存|ファイル|html|css|javascript|コード|program|app|game|build|create|implement/i.test(text);
@@ -1507,8 +1516,11 @@ async function checkHealth() {
     renderSettingsMeta();
     if (!state.busy) renderMessages();
   } catch {
+    state.appInfo.version = "取得失敗";
+    state.appInfo.commit = "";
     els.statusDot.className = "status-dot error";
     els.statusText.textContent = "オフライン";
+    renderSettingsMeta();
   }
 }
 
