@@ -107,17 +107,17 @@
             <label class="setting-field">
               <span>通常チャットモデル</span>
               <select id="chat-model"></select>
-              <small>空欄なら `GEMMA_MODEL` を使います。普段の会話や質問に使うモデルです。</small>
+              <small>迷ったらサーバー既定かGemma 4。速さ優先ならQwen/Phiを選びます。</small>
             </label>
             <label class="setting-field">
               <span>コード生成モデル</span>
               <select id="coding-model"></select>
-              <small>空欄なら `GEMMA_CODING_MODEL`、未設定なら `GEMMA_MODEL` を使います。フォルダー作業に使います。</small>
+              <small>フォルダー作業用です。複雑なコードはGemma 4 Coder推奨。要ダウンロード表示なら先に取得が必要です。</small>
             </label>
             <label class="setting-field">
               <span>翻訳モデル</span>
               <select id="translation-model"></select>
-              <small>空欄なら `GEMMA_TRANSLATION_MODEL` または軽量候補を自動で使います。</small>
+              <small>通常はサーバー自動で十分です。速さはQwen、高品質はGemma 4です。</small>
             </label>
             <label class="setting-field">
               <span>温度</span>

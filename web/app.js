@@ -283,16 +283,29 @@ function modelForTask(task) {
   return state.serverModels[task] || state.serverModels.chat || "";
 }
 
+function modelIsInstalled(model) {
+  return state.serverModels.available.includes(model);
+}
+
 function displayModelName(model, task = "chat") {
   if (!model) return "サーバー既定";
-  const installed = state.serverModels.available.includes(model);
+  const installed = modelIsInstalled(model);
   if (model.includes("gemma-4-12B-coder-fable5")) {
-    return `Gemma 4 Coder 12B Q4${installed ? "" : "（推奨・未取得）"}`;
+    return `Gemma 4 Coder 12B Q4（コード推奨${installed ? "" : "・要ダウンロード"}）`;
   }
-  if (model === state.serverModels.chat && task === "chat") return `${model}（通常既定）`;
-  if (model === state.serverModels.coding && task === "coding") return `${model}（コード既定）`;
-  if (model === state.serverModels.translation && task === "translation") return `${model}（翻訳既定）`;
-  return model;
+  if (model === "gemma4:12b") {
+    if (task === "coding") return "Gemma 4 12B（標準・すぐ使える）";
+    if (task === "translation") return "Gemma 4 12B（高品質・遅め）";
+    return "Gemma 4 12B（推奨・標準）";
+  }
+  if (model === "qwen2.5:3b") {
+    if (task === "translation") return "Qwen 2.5 3B（翻訳推奨・高速）";
+    return "Qwen 2.5 3B（高速・軽い）";
+  }
+  if (model === "phi3:latest") return "Phi-3（高速・軽い）";
+  if (model === "llama3:latest") return "Llama 3（予備）";
+  if (model === "qwen3:4b") return "Qwen3 4B（予備）";
+  return `${model}${installed ? "" : "（未取得）"}`;
 }
 
 function renderModelSelect(select, task, models) {
@@ -315,11 +328,28 @@ function renderModelSelect(select, task, models) {
   select.value = current;
 }
 
+function installedOrCurrent(models, task) {
+  const current = state.modelOverrides[task];
+  return models.filter((model) => model && (modelIsInstalled(model) || model === current || state.serverModels.recommendedCoding.includes(model)));
+}
+
 function syncModelInputs() {
-  const available = state.serverModels.available;
-  renderModelSelect(els.chatModel, "chat", [state.serverModels.chat, ...available]);
-  renderModelSelect(els.codingModel, "coding", [state.serverModels.coding, ...state.serverModels.recommendedCoding, ...available]);
-  renderModelSelect(els.translationModel, "translation", [state.serverModels.translation, ...available]);
+  renderModelSelect(els.chatModel, "chat", installedOrCurrent([
+    state.serverModels.chat,
+    "gemma4:12b",
+    "qwen2.5:3b",
+    "phi3:latest",
+  ], "chat"));
+  renderModelSelect(els.codingModel, "coding", installedOrCurrent([
+    state.serverModels.coding,
+    ...state.serverModels.recommendedCoding,
+    "gemma4:12b",
+  ], "coding"));
+  renderModelSelect(els.translationModel, "translation", installedOrCurrent([
+    state.serverModels.translation,
+    "qwen2.5:3b",
+    "gemma4:12b",
+  ], "translation"));
 }
 
 function renderSettingsMeta() {
@@ -327,12 +357,17 @@ function renderSettingsMeta() {
   const version = state.appInfo.version || "不明";
   const commit = state.appInfo.commit || "不明";
   const codingStatus = state.serverModels.codingInstalled ? "" : "（未取得）";
-  els.settingsMeta.innerHTML = [
+  const lines = [
     `<div>アプリ版: ${escapeHtml(version)} / commit ${escapeHtml(commit)}</div>`,
     `<div>通常: ${escapeHtml(modelForTask("chat"))}</div>`,
     `<div>コード: ${escapeHtml(modelForTask("coding"))}${escapeHtml(codingStatus)}</div>`,
     `<div>翻訳: ${escapeHtml(modelForTask("translation"))}</div>`,
-  ].join("");
+  ];
+  const selectedCoding = modelForTask("coding");
+  if (selectedCoding.includes("gemma-4-12B-coder-fable5") && !modelIsInstalled(selectedCoding)) {
+    lines.push(`<div>使うには先に実行: <code>ollama pull ${escapeHtml(selectedCoding)}</code></div>`);
+  }
+  els.settingsMeta.innerHTML = lines.join("");
 }
 
 function setEnterToSend(enabled) {

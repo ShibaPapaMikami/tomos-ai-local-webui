@@ -553,6 +553,12 @@ h1 {
   word-break: break-all;
 }
 
+.settings-meta code {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
 .workspace-panel {
   position: fixed;
   top: 0;
