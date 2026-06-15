@@ -26,6 +26,7 @@ import webbrowser
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
+CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
 TRANSLATION_MODEL_CANDIDATES = [
     "qwen2.5:3b",
@@ -233,6 +234,10 @@ def select_translation_model() -> str:
         if candidate in models:
             return candidate
     return MODEL
+
+
+def select_coding_model() -> str:
+    return CODING_MODEL or MODEL
 
 
 def translation_target_from_text(text: str) -> str:
@@ -1067,19 +1072,32 @@ def health_payload() -> dict:
         version = ollama_json("/api/version", timeout=3).get("version", "unknown")
         models = installed_ollama_models()
         installed = MODEL in models
+        coding_model = select_coding_model()
+        translation_model = select_translation_model()
         return {
             "ok": True,
             "ollama": "running",
             "version": version,
             "model": MODEL,
-            "translationModel": select_translation_model(),
+            "codingModel": coding_model,
+            "translationModel": translation_model,
+            "models": {
+                "chat": MODEL,
+                "coding": coding_model,
+                "translation": translation_model,
+            },
+            "availableModels": sorted(models),
             "modelInstalled": installed,
+            "codingModelInstalled": coding_model in models,
+            "translationModelInstalled": translation_model in models,
         }
     except Exception as exc:
         return {
             "ok": False,
             "ollama": "offline",
             "model": MODEL,
+            "codingModel": select_coding_model(),
+            "translationModel": TRANSLATION_MODEL or MODEL,
             "modelInstalled": False,
             "error": str(exc),
         }
@@ -1185,7 +1203,16 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     prompt_messages.append({"role": "system", "content": f"Workspace context error: {exc}"})
             prompt_messages.extend(recent_messages)
-            selected_model = select_translation_model() if is_translation_task else body.get("model") or MODEL
+            requested_model = str(body.get("model") or "").strip()
+            is_coding_task = body.get("task") == "coding" or bool(body.get("coding", False))
+            if requested_model:
+                selected_model = requested_model
+            elif is_translation_task:
+                selected_model = select_translation_model()
+            elif is_coding_task:
+                selected_model = select_coding_model()
+            else:
+                selected_model = MODEL
 
             payload = {
                 "model": selected_model,
@@ -1212,7 +1239,7 @@ class Handler(BaseHTTPRequestHandler):
                         "ok": True,
                         "type": "start",
                         "model": payload["model"],
-                        "task": "translation" if is_translation_task else "chat",
+                        "task": "translation" if is_translation_task else "coding" if is_coding_task else "chat",
                         "search": {
                             "enabled": use_web_search,
                             "results": search_results,
@@ -1243,7 +1270,7 @@ class Handler(BaseHTTPRequestHandler):
                         "type": "done",
                         "message": {"role": "assistant", "content": content},
                         "model": payload["model"],
-                        "task": "translation" if is_translation_task else "chat",
+                        "task": "translation" if is_translation_task else "coding" if is_coding_task else "chat",
                         "done": True,
                         "search": {
                             "enabled": use_web_search,
@@ -1266,7 +1293,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "message": message,
                     "model": response.get("model", payload["model"]),
-                    "task": "translation" if is_translation_task else "chat",
+                    "task": "translation" if is_translation_task else "coding" if is_coding_task else "chat",
                     "done": response.get("done", True),
                     "search": {
                         "enabled": use_web_search,
@@ -1391,6 +1418,8 @@ def main() -> None:
     print(f"Ollama: {OLLAMA_URL}")
     print(f"ComfyUI: {COMFYUI_URL}")
     print(f"Model: {MODEL}")
+    print(f"Coding model: {select_coding_model()}")
+    print(f"Translation model: {TRANSLATION_MODEL or 'auto'}")
     if args.open:
         webbrowser.open(url)
     try:

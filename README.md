@@ -91,7 +91,31 @@ Mac の起動ファイルは Safari を開きます。Windows は既定ブラウ
 
 短い挨拶や返事は、自動モードでは軽い設定で返します。設計やプログラム作成では、必要に応じて精度優先・深い思考に寄せます。
 
-`英訳して`、`和訳して`、`翻訳して` などの依頼は翻訳専用モードになります。余計な説明や箇条書きではなく、翻訳文だけを返すようにし、Web検索やフォルダー文脈を使わず軽い設定で処理します。`qwen2.5:3b` などの軽量モデルが入っている場合は翻訳だけ自動で軽量モデルを使います。固定したい場合は `GEMMA_TRANSLATION_MODEL` を指定してください。
+`英訳して`、`和訳して`、`翻訳して` などの依頼は翻訳専用モードになります。余計な説明や箇条書きではなく、翻訳文だけを返すようにし、Web検索やフォルダー文脈を使わず軽い設定で処理します。`qwen2.5:3b` などの軽量モデルが入っている場合は翻訳だけ自動で軽量モデルを使います。固定したい場合は `GEMMA_TRANSLATION_MODEL`、または設定画面の翻訳モデルを指定してください。
+
+### 用途別モデル
+
+通常チャット、コード生成、翻訳で別々のOllamaモデルを使えます。設定画面でモデル名を入力すると、そのブラウザーでは入力値が優先されます。空欄に戻すとサーバー既定値に戻ります。
+
+| 用途 | 既定値 | 環境変数 |
+| --- | --- | --- |
+| 通常チャット | `gemma4:12b` | `GEMMA_MODEL` |
+| コード生成 | `GEMMA_MODEL` と同じ | `GEMMA_CODING_MODEL` |
+| 翻訳 | 軽量候補を自動選択 | `GEMMA_TRANSLATION_MODEL` |
+
+コード生成用モデルを試す例:
+
+```bash
+ollama pull hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M
+GEMMA_CODING_MODEL=hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M ./Gemma4_12B_Web.command
+```
+
+Windows PowerShell では以下のように指定できます。
+
+```powershell
+$env:GEMMA_CODING_MODEL="hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M"
+.\Gemma4_12B_Web.bat
+```
 
 `今日の天気`、`東京の天気` などの質問は Open-Meteo から直接取得します。場所を書かない場合は `GEMMA_WEATHER_LOCATION`、未設定なら `東京` を使います。
 
@@ -170,7 +194,7 @@ index.html を見やすく修正して
 このCSSをスマホ対応にして
 ```
 
-フォルダー作業では、Gemma にファイル内容をJSONで生成させ、保存後に構文チェックを行います。HTML内のJavaScript、単体JavaScript、JSON、CSSの基本検証に加えて、TODOや省略コード、外部CDN依存も検出します。失敗した場合は自動で修正を試します。テトリスなど一部の定番小型サンプルは、長時間の生成待ちを避けるためローカルテンプレートで即生成します。
+フォルダー作業では、コード生成用モデルにファイル内容をJSONで生成させ、保存後に構文チェックを行います。HTML内のJavaScript、単体JavaScript、JSON、CSSの基本検証に加えて、TODOや省略コード、外部CDN依存も検出します。失敗した場合は自動で修正を試します。
 
 HTMLを保存した場合は、チャット結果にプレビューリンクが表示されます。
 

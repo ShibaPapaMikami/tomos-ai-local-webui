@@ -1,6 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $Model = if ($env:GEMMA_MODEL) { $env:GEMMA_MODEL } else { "gemma4:12b" }
+$CodingModel = if ($env:GEMMA_CODING_MODEL) { $env:GEMMA_CODING_MODEL } else { "" }
 
 Write-Host "Gemma 4 local Web UI - Windows setup"
 Write-Host ""
@@ -46,6 +47,16 @@ if (-not $InstalledModels) {
   ollama pull $Model
 } else {
   Write-Host "Model: installed ($Model)"
+}
+
+if ($CodingModel -and $CodingModel -ne $Model) {
+  $InstalledCodingModels = ollama list | Select-String -Pattern "^$([regex]::Escape($CodingModel))\s"
+  if (-not $InstalledCodingModels) {
+    Write-Host "$CodingModel をコード生成用にダウンロードします。"
+    ollama pull $CodingModel
+  } else {
+    Write-Host "Coding model: installed ($CodingModel)"
+  }
 }
 
 Write-Host ""

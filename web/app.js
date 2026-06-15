@@ -22,6 +22,17 @@ const state = {
   theme: localStorage.getItem("gemma4.theme") || "dark",
   responseMode: localStorage.getItem("gemma4.responseMode") || "auto",
   thinkingMode: localStorage.getItem("gemma4.thinkingMode") || "auto",
+  modelOverrides: {
+    chat: localStorage.getItem("gemma4.model.chat") || "",
+    coding: localStorage.getItem("gemma4.model.coding") || "",
+    translation: localStorage.getItem("gemma4.model.translation") || "",
+  },
+  serverModels: {
+    chat: "gemma4:12b",
+    coding: "gemma4:12b",
+    translation: "gemma4:12b",
+    available: [],
+  },
   enterToSend: localStorage.getItem("gemma4.enterToSend") === "true",
   lastDeleted: null,
   pendingImages: [],
@@ -75,6 +86,10 @@ const els = {
   responseMode: document.querySelector("#response-mode"),
   composerResponseMode: document.querySelector("#composer-response-mode"),
   thinkingMode: document.querySelector("#thinking-mode"),
+  chatModel: document.querySelector("#chat-model"),
+  codingModel: document.querySelector("#coding-model"),
+  translationModel: document.querySelector("#translation-model"),
+  modelOptions: document.querySelector("#model-options"),
   systemPrompt: document.querySelector("#system-prompt"),
   temperature: document.querySelector("#temperature"),
   topP: document.querySelector("#top-p"),
@@ -249,6 +264,23 @@ function setThinkingMode(mode) {
   state.thinkingMode = ["auto", "low", "medium", "high"].includes(mode) ? mode : "auto";
   localStorage.setItem("gemma4.thinkingMode", state.thinkingMode);
   if (els.thinkingMode) els.thinkingMode.value = state.thinkingMode;
+}
+
+function setModelOverride(task, value) {
+  if (!["chat", "coding", "translation"].includes(task)) return;
+  state.modelOverrides[task] = String(value || "").trim();
+  localStorage.setItem(`gemma4.model.${task}`, state.modelOverrides[task]);
+}
+
+function modelForTask(task) {
+  if (state.modelOverrides[task]) return state.modelOverrides[task];
+  return state.serverModels[task] || state.serverModels.chat || "";
+}
+
+function syncModelInputs() {
+  if (els.chatModel) els.chatModel.value = state.modelOverrides.chat;
+  if (els.codingModel) els.codingModel.value = state.modelOverrides.coding;
+  if (els.translationModel) els.translationModel.value = state.modelOverrides.translation;
 }
 
 function setEnterToSend(enabled) {
@@ -579,7 +611,7 @@ function renderMessages() {
   const session = activeSession();
   els.messages.innerHTML = "";
   els.chatTitle.textContent = session?.title || "新規チャット";
-  els.chatMeta.textContent = "gemma4:12b";
+  els.chatMeta.textContent = `通常: ${modelForTask("chat")} / コード: ${modelForTask("coding")}`;
 
   if (!session || session.messages.length === 0) {
     const empty = document.createElement("div");
@@ -1236,6 +1268,8 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      task: "coding",
+      model: modelForTask("coding"),
       system: workspaceBuilderSystemPrompt(),
       messages: [
         {
@@ -1356,58 +1390,37 @@ async function handleWorkspaceBuild(text) {
   };
 
   try {
-    const template = localWorkspaceTemplate(text);
-    if (template) {
-      attempts = 1;
-      generated = template;
-      state.progressLabel = "ローカル生成中";
+    for (attempts = 1; attempts <= 3; attempts += 1) {
+      state.progressLabel = attempts === 1 ? "生成・保存中" : `自動修正中 ${attempts - 1}/2`;
       updateProgressTimer();
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
-        "- 定番テンプレートを選択",
-        `- ${generated.files.length}件のファイルを準備`,
+        `- 試行 ${attempts}/3`,
+        `- ${modelForTask("coding")} でファイル内容を生成中`,
+        "- 生成後に保存と検証を行います",
+      ]);
+      generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
+      setBuildProgress([
+        `作業中: ${state.progressLabel}`,
+        `- 試行 ${attempts}/3`,
+        `- ${generated.files.length}件のファイルを受信`,
         "- ローカルフォルダーへ保存中",
       ]);
       savedFiles = await saveGeneratedFiles(generated.files);
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
+        `- 試行 ${attempts}/3`,
         `- ${savedFiles.length}件のファイルを保存`,
         "- 構文と未完成表現を検証中",
       ]);
       validation = await validateGeneratedFiles(savedFiles);
-    } else {
-      for (attempts = 1; attempts <= 3; attempts += 1) {
-        state.progressLabel = attempts === 1 ? "生成・保存中" : `自動修正中 ${attempts - 1}/2`;
-        updateProgressTimer();
-        setBuildProgress([
-          `作業中: ${state.progressLabel}`,
-          `- 試行 ${attempts}/3`,
-          "- Gemmaにファイル内容を生成させています",
-          "- 生成後に保存と検証を行います",
-        ]);
-        generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal);
-        setBuildProgress([
-          `作業中: ${state.progressLabel}`,
-          `- 試行 ${attempts}/3`,
-          `- ${generated.files.length}件のファイルを受信`,
-          "- ローカルフォルダーへ保存中",
-        ]);
-        savedFiles = await saveGeneratedFiles(generated.files);
-        setBuildProgress([
-          `作業中: ${state.progressLabel}`,
-          `- 試行 ${attempts}/3`,
-          `- ${savedFiles.length}件のファイルを保存`,
-          "- 構文と未完成表現を検証中",
-        ]);
-        validation = await validateGeneratedFiles(savedFiles);
-        if (validation.ok) break;
-        setBuildProgress([
-          "検証で問題を検出しました。",
-          `- 試行 ${attempts}/3`,
-          "- Gemmaに修正を依頼します",
-          validationText(validation),
-        ].filter(Boolean));
-      }
+      if (validation.ok) break;
+      setBuildProgress([
+        "検証で問題を検出しました。",
+        `- 試行 ${attempts}/3`,
+        "- コード用モデルに修正を依頼します",
+        validationText(validation),
+      ].filter(Boolean));
     }
     await loadWorkspace();
     for (const file of savedFiles) {
@@ -1448,8 +1461,31 @@ async function checkHealth() {
   try {
     const response = await fetch("/api/health");
     const data = await response.json();
+    if (data.models) {
+      state.serverModels.chat = data.models.chat || data.model || state.serverModels.chat;
+      state.serverModels.coding = data.models.coding || data.codingModel || state.serverModels.coding;
+      state.serverModels.translation = data.models.translation || data.translationModel || state.serverModels.translation;
+      if (els.chatModel) els.chatModel.placeholder = state.serverModels.chat;
+      if (els.codingModel) els.codingModel.placeholder = state.serverModels.coding;
+      if (els.translationModel) els.translationModel.placeholder = state.serverModels.translation;
+    }
+    if (Array.isArray(data.availableModels)) {
+      state.serverModels.available = data.availableModels;
+      if (els.modelOptions) {
+        els.modelOptions.innerHTML = "";
+        for (const model of data.availableModels) {
+          const option = document.createElement("option");
+          option.value = model;
+          els.modelOptions.append(option);
+        }
+      }
+    }
     els.statusDot.className = `status-dot ${data.ok && data.modelInstalled ? "ok" : "error"}`;
-    els.statusText.textContent = data.ok && data.modelInstalled ? "使用可能" : "モデル未取得";
+    const codingMissing = data.ok && data.codingModel && data.codingModelInstalled === false;
+    els.statusText.textContent = data.ok && data.modelInstalled
+      ? codingMissing ? "コード用モデル未取得" : "使用可能"
+      : "モデル未取得";
+    if (!state.busy) renderMessages();
   } catch {
     els.statusDot.className = "status-dot error";
     els.statusText.textContent = "オフライン";
@@ -1520,8 +1556,10 @@ async function sendMessage(text) {
         );
     const requestMessages = requestOptions.translationMode ? [userMessage] : [...session.messages];
     const stream = !requestOptions.translationMode;
+    const requestTask = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
     const payload = {
-      task: requestOptions.translationMode ? "translation" : "chat",
+      task: requestTask,
+      model: modelForTask(requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat"),
       stream,
       system: requestSystem,
       messages: requestMessages,
@@ -2432,6 +2470,15 @@ els.themeSelect.addEventListener("change", () => setTheme(els.themeSelect.value)
 els.responseMode.addEventListener("change", () => setResponseMode(els.responseMode.value));
 els.composerResponseMode.addEventListener("change", () => setResponseMode(els.composerResponseMode.value));
 els.thinkingMode.addEventListener("change", () => setThinkingMode(els.thinkingMode.value));
+els.chatModel.addEventListener("change", () => {
+  setModelOverride("chat", els.chatModel.value);
+  renderMessages();
+});
+els.codingModel.addEventListener("change", () => {
+  setModelOverride("coding", els.codingModel.value);
+  renderMessages();
+});
+els.translationModel.addEventListener("change", () => setModelOverride("translation", els.translationModel.value));
 els.enterToSend.addEventListener("change", () => setEnterToSend(els.enterToSend.checked));
 
 ensureFolderData();
@@ -2439,6 +2486,7 @@ syncWorkspaceFromActiveFolder();
 setTheme(state.theme);
 setResponseMode(state.responseMode);
 setThinkingMode(state.thinkingMode);
+syncModelInputs();
 setEnterToSend(state.enterToSend);
 resizePrompt();
 
