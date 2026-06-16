@@ -9,6 +9,7 @@ const state = {
   timerId: null,
   abortController: null,
   progressLabel: "生成中",
+  progressElapsedSeconds: 0,
   workspaceOpen: false,
   workspaceRoot: "",
   workspaceFiles: [],
@@ -19,6 +20,7 @@ const state = {
   sidebarQuery: "",
   sidebarHidden: localStorage.getItem("gemma4.sidebarHidden") === "true",
   sidebarWidth: Number(localStorage.getItem("gemma4.sidebarWidth")) || 268,
+  language: localStorage.getItem("gemma4.language") || "ja",
   theme: localStorage.getItem("gemma4.theme") || "dark",
   responseMode: localStorage.getItem("gemma4.responseMode") || "auto",
   thinkingMode: localStorage.getItem("gemma4.thinkingMode") || "auto",
@@ -27,14 +29,18 @@ const state = {
     coding: localStorage.getItem("gemma4.model.coding") || "",
     translation: localStorage.getItem("gemma4.model.translation") || "",
   },
+  composerModel: localStorage.getItem("gemma4.composerModel") || "",
   serverModels: {
     chat: "gemma4:12b",
     coding: "gemma4:12b",
     translation: "gemma4:12b",
     available: [],
     recommendedCoding: [],
+    pullable: [],
     codingInstalled: true,
   },
+  modelPullJobs: {},
+  modelPullTimer: null,
   appInfo: {
     version: "",
     commit: "",
@@ -44,7 +50,319 @@ const state = {
   pendingImages: [],
 };
 
-const WORKSPACE_GENERATION_TIMEOUT_MS = 360000;
+const WORKSPACE_PLAN_TIMEOUT_MS = 120000;
+const WORKSPACE_FILE_TIMEOUT_MS = 300000;
+const SIMPLE_WORKSPACE_FILE_TIMEOUT_MS = 120000;
+
+const SYSTEM_PROMPTS = {
+  ja: "あなたは簡潔で有用なアシスタントです。前置きなしで自然に短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。",
+  en: "You are a concise and helpful assistant. Answer directly and naturally. Use bullet points only when comparison, steps, or structured explanation are useful.",
+};
+
+const I18N = {
+  ja: {
+    "brand.subtitle": "12B ローカル",
+    "common.close": "閉じる",
+    "common.settings": "設定",
+    "common.send": "送信",
+    "common.stop": "停止",
+    "common.undo": "元に戻す",
+    "sidebar.folderButton": "フォルダー",
+    "sidebar.search": "検索",
+    "sidebar.searchPlaceholder": "フォルダー / チャットを検索",
+    "sidebar.treeTitle": "フォルダーとチャット",
+    "sidebar.show": "サイドバーを表示",
+    "sidebar.hide": "サイドバーを隠す",
+    "sidebar.showShort": "サイドバー",
+    "top.webSearch": "Web検索",
+    "top.webSearchTitle": "Web検索を使う",
+    "top.clear": "クリア",
+    "top.clearTitle": "チャットをクリア",
+    "settings.description": "応答の速さ、精度、文脈量を調整します。",
+    "settings.versionChecking": "バージョン確認中",
+    "settings.language": "表示言語",
+    "settings.languageHelp": "UIの表示言語を切り替えます。会話内容や保存済みの名前は変更しません。",
+    "settings.theme": "テーマ",
+    "settings.themeHelp": "画面の配色を切り替えます。",
+    "settings.responseMode": "応答モード",
+    "settings.responseModeHelp": "高速は短文向け、精度優先は設計や調査向けです。自動では内容で切り替えます。",
+    "settings.thinking": "思考量",
+    "settings.thinkingHelp": "コード作成や修正では深めにすると破綻しにくくなりますが、時間は増えます。",
+    "settings.chatModel": "通常チャットモデル",
+    "settings.chatModelHelp": "迷ったらサーバー既定かGemma 4。速さ優先ならQwenを選びます。",
+    "settings.codingModel": "コード生成モデル",
+    "settings.codingModelHelp": "フォルダー作業用です。複雑なコードはGemma 4 Coder推奨。要ダウンロード表示なら先に取得が必要です。",
+    "settings.translationModel": "翻訳モデル",
+    "settings.translationModelHelp": "通常はサーバー自動で十分です。速さはQwen、高品質はGemma 4です。",
+    "settings.systemPrompt": "システム指示",
+    "settings.systemPromptHelp": "全ての返信に共通して効く基本ルールです。長くすると応答が少し重くなります。",
+    "settings.temperature": "温度",
+    "settings.temperatureHelp": "低いほど安定、高いほど表現に幅が出ます。",
+    "settings.topPHelp": "候補語の広がりを確率で絞ります。通常は0.8〜0.95で十分です。",
+    "settings.topKHelp": "候補語の数を制限します。小さいほど安定しやすくなります。",
+    "settings.maxTokens": "最大トークン",
+    "settings.maxTokensHelp": "1回の返信で生成できる長さです。コード生成では自動で増やします。",
+    "settings.context": "コンテキスト",
+    "settings.contextHelp": "モデルが一度に見られる文脈量です。大きいほど重くなります。",
+    "settings.historyTurns": "記憶ターン",
+    "settings.historyTurnsHelp": "過去の会話を何往復ぶん送るかです。増やすと文脈は保てますが遅くなります。",
+    "settings.enterToSend": "Enterで送信",
+    "settings.enterToSendHelp": "OFFではEnterは改行です。送信は↑ボタン、またはCmd/Ctrl + Enterを使います。日本語変換中は送信しません。",
+    "settings.modelDownload": "モデルをダウンロード",
+    "theme.dark": "ダーク",
+    "theme.light": "ライト",
+    "theme.green": "グリーン",
+    "mode.auto": "自動",
+    "mode.fast": "高速",
+    "mode.balanced": "標準",
+    "mode.quality": "精度優先",
+    "mode.qualityShort": "精度",
+    "thinking.low": "軽め",
+    "thinking.high": "深く",
+    "model.auto": "モデル自動",
+    "model.serverDefault": "サーバー既定",
+    "model.serverAuto": "サーバー自動",
+    "model.missing": "未取得",
+    "model.downloadRequired": "要ダウンロード",
+    "model.installed": "取得済み",
+    "model.downloading": "取得中",
+    "model.download": "ダウンロード",
+    "model.gemmaStandard": "推奨・標準",
+    "model.gemmaCoding": "標準・すぐ使える",
+    "model.gemmaTranslation": "高品質・遅め",
+    "model.qwenFast": "高速・軽い",
+    "model.qwenTranslation": "翻訳推奨・高速",
+    "model.coderRecommended": "コード推奨",
+    "task.chat": "チャット",
+    "task.coding": "コード生成",
+    "task.translation": "翻訳",
+    "workspace.editFolder": "フォルダー編集",
+    "workspace.selectedFolder": "選択中フォルダー",
+    "workspace.noFolder": "フォルダー未選択",
+    "workspace.folderName": "フォルダー名",
+    "workspace.localFolder": "参照するローカルフォルダー",
+    "workspace.pickFolderPlaceholder": "フォルダーを選択してください",
+    "workspace.pickFolder": "フォルダーを選択",
+    "workspace.reload": "再読込",
+    "workspace.notConfigured": "{name} のローカルアクセスは未設定です。",
+    "workspace.loaded": "{name}: {files}件のファイルを読み込み、{selected}件を文脈に追加中。",
+    "workspace.empty": "このフォルダーは空です。生成したファイルはここへ保存できます。",
+    "workspace.binary": " バイナリ/大容量",
+    "workspace.savePath": "保存先ファイル",
+    "workspace.writePlaceholder": "生成されたコードを貼り付けてから保存してください。",
+    "workspace.saveFile": "ファイルを保存",
+    "workspace.waitingPick": "フォルダー選択を待機中...",
+    "workspace.loading": "フォルダーを読み込み中...",
+    "workspace.saved": "{path} を保存しました（{size}バイト）。",
+    "workspace.saveError": "保存エラー",
+    "workspace.savedTo": "{path} に保存しました（{size}バイト）。",
+    "workspace.cannotInferSavePath": "保存先ファイル名が判断できませんでした。保存欄にコードを入れました。保存先ファイルを入力して「ファイルを保存」を押してください。",
+    "composer.attachImage": "画像を添付",
+    "composer.removeAttachment": "添付を削除",
+    "composer.attachedImage": "添付画像",
+    "image.generated": "画像を生成しました。",
+    "composer.placeholder": "Gemma 4 12B に送信。例: 赤いリンゴの画像を生成して",
+    "composer.model": "使用モデル",
+    "chat.new": "新規チャット",
+    "chat.emptySubtitle": "Ollama経由のローカルチャット",
+    "chat.you": "あなた",
+    "chat.generatingRole": "Gemma ・ 生成中",
+    "chat.generating": "生成中",
+    "chat.streamingStatus": "{label} ・ {seconds}秒 ・ 順次表示中 ・ ■ で停止",
+    "chat.duration": "所要時間",
+    "chat.model": "モデル",
+    "chat.task": "用途",
+    "chat.mode": "モード",
+    "chat.preview": "動作確認",
+    "folder.new": "新規フォルダー",
+    "folder.default": "既定フォルダー",
+    "folder.untitled": "名称未設定",
+    "folder.none": "フォルダーなし",
+    "folder.localReady": "ローカル設定済み",
+    "folder.localMissing": "ローカル未設定",
+    "folder.add": "追加",
+    "folder.addTitle": "このフォルダーにチャットを追加",
+    "folder.edit": "編集",
+    "folder.editTitle": "フォルダー名を変更",
+    "folder.delete": "削除",
+    "folder.deleteTitle": "フォルダーを削除",
+    "folder.deleteConfirm": "「{name}」と中のチャット{count}件を削除しますか？",
+    "chat.editTitle": "チャット名を変更",
+    "chat.deleteTitle": "チャットを削除",
+    "chat.none": "チャットなし",
+    "chat.deleteConfirm": "「{name}」を削除しますか？",
+    "undo.deleted": "{target}「{label}」を削除しました。",
+    "status.checking": "確認中",
+    "status.available": "使用可能",
+    "status.codingMissing": "コード用モデル未取得",
+    "status.modelMissing": "モデル未取得",
+    "status.offline": "オフライン",
+    "progress.generating": "生成中",
+    "progress.fast": "高速生成中",
+    "progress.quality": "精度優先で生成中",
+    "progress.lightweight": "軽量モデルで生成中",
+    "progress.translation": "翻訳中",
+    "progress.coding": "コード生成中",
+    "progress.search": "検索 + 生成中",
+    "progress.workspace": "生成・検証中",
+    "progress.image": "画像生成中",
+    "progress.weather": "天気取得中",
+    "progress.saving": "保存中",
+    "progress.stopping": "停止中",
+    "error.prefix": "エラー",
+  },
+  en: {
+    "brand.subtitle": "12B local",
+    "common.close": "Close",
+    "common.settings": "Settings",
+    "common.send": "Send",
+    "common.stop": "Stop",
+    "common.undo": "Undo",
+    "sidebar.folderButton": "Folder",
+    "sidebar.search": "Search",
+    "sidebar.searchPlaceholder": "Search folders / chats",
+    "sidebar.treeTitle": "Folders and chats",
+    "sidebar.show": "Show sidebar",
+    "sidebar.hide": "Hide sidebar",
+    "sidebar.showShort": "Sidebar",
+    "top.webSearch": "Web",
+    "top.webSearchTitle": "Use web search",
+    "top.clear": "Clear",
+    "top.clearTitle": "Clear chat",
+    "settings.description": "Tune response speed, accuracy, and context size.",
+    "settings.versionChecking": "Checking version",
+    "settings.language": "Display language",
+    "settings.languageHelp": "Changes the UI language. Chat content and saved names are not translated.",
+    "settings.theme": "Theme",
+    "settings.themeHelp": "Switch the screen color theme.",
+    "settings.responseMode": "Response mode",
+    "settings.responseModeHelp": "Fast is for short replies; quality is for design and research. Auto switches by request.",
+    "settings.thinking": "Reasoning effort",
+    "settings.thinkingHelp": "Deeper is safer for coding and edits, but takes longer.",
+    "settings.chatModel": "Chat model",
+    "settings.chatModelHelp": "Use server default or Gemma 4 when unsure. Pick Qwen for speed.",
+    "settings.codingModel": "Coding model",
+    "settings.codingModelHelp": "Used for folder work. Gemma 4 Coder is recommended for complex code. Download it first if marked required.",
+    "settings.translationModel": "Translation model",
+    "settings.translationModelHelp": "Server auto is usually enough. Qwen is faster; Gemma 4 is higher quality.",
+    "settings.systemPrompt": "System prompt",
+    "settings.systemPromptHelp": "Base rules applied to every reply. Longer prompts can slow responses slightly.",
+    "settings.temperature": "Temperature",
+    "settings.temperatureHelp": "Lower is more stable; higher gives more variation.",
+    "settings.topPHelp": "Limits candidate token spread by probability. 0.8-0.95 is usually enough.",
+    "settings.topKHelp": "Limits the number of candidate tokens. Lower is more stable.",
+    "settings.maxTokens": "Max tokens",
+    "settings.maxTokensHelp": "Maximum length for one reply. Coding raises this automatically.",
+    "settings.context": "Context",
+    "settings.contextHelp": "How much context the model can see at once. Larger is heavier.",
+    "settings.historyTurns": "History turns",
+    "settings.historyTurnsHelp": "How many previous turns to send. More preserves context but slows down.",
+    "settings.enterToSend": "Enter to send",
+    "settings.enterToSendHelp": "Off means Enter inserts a newline. Use ↑ or Cmd/Ctrl + Enter to send. IME confirmation will not send.",
+    "settings.modelDownload": "Download models",
+    "theme.dark": "Dark",
+    "theme.light": "Light",
+    "theme.green": "Green",
+    "mode.auto": "Auto",
+    "mode.fast": "Fast",
+    "mode.balanced": "Standard",
+    "mode.quality": "Quality",
+    "mode.qualityShort": "Quality",
+    "thinking.low": "Light",
+    "thinking.high": "Deep",
+    "model.auto": "Model auto",
+    "model.serverDefault": "Server default",
+    "model.serverAuto": "Server auto",
+    "model.missing": "not installed",
+    "model.downloadRequired": "download required",
+    "model.installed": "Installed",
+    "model.downloading": "Downloading",
+    "model.download": "Download",
+    "model.gemmaStandard": "recommended standard",
+    "model.gemmaCoding": "standard, ready to use",
+    "model.gemmaTranslation": "higher quality, slower",
+    "model.qwenFast": "fast and light",
+    "model.qwenTranslation": "translation recommended, fast",
+    "model.coderRecommended": "recommended for code",
+    "task.chat": "Chat",
+    "task.coding": "Coding",
+    "task.translation": "Translation",
+    "workspace.editFolder": "Folder settings",
+    "workspace.selectedFolder": "Selected folder",
+    "workspace.noFolder": "No folder selected",
+    "workspace.folderName": "Folder name",
+    "workspace.localFolder": "Local folder to access",
+    "workspace.pickFolderPlaceholder": "Choose a folder",
+    "workspace.pickFolder": "Choose folder",
+    "workspace.reload": "Reload",
+    "workspace.notConfigured": "Local access is not set for {name}.",
+    "workspace.loaded": "{name}: loaded {files} files, {selected} added to context.",
+    "workspace.empty": "This folder is empty. Generated files can be saved here.",
+    "workspace.binary": " binary/large",
+    "workspace.savePath": "Save path",
+    "workspace.writePlaceholder": "Paste generated code here before saving.",
+    "workspace.saveFile": "Save file",
+    "workspace.waitingPick": "Waiting for folder selection...",
+    "workspace.loading": "Loading folder...",
+    "workspace.saved": "Saved {path} ({size} bytes).",
+    "workspace.saveError": "Save error",
+    "workspace.savedTo": "Saved to {path} ({size} bytes).",
+    "workspace.cannotInferSavePath": "Could not determine the save path. I put the code in the save box. Enter a save path and press Save file.",
+    "composer.attachImage": "Attach image",
+    "composer.removeAttachment": "Remove attachment",
+    "composer.attachedImage": "Attached image",
+    "image.generated": "Image generated.",
+    "composer.placeholder": "Message Gemma 4 12B. Example: generate an image of a red apple",
+    "composer.model": "Model",
+    "chat.new": "New chat",
+    "chat.emptySubtitle": "Local chat through Ollama",
+    "chat.you": "You",
+    "chat.generatingRole": "Gemma ・ generating",
+    "chat.generating": "Generating",
+    "chat.streamingStatus": "{label} ・ {seconds}s ・ streaming ・ ■ to stop",
+    "chat.duration": "Time",
+    "chat.model": "Model",
+    "chat.task": "Task",
+    "chat.mode": "Mode",
+    "chat.preview": "Preview",
+    "folder.new": "New folder",
+    "folder.default": "Default folder",
+    "folder.untitled": "Untitled",
+    "folder.none": "No folders",
+    "folder.localReady": "Local access set",
+    "folder.localMissing": "Local access not set",
+    "folder.add": "Add",
+    "folder.addTitle": "Add a chat to this folder",
+    "folder.edit": "Edit",
+    "folder.editTitle": "Rename folder",
+    "folder.delete": "Delete",
+    "folder.deleteTitle": "Delete folder",
+    "folder.deleteConfirm": "Delete “{name}” and {count} chats inside it?",
+    "chat.editTitle": "Rename chat",
+    "chat.deleteTitle": "Delete chat",
+    "chat.none": "No chats",
+    "chat.deleteConfirm": "Delete “{name}”?",
+    "undo.deleted": "Deleted {target} “{label}”.",
+    "status.checking": "Checking",
+    "status.available": "Available",
+    "status.codingMissing": "Coding model missing",
+    "status.modelMissing": "Model missing",
+    "status.offline": "Offline",
+    "progress.generating": "Generating",
+    "progress.fast": "Fast generation",
+    "progress.quality": "Generating with quality",
+    "progress.lightweight": "Generating with lightweight model",
+    "progress.translation": "Translating",
+    "progress.coding": "Generating code",
+    "progress.search": "Searching + generating",
+    "progress.workspace": "Generating and validating",
+    "progress.image": "Generating image",
+    "progress.weather": "Getting weather",
+    "progress.saving": "Saving",
+    "progress.stopping": "Stopping",
+    "error.prefix": "Error",
+  },
+};
 
 const els = {
   sidebar: document.querySelector("#sidebar"),
@@ -91,9 +409,12 @@ const els = {
   settingsClose: document.querySelector("#settings-close"),
   settingsPanel: document.querySelector("#settings-panel"),
   settingsMeta: document.querySelector("#settings-meta"),
+  modelInstaller: document.querySelector("#model-installer"),
+  languageSelect: document.querySelector("#language-select"),
   themeSelect: document.querySelector("#theme-select"),
   responseMode: document.querySelector("#response-mode"),
   composerResponseMode: document.querySelector("#composer-response-mode"),
+  composerModel: document.querySelector("#composer-model"),
   thinkingMode: document.querySelector("#thinking-mode"),
   chatModel: document.querySelector("#chat-model"),
   codingModel: document.querySelector("#coding-model"),
@@ -110,6 +431,47 @@ const els = {
 
 if (window.matchMedia("(max-width: 760px)").matches && localStorage.getItem("gemma4.sidebarHidden") === null) {
   state.sidebarHidden = true;
+}
+
+function t(key, params = {}) {
+  const dictionary = I18N[state.language] || I18N.ja;
+  let text = dictionary[key] || I18N.ja[key] || key;
+  for (const [name, value] of Object.entries(params)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}
+
+function applyI18n() {
+  document.documentElement.lang = state.language;
+  document.querySelectorAll("[data-i18n]").forEach((element) => {
+    element.textContent = t(element.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
+    element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((element) => {
+    element.setAttribute("title", t(element.dataset.i18nTitle));
+  });
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
+    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+  });
+  if (els.languageSelect) els.languageSelect.value = state.language;
+}
+
+function setLanguage(language) {
+  const next = I18N[language] ? language : "ja";
+  const currentPrompt = els.systemPrompt?.value || "";
+  state.language = next;
+  localStorage.setItem("gemma4.language", state.language);
+  if (els.systemPrompt && Object.values(SYSTEM_PROMPTS).includes(currentPrompt)) {
+    els.systemPrompt.value = SYSTEM_PROMPTS[state.language] || SYSTEM_PROMPTS.ja;
+  }
+  applyI18n();
+  syncModelInputs();
+  renderSettingsMeta();
+  renderModelInstaller();
+  render();
 }
 
 function loadSessions() {
@@ -146,7 +508,7 @@ function saveWorkspacePrefs() {
   saveFolders();
 }
 
-function createFolder(name = "新規フォルダー") {
+function createFolder(name = t("folder.new")) {
   const folder = {
     id: crypto.randomUUID(),
     name,
@@ -170,7 +532,7 @@ function ensureFolderData() {
   if (state.folders.length === 0 && !initialized) {
     state.folders.push({
       id: crypto.randomUUID(),
-      name: "既定フォルダー",
+      name: t("folder.default"),
       workspaceRoot: localStorage.getItem("gemma4.workspaceRoot") || "",
       selectedFiles: JSON.parse(localStorage.getItem("gemma4.selectedFiles") || "[]"),
       createdAt: Date.now(),
@@ -189,7 +551,7 @@ function ensureFolderData() {
   for (const folder of state.folders) {
     if (!Array.isArray(folder.selectedFiles)) folder.selectedFiles = [];
     if (typeof folder.workspaceRoot !== "string") folder.workspaceRoot = "";
-    if (!folder.name) folder.name = "名称未設定";
+    if (!folder.name) folder.name = t("folder.untitled");
   }
   for (const session of state.sessions) {
     if (!session.folderId || !state.folders.some((folder) => folder.id === session.folderId)) {
@@ -261,6 +623,10 @@ function setTheme(theme) {
   if (els.themeSelect) els.themeSelect.value = state.theme;
 }
 
+function setLanguageFromControl(language) {
+  setLanguage(language);
+}
+
 function setResponseMode(mode) {
   state.responseMode = ["auto", "fast", "balanced", "quality"].includes(mode) ? mode : "auto";
   localStorage.setItem("gemma4.responseMode", state.responseMode);
@@ -280,7 +646,14 @@ function setModelOverride(task, value) {
   localStorage.setItem(`gemma4.model.${task}`, state.modelOverrides[task]);
 }
 
-function modelForTask(task) {
+function setComposerModel(value) {
+  state.composerModel = String(value || "").trim();
+  localStorage.setItem("gemma4.composerModel", state.composerModel);
+  if (els.composerModel) els.composerModel.value = state.composerModel;
+}
+
+function modelForTask(task, useComposer = false) {
+  if (useComposer && state.composerModel) return state.composerModel;
   if (state.modelOverrides[task]) return state.modelOverrides[task];
   return state.serverModels[task] || state.serverModels.chat || "";
 }
@@ -289,43 +662,59 @@ function fallbackCodingModel() {
   return state.serverModels.chat || "gemma4:12b";
 }
 
+function fastChatModel() {
+  if (modelIsInstalled("qwen2.5:3b") || state.serverModels.translation === "qwen2.5:3b") return "qwen2.5:3b";
+  return state.serverModels.chat || "gemma4:12b";
+}
+
 function modelIsInstalled(model) {
   return state.serverModels.available.includes(model);
 }
 
 function displayModelName(model, task = "chat") {
-  if (!model) return "サーバー既定";
+  if (!model) return t("model.serverDefault");
   const installed = modelIsInstalled(model);
   if (model.includes("gemma-4-12B-coder-fable5")) {
-    return `Gemma 4 Coder 12B Q4（コード推奨${installed ? "" : "・要ダウンロード"}）`;
+    return `Gemma 4 Coder 12B Q4 (${t("model.coderRecommended")}${installed ? "" : ` / ${t("model.downloadRequired")}`})`;
   }
   if (model === "gemma4:12b") {
-    if (task === "coding") return "Gemma 4 12B（標準・すぐ使える）";
-    if (task === "translation") return "Gemma 4 12B（高品質・遅め）";
-    return "Gemma 4 12B（推奨・標準）";
+    if (task === "coding") return `Gemma 4 12B (${t("model.gemmaCoding")})`;
+    if (task === "translation") return `Gemma 4 12B (${t("model.gemmaTranslation")})`;
+    return `Gemma 4 12B (${t("model.gemmaStandard")})`;
   }
   if (model === "qwen2.5:3b") {
-    if (task === "translation") return "Qwen 2.5 3B（翻訳推奨・高速）";
-    return "Qwen 2.5 3B（高速・軽い）";
+    if (task === "translation") return `Qwen 2.5 3B (${t("model.qwenTranslation")})`;
+    return `Qwen 2.5 3B (${t("model.qwenFast")})`;
   }
-  if (model === "phi3:latest") return "Phi-3（高速・軽い）";
-  if (model === "llama3:latest") return "Llama 3（予備）";
-  if (model === "qwen3:4b") return "Qwen3 4B（予備）";
-  return `${model}${installed ? "" : "（未取得）"}`;
+  if (model === "phi3:latest") return "Phi-3";
+  if (model === "llama3:latest") return "Llama 3";
+  if (model === "qwen3:4b") return "Qwen3 4B";
+  return `${model}${installed ? "" : ` (${t("model.missing")})`}`;
 }
 
 function shortModelName(model, task = "chat") {
-  return displayModelName(model, task).replace(/（[^）]*）/g, "");
+  return displayModelName(model, task).replace(/（[^）]*）/g, "").replace(/\s*\([^)]*\)/g, "");
+}
+
+function composerModelLabel(model) {
+  if (!model) return t("model.auto");
+  if (model.includes("gemma-4-12B-coder-fable5")) return "Coder";
+  if (model === "gemma4:12b") return "Gemma 4";
+  if (model === "qwen2.5:3b") return "Qwen";
+  if (model === "phi3:latest") return "Phi-3";
+  if (model === "llama3:latest") return "Llama";
+  if (model === "qwen3:4b") return "Qwen3";
+  return shortModelName(model);
 }
 
 function taskLabel(task) {
-  if (task === "translation") return "翻訳";
-  if (task === "coding") return "コード生成";
-  return "チャット";
+  if (task === "translation") return t("task.translation");
+  if (task === "coding") return t("task.coding");
+  return t("task.chat");
 }
 
 function responseModeLabel(mode) {
-  return { auto: "自動", fast: "高速", balanced: "標準", quality: "精度優先" }[mode] || mode;
+  return { auto: t("mode.auto"), fast: t("mode.fast"), balanced: t("mode.balanced"), quality: t("mode.quality") }[mode] || mode;
 }
 
 function messageRunMeta(requestOptions, model) {
@@ -341,13 +730,19 @@ function messageRunMeta(requestOptions, model) {
   };
 }
 
+function modelForRequestTask(task, requestOptions) {
+  if (state.composerModel) return state.composerModel;
+  if (task === "chat" && requestOptions.fastModel) return fastChatModel();
+  return modelForTask(task);
+}
+
 function renderModelSelect(select, task, models) {
   if (!select) return;
   const current = state.modelOverrides[task] || "";
   select.innerHTML = "";
   const defaultOption = document.createElement("option");
   defaultOption.value = "";
-  defaultOption.textContent = task === "translation" ? "サーバー自動" : "サーバー既定";
+  defaultOption.textContent = task === "translation" ? t("model.serverAuto") : t("model.serverDefault");
   select.append(defaultOption);
   const uniqueModels = [...new Set(models.filter(Boolean))];
   if (current && !uniqueModels.includes(current)) uniqueModels.unshift(current);
@@ -363,7 +758,37 @@ function renderModelSelect(select, task, models) {
 
 function installedOrCurrent(models, task) {
   const current = state.modelOverrides[task];
-  return models.filter((model) => model && (modelIsInstalled(model) || model === current || state.serverModels.recommendedCoding.includes(model)));
+  return models.filter((model) => model && (modelIsInstalled(model) || model === current || model === state.composerModel || state.serverModels.recommendedCoding.includes(model)));
+}
+
+function renderComposerModelSelect() {
+  if (!els.composerModel) return;
+  const models = installedOrCurrent([
+    state.serverModels.chat,
+    state.serverModels.coding,
+    state.serverModels.translation,
+    ...state.serverModels.recommendedCoding,
+    "gemma4:12b",
+    "qwen2.5:3b",
+  ], "chat");
+  const uniqueModels = [...new Set(models.filter(Boolean))];
+  if (state.composerModel && !uniqueModels.includes(state.composerModel)) uniqueModels.unshift(state.composerModel);
+  els.composerModel.innerHTML = "";
+  const autoOption = document.createElement("option");
+  autoOption.value = "";
+  autoOption.textContent = t("model.auto");
+  autoOption.title = state.language === "en"
+    ? "Automatically chooses the chat, coding, or translation model by task"
+    : "用途に応じて通常・コード・翻訳モデルを自動で使い分けます";
+  els.composerModel.append(autoOption);
+  for (const model of uniqueModels) {
+    const option = document.createElement("option");
+    option.value = model;
+    option.textContent = composerModelLabel(model);
+    option.title = displayModelName(model, "chat");
+    els.composerModel.append(option);
+  }
+  els.composerModel.value = state.composerModel;
 }
 
 function syncModelInputs() {
@@ -371,7 +796,6 @@ function syncModelInputs() {
     state.serverModels.chat,
     "gemma4:12b",
     "qwen2.5:3b",
-    "phi3:latest",
   ], "chat"));
   renderModelSelect(els.codingModel, "coding", installedOrCurrent([
     state.serverModels.coding,
@@ -383,22 +807,124 @@ function syncModelInputs() {
     "qwen2.5:3b",
     "gemma4:12b",
   ], "translation"));
+  renderComposerModelSelect();
+}
+
+function renderModelInstaller() {
+  if (!els.modelInstaller) return;
+  const pullable = state.serverModels.pullable || [];
+  if (pullable.length === 0) {
+    els.modelInstaller.innerHTML = "";
+    return;
+  }
+  els.modelInstaller.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "model-installer-title";
+  const titleStrong = document.createElement("strong");
+  titleStrong.textContent = t("settings.modelDownload");
+  const titleHelp = document.createElement("span");
+  titleHelp.textContent = state.language === "en"
+    ? "Download Ollama models without Terminal. First downloads can use several GB of data."
+    : "ターミナルを使わずにOllamaモデルを取得します。初回は数GBの通信が発生します。";
+  title.append(titleStrong, titleHelp);
+  els.modelInstaller.append(title);
+  for (const item of pullable) {
+    const model = item.model;
+    const installed = modelIsInstalled(model);
+    const job = state.modelPullJobs[model] || null;
+    const row = document.createElement("div");
+    row.className = "model-install-row";
+    const info = document.createElement("div");
+    info.className = "model-install-info";
+    const name = document.createElement("strong");
+    name.textContent = item.label || composerModelLabel(model);
+    const detail = document.createElement("span");
+    detail.textContent = installed
+      ? `${t("model.installed")} ・ ${item.purpose || model}`
+      : job?.status === "running" || job?.status === "queued"
+        ? `${t("model.downloading")} ・ ${job.message || ""}`
+        : job?.status === "error"
+          ? `${t("error.prefix")} ・ ${job.message || ""}`
+          : item.purpose || model;
+    info.append(name, detail);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost-button model-install-button";
+    button.dataset.modelPull = model;
+    button.disabled = installed || job?.status === "running" || job?.status === "queued";
+    button.textContent = installed ? t("model.installed") : job?.status === "running" || job?.status === "queued" ? t("model.downloading") : t("model.download");
+    row.append(info, button);
+    els.modelInstaller.append(row);
+  }
+}
+
+async function refreshModelPullStatus() {
+  try {
+    const response = await fetch("/api/models/pull/status");
+    const data = await response.json();
+    if (response.ok && data.ok) {
+      state.modelPullJobs = data.jobs || {};
+      renderModelInstaller();
+      const running = Object.values(state.modelPullJobs).some((job) => job.status === "running" || job.status === "queued");
+      if (!running && state.modelPullTimer) {
+        window.clearInterval(state.modelPullTimer);
+        state.modelPullTimer = null;
+        checkHealth();
+      }
+    }
+  } catch {
+    // Health polling will surface offline state.
+  }
+}
+
+function ensureModelPullPolling() {
+  if (state.modelPullTimer) return;
+  state.modelPullTimer = window.setInterval(refreshModelPullStatus, 1500);
+}
+
+async function startModelPull(model) {
+  const ok = window.confirm(state.language === "en"
+    ? "Download this model? It can take time and use several GB of data."
+    : "モデルをダウンロードします。数GBの通信と時間がかかる場合があります。開始しますか？");
+  if (!ok) return;
+  try {
+    const response = await fetch("/api/models/pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || (state.language === "en" ? "Could not start model download." : "モデルのダウンロードを開始できませんでした。"));
+    state.modelPullJobs[model] = {
+      model,
+      status: data.status || "running",
+      message: data.message || (state.language === "en" ? "Download started." : "ダウンロードを開始しました。"),
+    };
+    renderModelInstaller();
+    ensureModelPullPolling();
+  } catch (error) {
+    window.alert(error.message);
+  }
 }
 
 function renderSettingsMeta() {
   if (!els.settingsMeta) return;
-  const version = state.appInfo.version || "不明";
-  const commit = state.appInfo.commit || "不明";
-  const codingStatus = state.serverModels.codingInstalled ? "" : "（未取得）";
+  const unknown = state.language === "en" ? "unknown" : "不明";
+  const version = state.appInfo.version || unknown;
+  const commit = state.appInfo.commit || unknown;
+  const codingStatus = state.serverModels.codingInstalled ? "" : ` (${t("model.missing")})`;
   const lines = [
-    `<div>アプリ版: ${escapeHtml(version)} / commit ${escapeHtml(commit)}</div>`,
-    `<div>通常: ${escapeHtml(modelForTask("chat"))}</div>`,
-    `<div>コード: ${escapeHtml(modelForTask("coding"))}${escapeHtml(codingStatus)}</div>`,
-    `<div>翻訳: ${escapeHtml(modelForTask("translation"))}</div>`,
+    `<div>${state.language === "en" ? "App" : "アプリ版"}: ${escapeHtml(version)} / commit ${escapeHtml(commit)}</div>`,
+    `<div>${t("task.chat")}: ${escapeHtml(modelForTask("chat"))}</div>`,
+    `<div>${t("task.coding")}: ${escapeHtml(modelForTask("coding"))}${escapeHtml(codingStatus)}</div>`,
+    `<div>${t("task.translation")}: ${escapeHtml(modelForTask("translation"))}</div>`,
   ];
+  if (state.composerModel) {
+    lines.push(`<div>${state.language === "en" ? "Composer fixed" : "チャット欄固定"}: ${escapeHtml(displayModelName(state.composerModel, "chat"))}</div>`);
+  }
   const selectedCoding = modelForTask("coding");
   if (selectedCoding.includes("gemma-4-12B-coder-fable5") && !modelIsInstalled(selectedCoding)) {
-    lines.push(`<div>使うには先に実行: <code>ollama pull ${escapeHtml(selectedCoding)}</code></div>`);
+    lines.push(`<div>${state.language === "en" ? "Download first" : "使うには先に実行"}: <code>ollama pull ${escapeHtml(selectedCoding)}</code></div>`);
   }
   els.settingsMeta.innerHTML = lines.join("");
 }
@@ -436,8 +962,8 @@ function saveActiveFolderTitle() {
 }
 
 function showUndo(kind, label) {
-  const target = kind === "folder" ? "フォルダー" : "チャット";
-  els.undoText.textContent = `${target}「${label}」を削除しました。`;
+  const target = kind === "folder" ? t("sidebar.folderButton") : t("task.chat");
+  els.undoText.textContent = t("undo.deleted", { target, label });
   els.undoToast.hidden = false;
 }
 
@@ -506,7 +1032,7 @@ function startSessionRename(session) {
 
 function deleteFolder(folder) {
   const count = state.sessions.filter((session) => session.folderId === folder.id).length;
-  const ok = window.confirm(`「${folder.name}」と中のチャット${count}件を削除しますか？`);
+  const ok = window.confirm(t("folder.deleteConfirm", { name: folder.name, count }));
   if (!ok) return;
   state.lastDeleted = {
     type: "folder",
@@ -535,7 +1061,7 @@ function deleteFolder(folder) {
 }
 
 function deleteSession(session) {
-  const ok = window.confirm(`「${session.title}」を削除しますか？`);
+  const ok = window.confirm(t("chat.deleteConfirm", { name: session.title }));
   if (!ok) return;
   state.lastDeleted = {
     type: "session",
@@ -553,12 +1079,12 @@ function deleteSession(session) {
 
 function newSession(folderId = state.activeFolderId) {
   if (!folderId) {
-    const folder = createFolder("新規フォルダー");
+    const folder = createFolder(t("folder.new"));
     folderId = folder.id;
   }
   const session = {
     id: crypto.randomUUID(),
-    title: "新規チャット",
+    title: t("chat.new"),
     folderId,
     messages: [],
     createdAt: Date.now(),
@@ -581,7 +1107,7 @@ function renderFolders() {
   if (visibleFolders().length === 0) {
     const empty = document.createElement("div");
     empty.className = "folder-empty sidebar-empty";
-    empty.textContent = "フォルダーなし";
+    empty.textContent = t("folder.none");
     els.folderList.append(empty);
     return;
   }
@@ -614,7 +1140,7 @@ function renderFolders() {
       name.className = "folder-name";
       name.textContent = folder.name;
       const meta = document.createElement("small");
-      meta.textContent = folder.workspaceRoot ? "ローカル設定済み" : "ローカル未設定";
+      meta.textContent = folder.workspaceRoot ? t("folder.localReady") : t("folder.localMissing");
       button.append(name, meta);
       button.addEventListener("click", async () => {
         state.editingFolderId = null;
@@ -635,8 +1161,8 @@ function renderFolders() {
     const addChat = document.createElement("button");
     addChat.type = "button";
     addChat.className = "item-action-primary";
-    addChat.textContent = "追加";
-    addChat.title = "このフォルダーにチャットを追加";
+    addChat.textContent = t("folder.add");
+    addChat.title = t("folder.addTitle");
     addChat.addEventListener("click", () => {
       state.editingFolderId = null;
       state.editingSessionId = null;
@@ -646,13 +1172,13 @@ function renderFolders() {
     });
     const edit = document.createElement("button");
     edit.type = "button";
-    edit.textContent = "編集";
-    edit.title = "フォルダー名を変更";
+    edit.textContent = t("folder.edit");
+    edit.title = t("folder.editTitle");
     edit.addEventListener("click", () => startFolderRename(folder));
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.textContent = "削除";
-    remove.title = "フォルダーを削除";
+    remove.textContent = t("folder.delete");
+    remove.title = t("folder.deleteTitle");
     remove.addEventListener("click", () => deleteFolder(folder));
     actions.append(addChat, edit, remove);
     row.append(actions);
@@ -702,13 +1228,13 @@ function renderFolders() {
       sessionActions.className = "item-actions";
       const sessionEdit = document.createElement("button");
       sessionEdit.type = "button";
-      sessionEdit.textContent = "編集";
-      sessionEdit.title = "チャット名を変更";
+      sessionEdit.textContent = t("folder.edit");
+      sessionEdit.title = t("chat.editTitle");
       sessionEdit.addEventListener("click", () => startSessionRename(session));
       const sessionRemove = document.createElement("button");
       sessionRemove.type = "button";
-      sessionRemove.textContent = "削除";
-      sessionRemove.title = "チャットを削除";
+      sessionRemove.textContent = t("folder.delete");
+      sessionRemove.title = t("chat.deleteTitle");
       sessionRemove.addEventListener("click", () => deleteSession(session));
       sessionActions.append(sessionEdit, sessionRemove);
       sessionRow.append(sessionActions);
@@ -718,7 +1244,7 @@ function renderFolders() {
     if (sessions.length === 0) {
       const empty = document.createElement("div");
       empty.className = "folder-empty";
-      empty.textContent = "チャットなし";
+      empty.textContent = t("chat.none");
       sessionList.append(empty);
     }
 
@@ -730,15 +1256,15 @@ function renderFolders() {
 function renderMessages() {
   const session = activeSession();
   els.messages.innerHTML = "";
-  els.chatTitle.textContent = session?.title || "新規チャット";
-  els.chatMeta.textContent = `通常: ${modelForTask("chat")} / コード: ${modelForTask("coding")}`;
+  els.chatTitle.textContent = session?.title || t("chat.new");
+  els.chatMeta.textContent = `${t("task.chat")}: ${modelForTask("chat")} / ${t("task.coding")}: ${modelForTask("coding")}`;
 
   if (!session || session.messages.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.innerHTML = `
       <h2>Gemma 4 12B</h2>
-      <div>Ollama経由のローカルチャット</div>
+      <div>${escapeHtml(t("chat.emptySubtitle"))}</div>
     `;
     els.messages.append(empty);
     return;
@@ -749,15 +1275,16 @@ function renderMessages() {
     wrapper.className = `message ${message.role}${message.streaming ? " streaming" : ""}`;
     const role = document.createElement("div");
     role.className = "message-role";
-    role.textContent = message.role === "user" ? "あなた" : message.streaming ? "Gemma ・ 生成中" : "Gemma";
+    role.textContent = message.role === "user" ? t("chat.you") : message.streaming ? t("chat.generatingRole") : "Gemma";
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = message.content || (message.streaming ? "生成中..." : "");
+    bubble.textContent = message.content || (message.streaming ? `${t("chat.generating")}...` : "");
     wrapper.append(role, bubble);
     if (message.streaming) {
       const status = document.createElement("div");
       status.className = "streaming-status";
-      status.textContent = "逐次表示中 ・ ■ で停止";
+      const elapsed = state.progressElapsedSeconds || 0;
+      status.textContent = t("chat.streamingStatus", { label: state.progressLabel, seconds: elapsed });
       wrapper.append(status);
     }
     if (message.imagePreviews && message.imagePreviews.length > 0) {
@@ -766,7 +1293,7 @@ function renderMessages() {
       for (const preview of message.imagePreviews) {
         const image = document.createElement("img");
         image.src = preview;
-        image.alt = "添付画像";
+        image.alt = t("composer.attachedImage");
         images.append(image);
       }
       wrapper.append(images);
@@ -781,7 +1308,7 @@ function renderMessages() {
         link.rel = "noreferrer";
         const image = document.createElement("img");
         image.src = generated.url;
-        image.alt = generated.filename || "生成画像";
+        image.alt = generated.filename || (state.language === "en" ? "Generated image" : "生成画像");
         link.append(image);
         images.append(link);
       }
@@ -810,7 +1337,12 @@ function renderMessages() {
         link.href = source.url;
         link.target = "_blank";
         link.rel = "noreferrer";
-        link.textContent = `[${index + 1}] ${source.title || source.url}`;
+        if (source.type === "preview") {
+          link.className = "preview-source";
+          link.textContent = source.title || t("chat.preview");
+        } else {
+          link.textContent = `[${index + 1}] ${source.title || source.url}`;
+        }
         sources.append(link);
       }
       wrapper.append(sources);
@@ -818,10 +1350,10 @@ function renderMessages() {
     if (message.role === "assistant" && typeof message.durationSeconds === "number") {
       const duration = document.createElement("div");
       duration.className = "message-duration";
-      const details = [`所要時間: ${formatDuration(message.durationSeconds)}`];
-      if (message.runMeta?.modelLabel) details.push(`モデル: ${message.runMeta.modelLabel}`);
-      if (message.runMeta?.taskLabel) details.push(`用途: ${message.runMeta.taskLabel}`);
-      if (message.runMeta?.responseModeLabel) details.push(`モード: ${message.runMeta.responseModeLabel}`);
+      const details = [`${t("chat.duration")}: ${formatDuration(message.durationSeconds)}`];
+      if (message.runMeta?.modelLabel) details.push(`${t("chat.model")}: ${message.runMeta.modelLabel}`);
+      if (message.runMeta?.taskLabel) details.push(`${t("chat.task")}: ${message.runMeta.taskLabel}`);
+      if (message.runMeta?.responseModeLabel) details.push(`${t("chat.mode")}: ${message.runMeta.responseModeLabel}`);
       duration.textContent = details.join(" / ");
       wrapper.append(duration);
     }
@@ -835,7 +1367,7 @@ function render() {
   document.body.dataset.theme = state.theme;
   document.body.classList.toggle("sidebar-hidden", state.sidebarHidden);
   els.sidebarToggle.hidden = !state.sidebarHidden;
-  els.sidebarCollapse.textContent = state.sidebarHidden ? "サイドバーを表示" : "サイドバーを隠す";
+  els.sidebarCollapse.textContent = state.sidebarHidden ? t("sidebar.show") : t("sidebar.hide");
   renderFolders();
   renderMessages();
   renderWorkspace();
@@ -846,7 +1378,7 @@ function render() {
   renderPendingImages();
   els.webSearchToggle.classList.toggle("active", state.webSearch);
   els.webSearchToggle.setAttribute("aria-pressed", String(state.webSearch));
-  els.progressLine.hidden = !state.busy;
+  els.progressLine.hidden = true;
 }
 
 function renderPendingImages() {
@@ -857,11 +1389,11 @@ function renderPendingImages() {
     item.className = "pending-image";
     const preview = document.createElement("img");
     preview.src = image.preview;
-    preview.alt = image.name;
+    preview.alt = image.name || t("composer.attachedImage");
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "×";
-    remove.title = "添付を削除";
+    remove.title = t("composer.removeAttachment");
     remove.addEventListener("click", () => {
       state.pendingImages.splice(index, 1);
       render();
@@ -874,17 +1406,17 @@ function renderPendingImages() {
 function renderWorkspace() {
   els.workspacePanel.hidden = !state.workspaceOpen;
   const folder = activeFolder();
-  els.workspaceFolderName.textContent = folder?.name || "フォルダー未選択";
+  els.workspaceFolderName.textContent = folder?.name || t("workspace.noFolder");
   els.workspaceFolderTitle.value = folder?.name || "";
   els.workspaceRoot.value = state.workspaceRoot;
   const selectedCount = state.selectedFiles.size;
   const fileCount = state.workspaceFiles.length;
   if (!state.workspaceRoot) {
-    els.workspaceStatus.textContent = `${activeFolder()?.name || "フォルダー"} のローカルアクセスは未設定です。`;
+    els.workspaceStatus.textContent = t("workspace.notConfigured", { name: activeFolder()?.name || t("sidebar.folderButton") });
   } else if (state.workspaceNote) {
     els.workspaceStatus.textContent = state.workspaceNote;
   } else {
-    els.workspaceStatus.textContent = `${activeFolder()?.name || "フォルダー"}: ${fileCount}件のファイルを読み込み、${selectedCount}件を文脈に追加中。`;
+    els.workspaceStatus.textContent = t("workspace.loaded", { name: activeFolder()?.name || t("sidebar.folderButton"), files: fileCount, selected: selectedCount });
   }
   els.workspaceFiles.innerHTML = "";
   for (const file of state.workspaceFiles) {
@@ -906,16 +1438,16 @@ function renderWorkspace() {
     const name = document.createElement("span");
     name.textContent = file.path;
     const meta = document.createElement("small");
-    meta.textContent = `${Math.ceil(file.size / 1024)} KB${file.text ? "" : " バイナリ/大容量"}`;
+    meta.textContent = `${Math.ceil(file.size / 1024)} KB${file.text ? "" : t("workspace.binary")}`;
     row.append(checkbox, name, meta);
     els.workspaceFiles.append(row);
   }
 }
 
 function updateSessionTitle(session, prompt) {
-  if (session.title !== "新規チャット" && session.title !== "New chat") return;
+  if (session.title !== "新規チャット" && session.title !== "New chat" && session.title !== t("chat.new")) return;
   const oneLine = prompt.replace(/\s+/g, " ").trim();
-  session.title = oneLine.slice(0, 42) || "新規チャット";
+  session.title = oneLine.slice(0, 42) || t("chat.new");
 }
 
 function numberValue(input, fallback) {
@@ -937,6 +1469,19 @@ function isWorkspaceBuildRequest(text) {
   return /テトリス|ゲーム|サイト|アプリ|ページ|ツール|作って|つくって|作成|生成|構築|実装|修正|変更|保存|ファイル|html|css|javascript|コード|program|app|game|build|create|implement/i.test(text);
 }
 
+function isSimpleWorkspaceBuildRequest(text) {
+  if (!isWorkspaceBuildRequest(text)) return false;
+  if (/テトリス|本格|複雑|複数|認証|データベース|API|バックエンド|3D|画像生成|編集|修正|変更|大き|complex|database|backend/i.test(text)) {
+    return false;
+  }
+  return /簡単|シンプル|小さ|小さい|軽く|試し|サンプル|test|simple|small|minimal|hello/i.test(text);
+}
+
+function modelForWorkspaceBuild(text) {
+  if (state.composerModel) return state.composerModel;
+  return isSimpleWorkspaceBuildRequest(text) ? fastChatModel() : modelForTask("coding");
+}
+
 function isSimpleReplyRequest(text) {
   const normalized = text.replace(/\s+/g, "").trim();
   if (!normalized || normalized.length > 24) return false;
@@ -944,6 +1489,21 @@ function isSimpleReplyRequest(text) {
     return false;
   }
   return /^(おはよ|おはよう|こんにちは|こんばんは|ありがとう|ありがと|どうも|了解|はい|うん|ok|OK|hi|hello|thanks|thankyou|goodmorning)/i.test(normalized);
+}
+
+function isLightweightChatRequest(text, hasImages = false) {
+  if (hasImages || state.webSearch) return false;
+  const normalized = text.replace(/\s+/g, "").trim();
+  if (!normalized || normalized.length > 44) return false;
+  if (isTranslationRequest(text) || isWorkspaceBuildRequest(text) || isWeatherRequest(text) || isImageGenerationRequest(text)) return false;
+  if (/教えて|調べ|検索|説明|理由|なぜ|比較|要約|分析|設計|実装|修正|コード|ファイル|保存|画像|添削|翻訳|translate|explain|why|how|code|file|image|search/i.test(text)) {
+    return false;
+  }
+  return (
+    isSimpleReplyRequest(text) ||
+    isCasualQuickReplyRequest(text) ||
+    /かな|かも|どうしよ|どうしよう|おすすめ|たべよう|食べよう|飲もう|ねむい|疲れた|つかれた|がんばる|頑張る/i.test(normalized)
+  );
 }
 
 function isTranslationRequest(text) {
@@ -968,7 +1528,7 @@ function effectiveThinkingMode(text, codingMode, responseMode) {
 
 function modeSystemSuffix(mode) {
   if (mode === "fast") {
-    return "\n\n高速応答モード: 挨拶や短い返事は1文で短く返してください。詳しい説明は求められた時だけにしてください。";
+    return "\n\n高速応答モード: 挨拶、雑談、短い相談は1文で自然に短く返してください。箇条書きや候補リストは、ユーザーが求めた時だけにしてください。";
   }
   if (mode === "quality") {
     return "\n\n精度優先モード: 必要な前提を確認し、抜け漏れがないように答えてください。ただし冗長な前置きは避けてください。";
@@ -1000,6 +1560,25 @@ function translationSystemPrompt() {
     "If the request says 英訳, translate into natural English.",
     "If the request says 和訳, translate into natural Japanese.",
     "If no target language is explicit, infer it from the request.",
+  ].join("\n");
+}
+
+function lightweightChatSystemPrompt() {
+  if (state.language === "en") {
+    return [
+      "You are a natural, lightweight casual assistant.",
+      "Reply directly in 1-2 short sentences.",
+      "For everyday questions like meals, breaks, or mood, give a concrete suggestion.",
+      "Do not preface that you are a language model, not an expert, or unable to do something.",
+      "Do not use bullet points, option lists, bold text, or headings.",
+    ].join("\n");
+  }
+  return [
+    "あなたは日本語で自然に返す軽い雑談アシスタントです。",
+    "ユーザーの短い相談や雑談に、1〜2文で直接答えてください。",
+    "食事、休憩、気分転換などの日常的な相談には、具体的に提案してください。",
+    "自分が言語モデルであること、専門外であること、実行できないことを前置きしないでください。",
+    "箇条書き、候補リスト、太字、見出しは使わないでください。",
   ].join("\n");
 }
 
@@ -1036,7 +1615,7 @@ function applyThinkingBudget(options) {
   if (options.thinkingMode === "high") {
     return {
       ...options,
-      progressLabel: options.codingMode ? options.progressLabel : "深く考えて生成中",
+      progressLabel: options.codingMode ? options.progressLabel : t("progress.quality"),
       numPredict: options.codingMode ? Math.max(options.numPredict, 8192) : Math.max(options.numPredict, 512),
       numCtx: options.codingMode ? Math.max(options.numCtx, 12288) : Math.max(options.numCtx, 4096),
       historyTurns: options.codingMode ? Math.max(options.historyTurns, 8) : Math.max(options.historyTurns, 6),
@@ -1050,21 +1629,41 @@ function applyThinkingBudget(options) {
   };
 }
 
-function chatRequestOptions(text) {
+function chatRequestOptions(text, hasImages = false) {
   const codingMode = isWorkspaceBuildRequest(text);
   const translationMode = isTranslationRequest(text) && !codingMode;
+  const lightweightMode = !codingMode && !translationMode && isLightweightChatRequest(text, hasImages);
   const mode = effectiveResponseMode(text, codingMode);
   const thinkingMode = effectiveThinkingMode(text, codingMode, mode);
   const maxTokens = numberValue(els.numPredict, 96);
   const contextSize = numberValue(els.numCtx, 2048);
   const historyTurns = numberValue(els.historyTurns, 4);
+  if (lightweightMode) {
+    return {
+      codingMode,
+      translationMode,
+      responseMode: "fast",
+      thinkingMode: "low",
+      progressLabel: t("progress.lightweight"),
+      temperature: Math.min(numberValue(els.temperature, 0.7), 0.55),
+      topP: 0.75,
+      topK: 20,
+      numPredict: 96,
+      numCtx: 1024,
+      historyTurns: 1,
+      keepAlive: "30m",
+      think: false,
+      webSearch: false,
+      fastModel: true,
+    };
+  }
   if (translationMode) {
     return {
       codingMode,
       translationMode,
       responseMode: "fast",
       thinkingMode: "low",
-      progressLabel: "翻訳中",
+      progressLabel: t("progress.translation"),
       temperature: 0.1,
       topP: 0.7,
       topK: 10,
@@ -1082,7 +1681,7 @@ function chatRequestOptions(text) {
       translationMode,
       responseMode: mode,
       thinkingMode,
-      progressLabel: "高速生成中",
+      progressLabel: t("progress.fast"),
       temperature: Math.min(numberValue(els.temperature, 0.7), 0.5),
       topP: Math.min(numberValue(els.topP, 0.9), 0.8),
       topK: Math.min(numberValue(els.topK, 40), 20),
@@ -1100,7 +1699,7 @@ function chatRequestOptions(text) {
       translationMode,
       responseMode: mode,
       thinkingMode,
-      progressLabel: codingMode ? "コード生成中" : "精度優先で生成中",
+      progressLabel: codingMode ? t("progress.coding") : t("progress.quality"),
       temperature: numberValue(els.temperature, 0.7),
       topP: numberValue(els.topP, 0.9),
       topK: numberValue(els.topK, 40),
@@ -1117,13 +1716,13 @@ function chatRequestOptions(text) {
     translationMode,
     responseMode: mode,
     thinkingMode,
-    progressLabel: codingMode ? "コード生成中" : state.webSearch ? "検索 + 生成中" : "生成中",
+    progressLabel: codingMode ? t("progress.coding") : state.webSearch ? t("progress.search") : t("progress.generating"),
     temperature: numberValue(els.temperature, 0.7),
     topP: numberValue(els.topP, 0.9),
     topK: numberValue(els.topK, 40),
-    numPredict: codingMode ? Math.max(maxTokens, 4096) : maxTokens,
-    numCtx: codingMode ? Math.max(contextSize, 8192) : contextSize,
-    historyTurns: codingMode ? Math.max(historyTurns, 6) : historyTurns,
+    numPredict: codingMode ? Math.max(maxTokens, 4096) : state.webSearch ? Math.max(maxTokens, 512) : maxTokens,
+    numCtx: codingMode ? Math.max(contextSize, 8192) : state.webSearch ? Math.max(contextSize, 4096) : contextSize,
+    historyTurns: codingMode ? Math.max(historyTurns, 6) : state.webSearch ? Math.min(Math.max(historyTurns, 3), 4) : historyTurns,
     keepAlive: codingMode ? "20m" : "15m",
     think: false,
     webSearch: state.webSearch,
@@ -1158,6 +1757,73 @@ index.html
 - 未完成の省略、TODO、途中で切れたコード、外部ライブラリCDN依存は禁止です。
 - ファイルパスは相対パスだけにしてください。
 - JSONのエスケープに自信がない場合は、形式Bのコードブロック形式を優先してください。`;
+}
+
+function workspacePlanSystemPrompt() {
+  return `あなたはローカルフォルダーに保存するWebアプリの実装計画を作るコーディングエージェントです。
+返答はJSONオブジェクトだけにしてください。Markdown、説明文、コードは禁止です。
+
+形式:
+{
+  "summary": "短い実装方針",
+  "files": [
+    {"path": "index.html", "purpose": "このファイルで実装する内容"}
+  ]
+}
+
+要件:
+- 小さなWebゲームやデモは、ユーザー指定がなければ index.html だけにしてください。
+- まず動く最小完成版を優先してください。見た目や演出を盛りすぎないでください。
+- 最大3ファイルまでにしてください。
+- ファイルパスは相対パスだけにしてください。
+- 画像や外部ライブラリが不要なら使わないでください。`;
+}
+
+function workspaceFileSystemPrompt() {
+  return `あなたはローカルフォルダー内の1ファイルを完成させるコーディングエージェントです。
+返答は「ファイルパス行 + 完全なコードブロック」だけにしてください。JSON、説明文、参考リンクは禁止です。
+
+形式:
+index.html
+\`\`\`html
+<!doctype html>
+...
+\`\`\`
+
+要件:
+- 指定された1ファイルだけを完全な内容で出力してください。
+- 小さなWebゲームやデモの index.html は、CSSとJavaScriptを含む自己完結HTMLにしてください。
+- まず動く最小完成版を優先してください。見た目や演出を盛りすぎないでください。
+- 1ファイルは原則250行以内にしてください。
+- 未完成の省略、TODO、途中で切れたコード、外部ライブラリCDN依存は禁止です。
+- ゲームの場合は、最低限の操作、スコアまたは状態表示、リスタートを入れてください。
+- ファイルパスは相対パスだけにしてください。`;
+}
+
+function simpleWorkspaceFileSystemPrompt() {
+  return `あなたは短時間で小さなWebプログラムを完成させるコーディングエージェントです。
+返答は「ファイルパス行 + 完全なコードブロック」だけにしてください。JSON、説明文、参考リンクは禁止です。
+
+形式:
+index.html
+\`\`\`html
+<!doctype html>
+...
+\`\`\`
+
+要件:
+- index.html 1ファイルだけを生成してください。
+- HTML、CSS、JavaScriptを1ファイルに含め、保存後にブラウザーでそのまま動く完成品にしてください。
+- ユーザーが種類を指定していない場合は、ボタンで操作できる小さなカウンターやメモなど、分かりやすい最小プログラムを作ってください。
+- 80〜160行程度を目安にし、凝った演出や大きな機能は入れないでください。
+- 未完成の省略、TODO、途中で切れたコード、外部ライブラリCDN依存は禁止です。`;
+}
+
+function simpleWorkspacePlan() {
+  return {
+    summary: "index.html 1ファイルで小さく動くWebプログラムを作成します。",
+    files: [{ path: "index.html", purpose: "ブラウザーでそのまま動く最小構成のHTML/CSS/JavaScript" }],
+  };
 }
 
 function extractJsonObject(text) {
@@ -1220,6 +1886,62 @@ function normalizeGeneratedFiles(payload) {
     throw new Error("保存できるファイルが生成されませんでした。");
   }
   return files;
+}
+
+function normalizeWorkspacePlan(payload) {
+  const fallback = {
+    summary: "index.html に自己完結のWebアプリを作成します。",
+    files: [{ path: "index.html", purpose: "CSSとJavaScriptを含む完成版のHTML" }],
+  };
+  if (!payload || !Array.isArray(payload.files)) return fallback;
+  const files = payload.files
+    .slice(0, 3)
+    .map((file) => ({
+      path: cleanCandidatePath(String(file.path || "")),
+      purpose: String(file.purpose || "このファイルを実装します。").trim(),
+    }))
+    .filter((file) => file.path);
+  if (files.length === 0) return fallback;
+  return {
+    summary: String(payload.summary || "段階的にファイルを生成します。").trim(),
+    files,
+  };
+}
+
+async function requestWorkspacePlan(userText, signal = null, model = modelForTask("coding")) {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      task: "coding",
+      model,
+      system: workspacePlanSystemPrompt(),
+      messages: [{ role: "user", content: userText }],
+      temperature: 0.1,
+      top_p: 0.7,
+      top_k: 20,
+      num_predict: 512,
+      num_ctx: 4096,
+      history_turns: 1,
+      think: false,
+      keep_alive: "20m",
+      web_search: false,
+      workspace: {
+        root: state.workspaceRoot,
+        files: [...state.selectedFiles],
+      },
+    }),
+    signal: combinedAbortSignal(signal, WORKSPACE_PLAN_TIMEOUT_MS),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "実装計画の作成に失敗しました。");
+  }
+  try {
+    return normalizeWorkspacePlan(extractJsonObject(data.message?.content || ""));
+  } catch {
+    return normalizeWorkspacePlan(null);
+  }
 }
 
 function localTetrisFiles() {
@@ -1475,13 +2197,72 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
         files: [...state.selectedFiles],
       },
     }),
-    signal: combinedAbortSignal(signal, WORKSPACE_GENERATION_TIMEOUT_MS),
+    signal: combinedAbortSignal(signal, WORKSPACE_FILE_TIMEOUT_MS),
   });
   const data = await response.json();
   if (!response.ok || !data.ok) {
     throw new Error(data.error || "コード生成に失敗しました。");
   }
   return parseWorkspaceGeneration(data.message?.content || "");
+}
+
+async function requestWorkspaceFile(userText, plan, fileSpec, previousFile = null, validation = null, signal = null, model = modelForTask("coding"), options = {}) {
+  const errors = validationText(validation);
+  const repairBlock = previousFile || errors || validation?.parseError
+    ? [
+        "",
+        "前回の生成を修正してください。",
+        errors ? `検証エラー:\n${errors}` : "",
+        validation?.parseError ? `保存形式エラー:\n${validation.parseError}` : "",
+        previousFile ? `前回の ${fileSpec.path}:\n${previousFile.content.slice(0, 30000)}` : "",
+      ].filter(Boolean).join("\n")
+    : "";
+  const content = [
+    `元の依頼:\n${userText}`,
+    "",
+    `実装方針:\n${plan.summary}`,
+    `生成対象:\n${fileSpec.path}`,
+    `目的:\n${fileSpec.purpose || "このファイルを完成させる"}`,
+    "",
+    `全ファイル:\n${plan.files.map((file) => `- ${file.path}: ${file.purpose || ""}`).join("\n")}`,
+    repairBlock,
+    "",
+    "上記の生成対象1ファイルだけを、保存できる完全なコードブロック形式で出力してください。",
+  ].join("\n");
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      task: "coding",
+      model,
+      system: options.system || workspaceFileSystemPrompt(),
+      messages: [{ role: "user", content }],
+      temperature: options.temperature ?? 0.15,
+      top_p: options.topP ?? 0.8,
+      top_k: options.topK ?? 20,
+      num_predict: options.numPredict ?? 4096,
+      num_ctx: options.numCtx ?? 8192,
+      history_turns: 1,
+      think: false,
+      keep_alive: options.keepAlive || "20m",
+      web_search: false,
+      workspace: {
+        root: state.workspaceRoot,
+        files: [...state.selectedFiles],
+      },
+    }),
+    signal: combinedAbortSignal(signal, options.timeoutMs || WORKSPACE_FILE_TIMEOUT_MS),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || `${fileSpec.path} の生成に失敗しました。`);
+  }
+  const parsed = parseWorkspaceGeneration(data.message?.content || "");
+  const exact = parsed.files.find((file) => file.path === fileSpec.path) || parsed.files[0];
+  return {
+    path: fileSpec.path,
+    content: exact.content,
+  };
 }
 
 async function saveGeneratedFiles(files) {
@@ -1523,6 +2304,9 @@ function buildWorkspaceResultMessage(savedFiles, validation, attempts, notes = [
   ];
   const errors = validationText(validation);
   if (errors) lines.push(`検証エラー:\n${errors}`);
+  if (savedFiles.some((file) => /\.html?$/i.test(file.path))) {
+    lines.push("下の「動作確認」からブラウザーで開けます。");
+  }
   if (notes.length > 0) lines.push(`メモ:\n${notes.map((note) => `- ${note}`).join("\n")}`);
   return lines.join("\n");
 }
@@ -1532,7 +2316,8 @@ function workspacePreviewSources(files) {
   return files
     .filter((file) => /\.html?$/i.test(file.path))
     .map((file) => ({
-      title: `${file.path} をプレビュー`,
+      type: "preview",
+      title: `${t("chat.preview")}: ${file.path}`,
       url: `/api/workspace/preview?root=${encodeURIComponent(state.workspaceRoot)}&path=${encodeURIComponent(file.path)}`,
     }));
 }
@@ -1548,7 +2333,7 @@ async function handleWorkspaceBuild(text) {
   updateSessionTitle(session, text);
   state.busy = true;
   state.abortController = new AbortController();
-  startProgressTimer("生成・検証中");
+  startProgressTimer(t("progress.workspace"));
   const progressMessage = {
     role: "assistant",
     content: "作業を開始しました。\n- 要件を整理中",
@@ -1561,9 +2346,24 @@ async function handleWorkspaceBuild(text) {
   let generated = null;
   let savedFiles = [];
   let validation = null;
+  let plan = null;
   let attempts = 0;
-  let activeCodingModel = modelForTask("coding");
+  const simpleBuild = isSimpleWorkspaceBuildRequest(text);
+  const maxAttempts = simpleBuild ? 2 : 3;
+  let activeCodingModel = modelForWorkspaceBuild(text);
   let usedFallbackModel = false;
+  const generationOptions = simpleBuild
+    ? {
+        system: simpleWorkspaceFileSystemPrompt(),
+        temperature: 0.1,
+        topP: 0.75,
+        topK: 20,
+        numPredict: 2048,
+        numCtx: 4096,
+        keepAlive: "30m",
+        timeoutMs: SIMPLE_WORKSPACE_FILE_TIMEOUT_MS,
+      }
+    : {};
   const setBuildProgress = (lines) => {
     progressMessage.content = lines.join("\n");
     saveSessions();
@@ -1571,46 +2371,91 @@ async function handleWorkspaceBuild(text) {
   };
 
   try {
-    for (attempts = 1; attempts <= 3; attempts += 1) {
-      state.progressLabel = attempts === 1 ? "生成・保存中" : `自動修正中 ${attempts - 1}/2`;
+    for (attempts = 1; attempts <= maxAttempts; attempts += 1) {
+      state.progressLabel = simpleBuild
+        ? attempts === 1 ? "簡単生成中" : "短く自動修正中"
+        : attempts === 1 ? "生成・保存中" : `自動修正中 ${attempts - 1}/2`;
       updateProgressTimer();
-      setBuildProgress([
-        `作業中: ${state.progressLabel}`,
-        `- 試行 ${attempts}/3`,
-        `- ${activeCodingModel} でファイル内容を生成中`,
-        usedFallbackModel ? "- Coderが遅いため標準モデルへ自動切替済み" : null,
-        "- 初回はモデル読み込みで数分かかることがあります",
-        "- 生成後に保存と検証を行います",
-      ].filter(Boolean));
       try {
-        generated = await requestWorkspaceFiles(text, generated?.files || [], validation, state.abortController.signal, activeCodingModel);
+        if (!plan) {
+          if (simpleBuild) {
+            plan = simpleWorkspacePlan();
+            setBuildProgress([
+              `作業中: ${state.progressLabel}`,
+              `- 試行 ${attempts}/${maxAttempts}`,
+              `- ${activeCodingModel} で小さな index.html を生成中`,
+              "- 計画生成を省略して短時間で保存します",
+            ]);
+          } else {
+            setBuildProgress([
+              `作業中: ${state.progressLabel}`,
+              `- 試行 ${attempts}/${maxAttempts}`,
+              `- ${activeCodingModel} で実装計画を作成中`,
+              usedFallbackModel ? "- Coderが遅いため標準モデルへ自動切替済み" : null,
+              "- 初回はモデル読み込みで数分かかることがあります",
+            ].filter(Boolean));
+            plan = await requestWorkspacePlan(text, state.abortController.signal, activeCodingModel);
+          }
+        }
+
+        const generatedFiles = [];
+        for (const [index, fileSpec] of plan.files.entries()) {
+          const previousFile = generated?.files?.find((file) => file.path === fileSpec.path) || null;
+          setBuildProgress([
+            `作業中: ${state.progressLabel}`,
+            `- 試行 ${attempts}/${maxAttempts}`,
+            `- 計画: ${plan.summary}`,
+            `- ${index + 1}/${plan.files.length} ${fileSpec.path} を生成中`,
+            simpleBuild ? "- 簡単タスクのため短時間生成を使用中" : null,
+            usedFallbackModel ? "- Coderが遅いため標準モデルへ自動切替済み" : null,
+          ].filter(Boolean));
+          const file = await requestWorkspaceFile(
+            text,
+            plan,
+            fileSpec,
+            previousFile,
+            validation,
+            state.abortController.signal,
+            activeCodingModel,
+            generationOptions,
+          );
+          generatedFiles.push(file);
+        }
+        generated = {
+          summary: plan.summary,
+          files: generatedFiles,
+          notes: [simpleBuild
+            ? `簡単生成: ${activeCodingModel} で1ファイル生成 → 保存 → 検証`
+            : `段階生成: 計画作成 → ${generatedFiles.length}ファイル生成 → 保存 → 検証`],
+        };
       } catch (error) {
         const fallback = fallbackCodingModel();
         if (
           error.name === "TimeoutError" &&
-          attempts < 3 &&
+          attempts < maxAttempts &&
           !usedFallbackModel &&
           activeCodingModel !== fallback
         ) {
           activeCodingModel = fallback;
           usedFallbackModel = true;
+          plan = null;
           validation = {
             ok: false,
             results: [],
             parseError: "前回のコード生成モデルが時間内に完了しませんでした。標準モデルで短い完成版を再生成してください。",
           };
           setBuildProgress([
-            "コード生成モデルが時間内に完了しませんでした。",
-            `- 試行 ${attempts}/3`,
+            simpleBuild ? "簡単生成が時間内に完了しませんでした。" : "コード生成モデルが時間内に完了しませんでした。",
+            `- 試行 ${attempts}/${maxAttempts}`,
             `- ${fallback} に自動切替して再試行します`,
           ]);
           continue;
         }
-        if (attempts < 3 && /生成結果を読み取れませんでした|JSON|コードブロック/.test(error.message)) {
+        if (attempts < maxAttempts && /生成結果を読み取れませんでした|JSON|コードブロック/.test(error.message)) {
           validation = { ok: false, results: [], parseError: error.message };
           setBuildProgress([
             "生成結果の形式を読み取れませんでした。",
-            `- 試行 ${attempts}/3`,
+            `- 試行 ${attempts}/${maxAttempts}`,
             "- コード用モデルに保存可能な形式で再出力を依頼します",
             error.message,
           ]);
@@ -1620,14 +2465,14 @@ async function handleWorkspaceBuild(text) {
       }
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
-        `- 試行 ${attempts}/3`,
+        `- 試行 ${attempts}/${maxAttempts}`,
         `- ${generated.files.length}件のファイルを受信`,
         "- ローカルフォルダーへ保存中",
       ]);
       savedFiles = await saveGeneratedFiles(generated.files);
       setBuildProgress([
         `作業中: ${state.progressLabel}`,
-        `- 試行 ${attempts}/3`,
+        `- 試行 ${attempts}/${maxAttempts}`,
         `- ${savedFiles.length}件のファイルを保存`,
         "- 構文と未完成表現を検証中",
       ]);
@@ -1635,7 +2480,7 @@ async function handleWorkspaceBuild(text) {
       if (validation.ok) break;
       setBuildProgress([
         "検証で問題を検出しました。",
-        `- 試行 ${attempts}/3`,
+        `- 試行 ${attempts}/${maxAttempts}`,
         "- コード用モデルに修正を依頼します",
         validationText(validation),
       ].filter(Boolean));
@@ -1653,10 +2498,10 @@ async function handleWorkspaceBuild(text) {
       model: activeCodingModel,
       modelLabel: shortModelName(activeCodingModel, "coding"),
       task: "coding",
-      taskLabel: "コード生成",
-      responseMode: "quality",
-      responseModeLabel: "精度優先",
-      thinkingMode: "high",
+      taskLabel: t("task.coding"),
+      responseMode: simpleBuild ? "fast" : "quality",
+      responseModeLabel: simpleBuild ? t("mode.fast") : t("mode.quality"),
+      thinkingMode: simpleBuild ? "low" : "high",
     };
     delete progressMessage.streaming;
   } catch (error) {
@@ -1664,23 +2509,29 @@ async function handleWorkspaceBuild(text) {
     if (error.name === "AbortError") {
       progressMessage.content = "生成を停止しました。";
     } else if (error.name === "TimeoutError" || /timed out/i.test(error.message)) {
-      progressMessage.content = [
-        "生成が6分以内に完了しなかったため停止しました。",
-        "- Coderが遅い場合は標準モデルへの自動切替を試します",
-        "- それでも止まる場合は、依頼をさらに小さくしてください。例: まず index.html だけ作る",
-      ].join("\n");
+      progressMessage.content = simpleBuild
+        ? [
+            "簡単生成が2分以内に完了しなかったため停止しました。",
+            "- 依頼をさらに具体化すると成功しやすくなります",
+            "- 例: ボタンを押すと数字が増えるindex.htmlを作って",
+          ].join("\n")
+        : [
+            "生成が時間内に完了しなかったため停止しました。",
+            "- Coderが遅い場合は標準モデルへの自動切替を試します",
+            "- それでも止まる場合は、依頼をさらに小さくしてください。例: まず画面だけ作る",
+          ].join("\n");
     } else {
-      progressMessage.content = `生成エラー: ${error.message}`;
+      progressMessage.content = `${t("error.prefix")}: ${error.message}`;
     }
     progressMessage.durationSeconds = durationSeconds;
     progressMessage.runMeta = {
       model: activeCodingModel,
       modelLabel: shortModelName(activeCodingModel, "coding"),
       task: "coding",
-      taskLabel: "コード生成",
-      responseMode: "quality",
-      responseModeLabel: "精度優先",
-      thinkingMode: "high",
+      taskLabel: t("task.coding"),
+      responseMode: simpleBuild ? "fast" : "quality",
+      responseModeLabel: simpleBuild ? t("mode.fast") : t("mode.quality"),
+      thinkingMode: simpleBuild ? "low" : "high",
     };
     delete progressMessage.streaming;
   } finally {
@@ -1708,23 +2559,29 @@ async function checkHealth() {
     if (Array.isArray(data.recommendedCodingModels)) {
       state.serverModels.recommendedCoding = data.recommendedCodingModels;
     }
+    if (Array.isArray(data.pullableModels)) {
+      state.serverModels.pullable = data.pullableModels;
+      renderModelInstaller();
+    }
     if (Array.isArray(data.availableModels) || state.serverModels.recommendedCoding.length > 0) {
       state.serverModels.available = data.availableModels || state.serverModels.available;
       syncModelInputs();
+      renderModelInstaller();
     }
     els.statusDot.className = `status-dot ${data.ok && data.modelInstalled ? "ok" : "error"}`;
     const codingMissing = data.ok && data.codingModel && data.codingModelInstalled === false;
     els.statusText.textContent = data.ok && data.modelInstalled
-      ? codingMissing ? "コード用モデル未取得" : "使用可能"
-      : "モデル未取得";
+      ? codingMissing ? t("status.codingMissing") : t("status.available")
+      : t("status.modelMissing");
     renderSettingsMeta();
     if (!state.busy) renderMessages();
   } catch {
-    state.appInfo.version = "取得失敗";
+    state.appInfo.version = state.language === "en" ? "failed" : "取得失敗";
     state.appInfo.commit = "";
     els.statusDot.className = "status-dot error";
-    els.statusText.textContent = "オフライン";
+    els.statusText.textContent = t("status.offline");
     renderSettingsMeta();
+    renderModelInstaller();
   }
 }
 
@@ -1756,9 +2613,9 @@ async function sendMessage(text) {
     session = activeSession();
   }
 
-  const requestOptions = chatRequestOptions(text);
   const images = state.pendingImages.map((image) => image.base64);
   const imagePreviews = state.pendingImages.map((image) => image.preview);
+  const requestOptions = chatRequestOptions(text, images.length > 0);
   const userMessage = { role: "user", content: text, images, imagePreviews };
   session.messages.push(userMessage);
   state.pendingImages = [];
@@ -1783,19 +2640,22 @@ async function sendMessage(text) {
   try {
     const requestSystem = requestOptions.translationMode
       ? translationSystemPrompt()
-      : buildSystemPrompt(
-          els.systemPrompt.value,
-          requestOptions.codingMode,
-          requestOptions.responseMode,
-          requestOptions.thinkingMode,
-          requestOptions.translationMode,
-        );
-    const requestMessages = requestOptions.translationMode ? [userMessage] : [...session.messages];
+      : requestOptions.fastModel
+        ? lightweightChatSystemPrompt()
+        : buildSystemPrompt(
+            els.systemPrompt.value,
+            requestOptions.codingMode,
+            requestOptions.responseMode,
+            requestOptions.thinkingMode,
+            requestOptions.translationMode,
+          );
+    const requestMessages = requestOptions.translationMode || requestOptions.fastModel ? [userMessage] : [...session.messages];
     const stream = !requestOptions.translationMode;
     const requestTask = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
+    const requestModel = modelForRequestTask(requestTask, requestOptions);
     const payload = {
       task: requestTask,
-      model: modelForTask(requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat"),
+      model: requestModel,
       stream,
       system: requestSystem,
       messages: requestMessages,
@@ -1868,14 +2728,14 @@ async function sendMessage(text) {
         }
       }
       const savedNote = savedFiles.length > 0
-        ? `保存しました。\n${savedFiles.map((file) => `- ${file.path} (${file.size}バイト)`).join("\n")}`
+        ? `${state.language === "en" ? "Saved." : "保存しました。"}\n${savedFiles.map((file) => `- ${file.path} (${file.size} bytes)`).join("\n")}`
         : saveError
-          ? `\n\n自動保存エラー: ${saveError}`
+          ? `\n\n${t("workspace.saveError")}: ${saveError}`
           : "";
       assistantMessage.content = requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`;
       assistantMessage.sources = requestOptions.codingMode ? workspacePreviewSources(savedFiles) : streamSearchResults;
       assistantMessage.durationSeconds = durationSeconds;
-      assistantMessage.runMeta = messageRunMeta(requestOptions, modelForTask(requestTask));
+      assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel);
       delete assistantMessage.streaming;
       return;
     }
@@ -1896,48 +2756,48 @@ async function sendMessage(text) {
       }
     }
     const savedNote = savedFiles.length > 0
-      ? `保存しました。\n${savedFiles.map((file) => `- ${file.path} (${file.size}バイト)`).join("\n")}`
+      ? `${state.language === "en" ? "Saved." : "保存しました。"}\n${savedFiles.map((file) => `- ${file.path} (${file.size} bytes)`).join("\n")}`
       : saveError
-        ? `\n\n自動保存エラー: ${saveError}`
+        ? `\n\n${t("workspace.saveError")}: ${saveError}`
         : "";
     session.messages.push({
       role: "assistant",
       content: requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`,
       sources: requestOptions.codingMode ? workspacePreviewSources(savedFiles) : data.search?.results || [],
       durationSeconds,
-      runMeta: messageRunMeta(requestOptions, data.model || modelForTask(requestTask)),
+      runMeta: messageRunMeta(requestOptions, data.model || requestModel),
     });
   } catch (error) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
     if (error.name === "AbortError") {
       if (assistantMessage) {
         assistantMessage.content = assistantMessage.content
-          ? `${assistantMessage.content}\n\n（停止しました）`
-          : "停止しました。";
+          ? `${assistantMessage.content}\n\n${state.language === "en" ? "(Stopped)" : "（停止しました）"}`
+          : (state.language === "en" ? "Stopped." : "停止しました。");
         assistantMessage.durationSeconds = durationSeconds;
-        assistantMessage.runMeta = messageRunMeta(requestOptions, modelForTask(requestTask));
+        assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel);
         delete assistantMessage.streaming;
       } else {
         session.messages.push({
           role: "assistant",
-          content: "停止しました。",
+          content: state.language === "en" ? "Stopped." : "停止しました。",
           durationSeconds,
-          runMeta: messageRunMeta(requestOptions, modelForTask(requestTask)),
+          runMeta: messageRunMeta(requestOptions, requestModel),
         });
       }
     } else if (assistantMessage) {
       assistantMessage.content = assistantMessage.content
-        ? `${assistantMessage.content}\n\nエラー: ${error.message}`
-        : `エラー: ${error.message}`;
+        ? `${assistantMessage.content}\n\n${t("error.prefix")}: ${error.message}`
+        : `${t("error.prefix")}: ${error.message}`;
       assistantMessage.durationSeconds = durationSeconds;
-      assistantMessage.runMeta = messageRunMeta(requestOptions, modelForTask(requestTask));
+      assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel);
       delete assistantMessage.streaming;
     } else {
       session.messages.push({
         role: "assistant",
-        content: `エラー: ${error.message}`,
+        content: `${t("error.prefix")}: ${error.message}`,
         durationSeconds,
-        runMeta: messageRunMeta(requestOptions, modelForTask(requestTask)),
+        runMeta: messageRunMeta(requestOptions, requestModel),
       });
     }
   } finally {
@@ -1995,7 +2855,7 @@ async function generateImageFromChat(text) {
   session.messages.push({ role: "user", content: text });
   updateSessionTitle(session, prompt);
   state.busy = true;
-  startProgressTimer("画像生成中");
+  startProgressTimer(t("progress.image"));
   saveSessions();
   render();
 
@@ -2025,7 +2885,7 @@ async function generateImageFromChat(text) {
     const durationSeconds = (Date.now() - state.startedAt) / 1000;
     session.messages.push({
       role: "assistant",
-      content: "画像を生成しました。",
+      content: t("image.generated"),
       generatedImages: data.images || [],
       imageMeta: data.meta || null,
       durationSeconds,
@@ -2034,7 +2894,7 @@ async function generateImageFromChat(text) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
     session.messages.push({
       role: "assistant",
-      content: `画像生成エラー: ${error.message}`,
+      content: `${t("error.prefix")}: ${error.message}`,
       durationSeconds,
     });
   } finally {
@@ -2086,12 +2946,13 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function startProgressTimer(label = "生成中") {
+function startProgressTimer(label = t("progress.generating")) {
   stopProgressTimer();
   state.progressLabel = label;
+  state.progressElapsedSeconds = 0;
   state.startedAt = Date.now();
   updateProgressTimer();
-  state.timerId = window.setInterval(updateProgressTimer, 250);
+  state.timerId = window.setInterval(updateProgressTimer, 1000);
 }
 
 function stopProgressTimer() {
@@ -2100,17 +2961,23 @@ function stopProgressTimer() {
     state.timerId = null;
   }
   state.startedAt = 0;
+  state.progressElapsedSeconds = 0;
 }
 
 function updateProgressTimer() {
   if (!state.startedAt) return;
   const elapsedSeconds = Math.floor((Date.now() - state.startedAt) / 1000);
-  els.progressText.textContent = `${state.progressLabel}... ${elapsedSeconds}秒`;
+  state.progressElapsedSeconds = elapsedSeconds;
+  els.progressText.textContent = state.language === "en"
+    ? `${state.progressLabel}... ${elapsedSeconds}s`
+    : `${state.progressLabel}... ${elapsedSeconds}秒`;
+  if (state.busy) renderMessages();
 }
 
 function formatDuration(seconds) {
-  if (seconds < 10) return `${seconds.toFixed(1)}秒`;
-  return `${Math.round(seconds)}秒`;
+  const suffix = state.language === "en" ? "s" : "秒";
+  if (seconds < 10) return `${seconds.toFixed(1)}${suffix}`;
+  return `${Math.round(seconds)}${suffix}`;
 }
 
 function isLocalDateTimeRequest(text) {
@@ -2120,6 +2987,21 @@ function isLocalDateTimeRequest(text) {
     /(いま|今|現在|今の).{0,6}(時間|時刻)|何時/.test(normalized) ||
     /(今日|本日|現在).{0,6}(日付|何日|曜日)|何曜日/.test(normalized) ||
     /^(time|date|today|whattime|whatday)\??$/i.test(normalized)
+  );
+}
+
+function normalizeShortReply(text) {
+  return text.replace(/[!！?？。、〜~ー－—\s]/g, "").toLowerCase();
+}
+
+function isCasualQuickReplyRequest(text) {
+  const normalized = normalizeShortReply(text);
+  if (normalized.length > 24) return false;
+  return (
+    /^(つかれた|疲れた|なんかつかれた|なんか疲れた|しんどい|ねむい|眠い|ねむ)$/.test(normalized) ||
+    /^(わかった|了解|りょうかい|ok|おけ|なるほど|たしかに|そうだね|そうですね)$/.test(normalized) ||
+    /^(ok|おけ)?(がんばる|頑張る)(ね|よ)?$/.test(normalized) ||
+    /^(おそい|遅い|おそかった|遅かった|まだ|ながい|長い)$/.test(normalized)
   );
 }
 
@@ -2177,7 +3059,7 @@ async function handleWeatherRequest(text) {
   session.messages.push({ role: "user", content: text });
   updateSessionTitle(session, text);
   state.busy = true;
-  startProgressTimer("天気取得中");
+  startProgressTimer(t("progress.weather"));
   saveSessions();
   render();
   try {
@@ -2201,7 +3083,7 @@ async function handleWeatherRequest(text) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
     session.messages.push({
       role: "assistant",
-      content: `天気取得エラー: ${error.message}`,
+      content: `${t("error.prefix")}: ${error.message}`,
       durationSeconds,
     });
   } finally {
@@ -2233,7 +3115,7 @@ function handleLocalUtilityRequest(text) {
 }
 
 async function pickWorkspaceFolder() {
-  els.workspaceStatus.textContent = "フォルダー選択を待機中...";
+  els.workspaceStatus.textContent = t("workspace.waitingPick");
   try {
     const response = await fetch("/api/workspace/pick", {
       method: "POST",
@@ -2242,7 +3124,7 @@ async function pickWorkspaceFolder() {
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || "フォルダー選択に失敗しました");
+      throw new Error(data.error || (state.language === "en" ? "Could not choose folder." : "フォルダー選択に失敗しました"));
     }
     state.workspaceRoot = data.root;
     els.workspaceRoot.value = data.root;
@@ -2250,14 +3132,14 @@ async function pickWorkspaceFolder() {
     saveWorkspacePrefs();
     await loadWorkspace();
   } catch (error) {
-    els.workspaceStatus.textContent = `エラー: ${error.message}`;
+    els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message}`;
   }
 }
 
 async function loadWorkspace() {
   const root = els.workspaceRoot.value.trim();
   if (!root) return;
-  els.workspaceStatus.textContent = "フォルダーを読み込み中...";
+  els.workspaceStatus.textContent = t("workspace.loading");
   try {
     const response = await fetch("/api/workspace/tree", {
       method: "POST",
@@ -2266,14 +3148,16 @@ async function loadWorkspace() {
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || "フォルダーを読み込めませんでした");
+      throw new Error(data.error || (state.language === "en" ? "Could not load folder." : "フォルダーを読み込めませんでした"));
     }
     state.workspaceRoot = data.root;
     state.workspaceFiles = data.files || [];
     if (state.workspaceFiles.length === 0) {
-      state.workspaceNote = "このフォルダーは空です。生成したファイルはここへ保存できます。";
+      state.workspaceNote = t("workspace.empty");
     } else if (data.truncated) {
-      state.workspaceNote = `${state.workspaceFiles.length}件を表示中です。件数が多いため一部を省略しました。`;
+      state.workspaceNote = state.language === "en"
+        ? `Showing ${state.workspaceFiles.length} files. Some were omitted because there are many files.`
+        : `${state.workspaceFiles.length}件を表示中です。件数が多いため一部を省略しました。`;
     } else {
       state.workspaceNote = "";
     }
@@ -2281,7 +3165,7 @@ async function loadWorkspace() {
     saveWorkspacePrefs();
     render();
   } catch (error) {
-    els.workspaceStatus.textContent = `エラー: ${error.message}`;
+    els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message}`;
   }
 }
 
@@ -2290,7 +3174,9 @@ async function saveWorkspaceFile() {
   const path = els.writePath.value.trim();
   const content = els.writeContent.value;
   if (!root || !path) {
-    els.workspaceStatus.textContent = "先にフォルダーを選択し、相対パスを入力してください。";
+    els.workspaceStatus.textContent = state.language === "en"
+      ? "Choose a folder and enter a relative path first."
+      : "先にフォルダーを選択し、相対パスを入力してください。";
     return;
   }
   try {
@@ -2301,12 +3187,12 @@ async function saveWorkspaceFile() {
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || "ファイルを保存できませんでした");
+      throw new Error(data.error || (state.language === "en" ? "Could not save file." : "ファイルを保存できませんでした"));
     }
-    els.workspaceStatus.textContent = `${data.path} を保存しました（${data.size}バイト）。`;
+    els.workspaceStatus.textContent = t("workspace.saved", { path: data.path, size: data.size });
     await loadWorkspace();
   } catch (error) {
-    els.workspaceStatus.textContent = `エラー: ${error.message}`;
+    els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message}`;
   }
 }
 
@@ -2516,7 +3402,7 @@ async function handleSaveCommand(text) {
     state.workspaceOpen = true;
     session.messages.push({
       role: "assistant",
-      content: "保存先ファイル名が判断できませんでした。保存欄にコードを入れました。保存先ファイルを入力して「ファイルを保存」を押してください。",
+      content: t("workspace.cannotInferSavePath"),
       durationSeconds: 0,
     });
     saveSessions();
@@ -2525,7 +3411,7 @@ async function handleSaveCommand(text) {
   }
 
   state.busy = true;
-  startProgressTimer("保存中");
+  startProgressTimer(t("progress.saving"));
   saveSessions();
   render();
 
@@ -2544,7 +3430,7 @@ async function handleSaveCommand(text) {
     els.writeContent.value = block.content;
     session.messages.push({
       role: "assistant",
-      content: `${data.path} に保存しました（${data.size}バイト）。`,
+      content: t("workspace.savedTo", { path: data.path, size: data.size }),
       sources: workspacePreviewSources([{ path: data.path, size: data.size }]),
       durationSeconds,
     });
@@ -2555,7 +3441,7 @@ async function handleSaveCommand(text) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
     session.messages.push({
       role: "assistant",
-      content: `保存エラー: ${error.message}`,
+      content: `${t("workspace.saveError")}: ${error.message}`,
       durationSeconds,
     });
   } finally {
@@ -2584,12 +3470,12 @@ els.composer.addEventListener("submit", async (event) => {
     await handleWorkspaceBuild(text);
     return;
   }
-  sendMessage(text || "この画像を説明してください。");
+  sendMessage(text || (state.language === "en" ? "Describe this image." : "この画像を説明してください。"));
 });
 
 els.stop.addEventListener("click", () => {
   if (!state.abortController) return;
-  state.progressLabel = "停止中";
+  state.progressLabel = t("progress.stopping");
   updateProgressTimer();
   state.abortController.abort();
 });
@@ -2653,7 +3539,7 @@ els.undoDelete.addEventListener("click", restoreLastDeleted);
 els.undoClose.addEventListener("click", hideUndo);
 
 els.newFolder.addEventListener("click", async () => {
-  createFolder("新規フォルダー");
+  createFolder(t("folder.new"));
   newSession();
   startFolderRename(activeFolder());
   render();
@@ -2663,7 +3549,7 @@ els.clearChat.addEventListener("click", () => {
   const session = activeSession();
   if (!session) return;
   session.messages = [];
-  session.title = "新規チャット";
+  session.title = t("chat.new");
   saveSessions();
   render();
 });
@@ -2709,9 +3595,17 @@ els.settingsClose.addEventListener("click", () => {
   els.settingsPanel.hidden = true;
 });
 
+els.modelInstaller.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-model-pull]");
+  if (!button) return;
+  startModelPull(button.dataset.modelPull);
+});
+
 els.themeSelect.addEventListener("change", () => setTheme(els.themeSelect.value));
+els.languageSelect.addEventListener("change", () => setLanguageFromControl(els.languageSelect.value));
 els.responseMode.addEventListener("change", () => setResponseMode(els.responseMode.value));
 els.composerResponseMode.addEventListener("change", () => setResponseMode(els.composerResponseMode.value));
+els.composerModel.addEventListener("change", () => setComposerModel(els.composerModel.value));
 els.thinkingMode.addEventListener("change", () => setThinkingMode(els.thinkingMode.value));
 els.chatModel.addEventListener("change", () => {
   setModelOverride("chat", els.chatModel.value);
@@ -2731,6 +3625,11 @@ els.enterToSend.addEventListener("change", () => setEnterToSend(els.enterToSend.
 
 ensureFolderData();
 syncWorkspaceFromActiveFolder();
+state.language = I18N[state.language] ? state.language : "ja";
+applyI18n();
+if (els.systemPrompt && Object.values(SYSTEM_PROMPTS).includes(els.systemPrompt.value)) {
+  els.systemPrompt.value = SYSTEM_PROMPTS[state.language] || SYSTEM_PROMPTS.ja;
+}
 setTheme(state.theme);
 setResponseMode(state.responseMode);
 setThinkingMode(state.thinkingMode);

@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -25,7 +26,7 @@ import webbrowser
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.4.0")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.6.0")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -40,9 +41,21 @@ CODING_MODEL_CANDIDATES = [
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 DEFAULT_SYSTEM_PROMPT = (
-    "あなたは簡潔で有用なアシスタントです。前置きなしで直接答えてください。"
-    "詳しい説明を求められない限り、1〜3個の短い箇条書きで回答してください。"
+    "あなたは簡潔で有用なアシスタントです。前置きなしで自然に短く答えてください。"
+    "箇条書きは、比較・手順・整理が必要な場合だけ使ってください。"
 )
+PULLABLE_MODELS = [
+    {"model": MODEL, "label": "Gemma 4 12B", "purpose": "標準チャット・画像理解"},
+    {"model": "qwen2.5:3b", "label": "Qwen 2.5 3B", "purpose": "高速チャット・翻訳"},
+    {
+        "model": "hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M",
+        "label": "Gemma 4 Coder 12B Q4",
+        "purpose": "コード生成",
+    },
+]
+PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"]}
+MODEL_PULL_JOBS: dict[str, dict[str, object]] = {}
+MODEL_PULL_LOCK = threading.Lock()
 IMAGE_PROMPT_SYSTEM = (
     "Convert the user's image request into one concise English Stable Diffusion prompt. "
     "Preserve the exact subject. If the subject is simple, make it explicit and recognizable. "
@@ -275,8 +288,8 @@ def friendly_ollama_error(error_body: str) -> str:
         model = match.group(1)
         return (
             f"モデルが未取得です: {model}\n"
-            f"使うにはターミナルで次を実行してください。\n"
-            f"ollama pull {model}"
+            "使うには設定画面の「モデルをダウンロード」から取得してください。\n"
+            f"ターミナルで行う場合: ollama pull {model}"
         )
     return message
 
@@ -447,6 +460,8 @@ def weather_description(code: object) -> str:
 
 
 def weather_day_offset_from_text(text: str) -> int:
+    if re.search(r"今週|週間|一週間|1週間|週の|weekly|this\s+week", text, flags=re.IGNORECASE):
+        return 6
     return 1 if re.search(r"明日|tomorrow", text, flags=re.IGNORECASE) else 0
 
 
@@ -454,6 +469,7 @@ def weather_location_from_query(text: str) -> str:
     cleaned = text.strip()
     cleaned = re.sub(r"[?？。!！]", "", cleaned)
     cleaned = re.sub(r"(教えて|おしえて|ください|下さい|どう|ですか|は)$", "", cleaned)
+    cleaned = re.sub(r"(今週|週間|一週間|1週間|週の|weekly|this\s+week)(?:の)?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(今日|本日|現在|今|いま|明日|tomorrow|today)(?:の)?", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(天気|気温|降水|雨|晴れ|曇り|weather|temperature|forecast).*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^(の|で|における|at|in|for)\s*", "", cleaned, flags=re.IGNORECASE)
@@ -496,7 +512,8 @@ def geocode_location(location: str) -> dict:
 
 
 def fetch_weather(location: str, day_offset: int = 0) -> dict:
-    day_offset = max(0, min(day_offset, 1))
+    day_offset = max(0, min(day_offset, 6))
+    forecast_days = 7 if day_offset >= 2 else day_offset + 1
     place = geocode_location(location)
     query = urllib.parse.urlencode(
         {
@@ -514,7 +531,7 @@ def fetch_weather(location: str, day_offset: int = 0) -> dict:
             ),
             "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
             "timezone": place["timezone"],
-            "forecast_days": day_offset + 1,
+            "forecast_days": forecast_days,
         }
     )
     request = urllib.request.Request(
@@ -533,10 +550,23 @@ def fetch_weather(location: str, day_offset: int = 0) -> dict:
     daily_min = daily.get("temperature_2m_min") or []
     daily_precipitation = daily.get("precipitation_probability_max") or []
     daily_time = daily.get("time") or []
+    daily_forecasts = []
+    for index, date in enumerate(daily_time[:forecast_days]):
+        daily_forecasts.append(
+            {
+                "date": date,
+                "weather": weather_description(daily_weather[index] if len(daily_weather) > index else None),
+                "temperatureMax": daily_max[index] if len(daily_max) > index else None,
+                "temperatureMin": daily_min[index] if len(daily_min) > index else None,
+                "precipitationProbability": daily_precipitation[index] if len(daily_precipitation) > index else None,
+            }
+        )
+    target_index = min(day_offset, max(len(daily_time) - 1, 0))
     return {
         "location": location_label,
         "timezone": forecast.get("timezone") or place["timezone"],
         "dayOffset": day_offset,
+        "period": "week" if day_offset >= 2 else "day",
         "current": {
             "time": current.get("time"),
             "weather": weather_description(current.get("weather_code")),
@@ -548,13 +578,14 @@ def fetch_weather(location: str, day_offset: int = 0) -> dict:
             "windSpeed": current.get("wind_speed_10m"),
         },
         "target": {
-            "date": daily_time[day_offset] if len(daily_time) > day_offset else None,
+            "date": daily_time[target_index] if len(daily_time) > target_index else None,
             "label": "明日" if day_offset == 1 else "今日",
-            "weather": weather_description(daily_weather[day_offset] if len(daily_weather) > day_offset else None),
-            "temperatureMax": daily_max[day_offset] if len(daily_max) > day_offset else None,
-            "temperatureMin": daily_min[day_offset] if len(daily_min) > day_offset else None,
-            "precipitationProbability": daily_precipitation[day_offset] if len(daily_precipitation) > day_offset else None,
+            "weather": weather_description(daily_weather[target_index] if len(daily_weather) > target_index else None),
+            "temperatureMax": daily_max[target_index] if len(daily_max) > target_index else None,
+            "temperatureMin": daily_min[target_index] if len(daily_min) > target_index else None,
+            "precipitationProbability": daily_precipitation[target_index] if len(daily_precipitation) > target_index else None,
         },
+        "dailyForecasts": daily_forecasts,
         "source": "Open-Meteo",
     }
 
@@ -563,7 +594,17 @@ def build_weather_answer(weather: dict) -> str:
     current = weather["current"]
     target = weather["target"]
     unit = current.get("temperatureUnit") or "°C"
-    if weather.get("dayOffset") == 1:
+    if weather.get("period") == "week":
+        lines = [
+            f"{weather['location']}の今週の予報です。",
+            *[
+                f"- {item['date']}: {item['weather']}、最高{item['temperatureMax']}{unit} / 最低{item['temperatureMin']}{unit}、降水確率は最大{item['precipitationProbability']}%"
+                for item in weather.get("dailyForecasts", [])
+            ],
+            f"現在は{current['weather']}、気温{current['temperature']}{unit}、湿度{current['humidity']}%です。",
+            f"更新時刻: {current['time']}（{weather['timezone']}） / 出典: {weather['source']}",
+        ]
+    elif weather.get("dayOffset") == 1:
         lines = [
             f"{weather['location']}の明日（{target['date']}）の予報は{target['weather']}です。",
             f"最高{target['temperatureMax']}{unit} / 最低{target['temperatureMin']}{unit}、降水確率は最大{target['precipitationProbability']}%です。",
@@ -1134,6 +1175,7 @@ def health_payload() -> dict:
                 model for model in [CODING_MODEL, *CODING_MODEL_CANDIDATES]
                 if model
             ],
+            "pullableModels": PULLABLE_MODELS,
             "modelInstalled": installed,
             "codingModelInstalled": coding_model in models,
             "translationModelInstalled": translation_model in models,
@@ -1147,9 +1189,103 @@ def health_payload() -> dict:
             "model": MODEL,
             "codingModel": select_coding_model(),
             "translationModel": TRANSLATION_MODEL or MODEL,
+            "models": {
+                "chat": MODEL,
+                "coding": select_coding_model(),
+                "translation": TRANSLATION_MODEL or MODEL,
+            },
+            "availableModels": [],
+            "recommendedCodingModels": [
+                model for model in [CODING_MODEL, *CODING_MODEL_CANDIDATES]
+                if model
+            ],
+            "pullableModels": PULLABLE_MODELS,
             "modelInstalled": False,
+            "codingModelInstalled": False,
+            "translationModelInstalled": False,
             "error": str(exc),
         }
+
+
+def model_pull_status() -> dict:
+    with MODEL_PULL_LOCK:
+        jobs = {model: dict(job) for model, job in MODEL_PULL_JOBS.items()}
+    return {"ok": True, "jobs": jobs}
+
+
+def run_model_pull(model: str) -> None:
+    with MODEL_PULL_LOCK:
+        MODEL_PULL_JOBS[model] = {
+            "model": model,
+            "status": "running",
+            "message": "ダウンロードを開始しました。",
+            "startedAt": time.time(),
+            "finishedAt": None,
+        }
+    try:
+        process = subprocess.Popen(
+            ["ollama", "pull", model],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        last_line = ""
+        if process.stdout:
+            for line in process.stdout:
+                last_line = line.strip() or last_line
+                if last_line:
+                    with MODEL_PULL_LOCK:
+                        job = MODEL_PULL_JOBS.get(model, {})
+                        job.update({"message": last_line})
+                        MODEL_PULL_JOBS[model] = job
+        code = process.wait()
+        with MODEL_PULL_LOCK:
+            job = MODEL_PULL_JOBS.get(model, {})
+            job.update({
+                "status": "done" if code == 0 else "error",
+                "message": "ダウンロードが完了しました。" if code == 0 else last_line or f"ollama pull が終了コード {code} で失敗しました。",
+                "finishedAt": time.time(),
+            })
+            MODEL_PULL_JOBS[model] = job
+    except Exception as exc:
+        with MODEL_PULL_LOCK:
+            job = MODEL_PULL_JOBS.get(model, {})
+            job.update({"status": "error", "message": str(exc), "finishedAt": time.time()})
+            MODEL_PULL_JOBS[model] = job
+
+
+def start_model_pull(model: str) -> dict:
+    if model not in PULLABLE_MODEL_NAMES:
+        raise ValueError("このモデルはUIからダウンロードできません。")
+    try:
+        already_installed = model in installed_ollama_models()
+    except Exception:
+        already_installed = False
+    if already_installed:
+        with MODEL_PULL_LOCK:
+            MODEL_PULL_JOBS[model] = {
+                "model": model,
+                "status": "done",
+                "message": "すでにダウンロード済みです。",
+                "startedAt": time.time(),
+                "finishedAt": time.time(),
+            }
+        return {"ok": True, "model": model, "status": "done", "message": "すでにダウンロード済みです。"}
+    with MODEL_PULL_LOCK:
+        existing = MODEL_PULL_JOBS.get(model)
+        if existing and existing.get("status") == "running":
+            return {"ok": True, "model": model, "status": "running", "message": str(existing.get("message", ""))}
+        MODEL_PULL_JOBS[model] = {
+            "model": model,
+            "status": "queued",
+            "message": "ダウンロード待機中です。",
+            "startedAt": time.time(),
+            "finishedAt": None,
+        }
+    thread = threading.Thread(target=run_model_pull, args=(model,), daemon=True)
+    thread.start()
+    return {"ok": True, "model": model, "status": "running", "message": "ダウンロードを開始しました。"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1163,6 +1299,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/health":
             payload = health_payload()
             json_response(self, 200 if payload["ok"] else 503, payload)
+            return
+        if parsed.path == "/api/models/pull/status":
+            json_response(self, 200, model_pull_status())
             return
         if parsed.path == "/api/image/status":
             payload = comfyui_status_payload()
@@ -1205,6 +1344,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/image/generate":
             self.handle_image_generate()
+            return
+        if self.path == "/api/models/pull":
+            self.handle_model_pull()
             return
         if self.path.startswith("/api/workspace/"):
             self.handle_workspace()
@@ -1369,6 +1511,14 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, exc.code, {"ok": False, "error": error_body})
         except Exception as exc:
             json_response(self, 500, {"ok": False, "error": str(exc)})
+
+    def handle_model_pull(self) -> None:
+        try:
+            body = read_json_body(self)
+            result = start_model_pull(str(body.get("model", "")).strip())
+            json_response(self, 200, result)
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc)})
 
     def handle_image_view(self, query: str) -> None:
         try:

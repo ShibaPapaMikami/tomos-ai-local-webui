@@ -4,6 +4,111 @@ Gemma 4 12B を Ollama でローカル実行し、ブラウザーから使うた
 
 学生や授業利用でも導入しやすいように、APIキーなしでチャット、画像入力、Web検索、ローカルフォルダーを使ったコード生成を扱える構成にしています。
 
+日本語の説明はこの下に続きます。English overview is available below.
+
+## English Overview
+
+Gemma 4 12B Local Web UI is a lightweight browser UI for running local Ollama models such as Gemma 4 12B. It is designed for students and classrooms: no API key is required for basic chat, image input, web search, weather lookup, or local-folder coding workflows.
+
+Key features:
+
+- Local chat with Gemma 4 12B through Ollama
+- Japanese / English UI language switch in Settings
+- Image input from file picker or clipboard paste
+- Web search context using DuckDuckGo HTML search
+- Current and weekly weather lookup using Open-Meteo
+- Codex-like folders and chats in the left sidebar
+- Local folder access for generating and saving code
+- Step-by-step code generation: plan, generate files, save, validate, repair
+- Response mode: Auto / Fast / Standard / Quality
+- Reasoning effort: Auto / Light / Standard / Deep
+- Optional ComfyUI image generation from chat
+- Model downloads from the Settings screen, without typing `ollama pull`
+
+### Requirements
+
+- Python 3.10 or later
+- Ollama
+- Enough disk space for local models, usually 10GB or more
+
+The first model download can be several GB. On school networks, it may take time.
+
+### Quick Start on Mac
+
+1. Install [Ollama](https://ollama.com/download).
+2. Open this folder.
+3. Run the setup script:
+
+```sh
+./scripts/setup-mac.sh
+```
+
+4. Start the app:
+
+```sh
+./Start_Mac.command
+```
+
+You can also double-click `Start_Mac.command`.
+
+### Quick Start on Windows
+
+1. Install [Python](https://www.python.org/downloads/).
+   - Enable `Add python.exe to PATH` during installation.
+2. Install [Ollama](https://ollama.com/download).
+3. Open PowerShell in this folder and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+```
+
+4. Double-click `Start_Windows.bat`.
+
+### App URL
+
+After starting the app, open:
+
+```text
+http://127.0.0.1:54876
+```
+
+The Mac launcher opens Safari. Windows uses the default browser.
+
+### Model Downloads
+
+Open `Settings` and use `Download models` to install supported Ollama models from the UI. This is the recommended path for students because it avoids Terminal commands.
+
+Recommended choices:
+
+- Chat: Gemma 4 12B
+- Fast chat / translation: Qwen 2.5 3B
+- Folder-based coding: Gemma 4 Coder 12B Q4
+
+### Local Folder Coding
+
+Create a folder in the left sidebar, open its folder settings, and choose a local folder. Then ask the chat to create or edit files, for example:
+
+```text
+Create a simple web Tetris game in this folder.
+Make index.html easier to read.
+Make this CSS responsive for mobile.
+```
+
+Generated HTML files include a preview button in the chat.
+
+### What Is Not Included
+
+This repository does not include ComfyUI, model files, generated images, virtual environments, caches, or logs. Those files are intentionally ignored so the GitHub repository stays small.
+
+## 導入方針
+
+現時点では、Mac は `.command`、Windows は `.bat` / `.ps1` で導入・起動できる軽量構成です。将来的には以下のような本格インストーラー化も可能です。
+
+- Mac: 署名付き `.pkg` または `.dmg`
+- Windows: `.msi` または Inno Setup 形式のインストーラー
+
+ただし配布を簡単にするには、まず現在のスクリプト方式で安定させるのが現実的です。Ollama と Python は事前インストールが必要ですが、Gemma / Qwen / Coder などのモデル取得は設定画面から実行できます。
+
 ## できること
 
 - ローカルの Gemma 4 12B とチャット
@@ -12,10 +117,13 @@ Gemma 4 12B を Ollama でローカル実行し、ブラウザーから使うた
 - Open-Meteoを使った現在の天気・今日の予報取得
 - Codex風のフォルダー/チャット管理
 - 指定フォルダー内へのファイル生成・保存
+- フォルダー生成の段階実行: 計画 → ファイル生成 → 保存 → 検証 → 自動修正
 - 生成中の逐次表示と停止
 - 応答モードの切替: 自動 / 高速 / 標準 / 精度優先
 - 思考量の切替: 自動 / 軽め / 標準 / 深く
 - 現在時刻、日付、曜日のローカル即答
+- 短い挨拶や日常相談は軽量モデルへ自動ルーティング
+- 設定画面からOllamaモデルをダウンロード
 - ComfyUI がある環境では、チャットから画像生成
 
 ## 必要なもの
@@ -28,6 +136,7 @@ Gemma 4 12B を Ollama でローカル実行し、ブラウザーから使うた
 - 空き容量: 少なくとも 10GB 程度
 
 Gemma 4 12B の初回ダウンロードは数GBあります。学校のネットワークでは時間がかかることがあります。
+起動後に `設定` を開き、`モデルをダウンロード` から必要なモデルを取得できます。
 
 ## はじめての導入
 
@@ -97,18 +206,23 @@ Mac の起動ファイルは Safari を開きます。Windows は既定ブラウ
 
 設定で `Enterで送信` をONにすると、Enter単体でも送信できます。日本語変換中のEnterでは送信しません。
 
-短い挨拶や返事は、自動モードでは軽い設定で返します。設計やプログラム作成では、必要に応じて精度優先・深い思考に寄せます。
+短い挨拶や日常相談は、モデル自動時に軽量モデルへ回して速度を優先します。設計やプログラム作成では、必要に応じて精度優先・深い思考に寄せます。
 
 `英訳して`、`和訳して`、`翻訳して` などの依頼は翻訳専用モードになります。余計な説明や箇条書きではなく、翻訳文だけを返すようにし、Web検索やフォルダー文脈を使わず軽い設定で処理します。`qwen2.5:3b` などの軽量モデルが入っている場合は翻訳だけ自動で軽量モデルを使います。固定したい場合は `GEMMA_TRANSLATION_MODEL`、または設定画面の翻訳モデルを指定してください。
 
 ### 用途別モデル
 
 通常チャット、コード生成、翻訳で別々のOllamaモデルを使えます。設定画面でモデル名を入力すると、そのブラウザーでは入力値が優先されます。空欄に戻すとサーバー既定値に戻ります。
-コード生成モデル欄には推奨候補も表示しますが、未取得のモデルは先に `ollama pull` が必要です。
+コード生成モデル欄には推奨候補も表示します。未取得のモデルは、設定画面の `モデルをダウンロード` から取得してください。
+
+入力フォームの `モデル自動` から、その場で使うモデルを固定できます。`モデル自動` では通常チャット、コード生成、翻訳を用途別モデルで使い分けます。固定した場合は、次の回答から選択したモデルを使います。通常の候補は `Gemma 4`、`Qwen`、`Coder` に絞っています。
+`モデル自動` のままなら、短い雑談や軽い相談は `Qwen` が入っている環境では `Qwen` を使い、調査・画像・コード・長い説明は `Gemma 4` または `Coder` を使います。軽い相談では専用の短文プロンプトを使い、会話履歴を送らずに今回の入力だけで返すため、前のコード作業文脈に引っ張られにくくなります。
+
+フォルダー内にプログラムを作る依頼では、いきなり全コードを書かせず、まず短い実装計画を作り、ファイルごとに生成してから保存・検証します。検証で構文エラーや未完成表現が見つかった場合は、エラー内容を使って自動修正を試します。
 
 選び方の目安:
 
-- 通常チャット: 迷ったら `Gemma 4 12B`。速さ優先なら `Qwen 2.5 3B` または `Phi-3`。
+- 通常チャット: 迷ったら `Gemma 4 12B`。速さ優先なら `Qwen 2.5 3B`。
 - コード生成: すぐ使うなら `Gemma 4 12B`。複雑なフォルダー作業は `Gemma 4 Coder 12B Q4` 推奨。
 - 翻訳: 通常はサーバー自動で十分。速さは `Qwen 2.5 3B`、品質優先は `Gemma 4 12B`。
 
@@ -120,12 +234,17 @@ Mac の起動ファイルは Safari を開きます。Windows は既定ブラウ
 
 コード生成用モデルを試す例:
 
+1. 設定画面の `モデルをダウンロード` で `Gemma 4 Coder 12B Q4` を取得します。
+2. `コード生成モデル` で `Gemma 4 Coder 12B Q4` を選びます。
+3. フォルダー作業やプログラム作成を依頼します。
+
+ターミナルで指定したい場合:
+
 ```bash
-ollama pull hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M
 GEMMA_CODING_MODEL=hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M ./Gemma4_12B_Web.command
 ```
 
-Windows PowerShell では以下のように指定できます。
+Windows PowerShell:
 
 ```powershell
 $env:GEMMA_CODING_MODEL="hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M"
@@ -177,6 +296,7 @@ $env:GEMMA_CODING_MODEL="hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-
 
 - Web検索を使うと外部サイトへ検索リクエストが送られます。
 - 高速モードでは、短い返事で検索待ちが発生しないようにWeb検索を自動で使わない設定にしています。
+- Web検索中は、検索結果をまとめ切れるように通常チャットより少し長めに生成します。
 
 ### ローカル便利機能
 
@@ -188,7 +308,7 @@ $env:GEMMA_CODING_MODEL="hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-
 今日は何曜日？
 ```
 
-この方式にしているため、時刻のような確定情報はモデルの推測に頼りません。
+この方式にしているため、時刻のような確定情報はモデルの推測に頼りません。挨拶や日常相談は定型文ではなく、軽量モデルで生成します。
 
 ### ローカルフォルダーでコード生成
 
@@ -209,11 +329,13 @@ index.html を見やすく修正して
 このCSSをスマホ対応にして
 ```
 
-フォルダー作業では、コード生成用モデルにファイル内容をJSONで生成させ、保存後に構文チェックを行います。HTML内のJavaScript、単体JavaScript、JSON、CSSの基本検証に加えて、TODOや省略コード、外部CDN依存も検出します。失敗した場合は自動で修正を試します。
+フォルダー作業では、コード生成用モデルにファイル内容を生成させ、保存後に構文チェックを行います。HTML内のJavaScript、単体JavaScript、JSON、CSSの基本検証に加えて、TODOや省略コード、外部CDN依存も検出します。失敗した場合は自動で修正を試します。
 
-HTMLを保存した場合は、チャット結果にプレビューリンクが表示されます。
+`簡単な`、`シンプルな`、`小さな` などの依頼では、計画生成を省略し、`Qwen` が入っている環境では `Qwen` を使って `index.html` 1ファイルを短時間で生成します。複雑なコード生成では `Gemma 4` または `Coder` を使います。
 
-コード生成中は、チャット内に `生成中`、`保存中`、`検証中`、`自動修正中` の進捗が表示されます。長時間止まって見える場合は `■` で停止できます。フォルダー作業の1回の生成は6分で区切ります。Coderモデルの初回実行は読み込みに数分かかることがあります。Coderモデルが時間内に終わらない場合は、通常のGemma 4 12Bへ自動で切り替えて再試行します。
+HTMLを保存した場合は、チャット結果に `動作確認` ボタンが表示されます。押すと保存したHTMLをブラウザーで確認できます。
+
+コード生成中は、チャット内に `生成中`、`保存中`、`検証中`、`自動修正中` の進捗が表示されます。長時間止まって見える場合は `■` で停止できます。簡単生成は2分、通常のフォルダー作業は6分で区切ります。Coderモデルの初回実行は読み込みに数分かかることがあります。Coderモデルが時間内に終わらない場合は、通常のGemma 4 12Bへ自動で切り替えて再試行します。
 
 ## ComfyUI で画像生成したい場合
 

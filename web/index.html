@@ -13,27 +13,27 @@
           <div class="mark">G4</div>
           <div>
             <div class="brand-title">Gemma 4</div>
-            <div class="brand-subtitle">12B ローカル</div>
+            <div class="brand-subtitle" data-i18n="brand.subtitle">12B ローカル</div>
           </div>
         </div>
 
         <div class="sidebar-actions">
           <button class="new-chat" id="new-folder" type="button">
             <span>+</span>
-            <span>フォルダー</span>
+            <span data-i18n="sidebar.folderButton">フォルダー</span>
           </button>
         </div>
 
         <label class="sidebar-search">
-          <span>検索</span>
-          <input id="sidebar-search" type="search" placeholder="フォルダー / チャットを検索" />
+          <span data-i18n="sidebar.search">検索</span>
+          <input id="sidebar-search" type="search" placeholder="フォルダー / チャットを検索" data-i18n-placeholder="sidebar.searchPlaceholder" />
         </label>
 
         <section class="sidebar-section tree-section">
           <div class="section-header">
-            <span>フォルダーとチャット</span>
+            <span data-i18n="sidebar.treeTitle">フォルダーとチャット</span>
           </div>
-          <nav class="folder-list folder-tree" id="folder-list" aria-label="フォルダーとチャット"></nav>
+          <nav class="folder-list folder-tree" id="folder-list" aria-label="フォルダーとチャット" data-i18n-aria-label="sidebar.treeTitle"></nav>
         </section>
 
         <div class="sidebar-footer">
@@ -42,117 +42,126 @@
             <span id="status-text">確認中</span>
           </div>
           <button class="ghost-button" id="sidebar-collapse" type="button">サイドバーを隠す</button>
-          <button class="ghost-button" id="settings-toggle" type="button">設定</button>
+          <button class="ghost-button" id="settings-toggle" type="button" data-i18n="common.settings">設定</button>
         </div>
         <div class="sidebar-resizer" id="sidebar-resizer" aria-hidden="true"></div>
       </aside>
 
       <main class="workspace">
         <header class="topbar">
-          <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button">サイドバー</button>
+          <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button" data-i18n="sidebar.showShort">サイドバー</button>
           <div>
             <h1 id="chat-title">新規チャット</h1>
             <p id="chat-meta">gemma4:12b</p>
           </div>
           <div class="top-actions">
-            <button class="icon-button search-button" id="web-search-toggle" type="button" title="Web検索を使う" aria-pressed="false">Web検索</button>
-            <button class="icon-button" id="clear-chat" type="button" title="チャットをクリア">クリア</button>
+            <button class="icon-button search-button" id="web-search-toggle" type="button" title="Web検索を使う" data-i18n-title="top.webSearchTitle" aria-pressed="false" data-i18n="top.webSearch">Web検索</button>
+            <button class="icon-button" id="clear-chat" type="button" title="チャットをクリア" data-i18n-title="top.clearTitle" data-i18n="top.clear">クリア</button>
           </div>
         </header>
 
         <section class="settings-panel" id="settings-panel" hidden>
           <div class="settings-header">
             <div>
-              <strong>設定</strong>
-              <span>応答の速さ、精度、文脈量を調整します。</span>
+              <strong data-i18n="common.settings">設定</strong>
+              <span data-i18n="settings.description">応答の速さ、精度、文脈量を調整します。</span>
             </div>
-            <button class="ghost-button" id="settings-close" type="button">閉じる</button>
+            <button class="ghost-button" id="settings-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
           <div class="settings-meta" id="settings-meta">バージョン確認中</div>
+          <section class="model-installer" id="model-installer" aria-label="モデルをダウンロード" data-i18n-aria-label="settings.modelDownload"></section>
           <label class="setting-field setting-wide">
-            <span>システム指示</span>
-            <textarea id="system-prompt" rows="3">あなたは簡潔で有用なアシスタントです。前置きなしで直接答えてください。詳しい説明を求められない限り、1〜3個の短い箇条書きで回答してください。</textarea>
-            <small>全ての返信に共通して効く基本ルールです。長くすると応答が少し重くなります。</small>
+            <span data-i18n="settings.systemPrompt">システム指示</span>
+            <textarea id="system-prompt" rows="3">あなたは簡潔で有用なアシスタントです。前置きなしで自然に短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。</textarea>
+            <small data-i18n="settings.systemPromptHelp">全ての返信に共通して効く基本ルールです。長くすると応答が少し重くなります。</small>
           </label>
           <div class="settings-grid">
             <label class="setting-field">
-              <span>テーマ</span>
+              <span data-i18n="settings.language">表示言語</span>
+              <select id="language-select">
+                <option value="ja">日本語</option>
+                <option value="en">English</option>
+              </select>
+              <small data-i18n="settings.languageHelp">UIの表示言語を切り替えます。会話内容や保存済みの名前は変更しません。</small>
+            </label>
+            <label class="setting-field">
+              <span data-i18n="settings.theme">テーマ</span>
               <select id="theme-select">
-                <option value="dark">ダーク</option>
-                <option value="light">ライト</option>
-                <option value="green">グリーン</option>
+                <option value="dark" data-i18n="theme.dark">ダーク</option>
+                <option value="light" data-i18n="theme.light">ライト</option>
+                <option value="green" data-i18n="theme.green">グリーン</option>
               </select>
-              <small>画面の配色を切り替えます。</small>
+              <small data-i18n="settings.themeHelp">画面の配色を切り替えます。</small>
             </label>
             <label class="setting-field">
-              <span>応答モード</span>
+              <span data-i18n="settings.responseMode">応答モード</span>
               <select id="response-mode">
-                <option value="auto">自動</option>
-                <option value="fast">高速</option>
-                <option value="balanced">標準</option>
-                <option value="quality">精度優先</option>
+                <option value="auto" data-i18n="mode.auto">自動</option>
+                <option value="fast" data-i18n="mode.fast">高速</option>
+                <option value="balanced" data-i18n="mode.balanced">標準</option>
+                <option value="quality" data-i18n="mode.quality">精度優先</option>
               </select>
-              <small>高速は短文向け、精度優先は設計や調査向けです。自動では内容で切り替えます。</small>
+              <small data-i18n="settings.responseModeHelp">高速は短文向け、精度優先は設計や調査向けです。自動では内容で切り替えます。</small>
             </label>
             <label class="setting-field">
-              <span>思考量</span>
+              <span data-i18n="settings.thinking">思考量</span>
               <select id="thinking-mode">
-                <option value="auto">自動</option>
-                <option value="low">軽め</option>
-                <option value="medium">標準</option>
-                <option value="high">深く</option>
+                <option value="auto" data-i18n="mode.auto">自動</option>
+                <option value="low" data-i18n="thinking.low">軽め</option>
+                <option value="medium" data-i18n="mode.balanced">標準</option>
+                <option value="high" data-i18n="thinking.high">深く</option>
               </select>
-              <small>コード作成や修正では深めにすると破綻しにくくなりますが、時間は増えます。</small>
+              <small data-i18n="settings.thinkingHelp">コード作成や修正では深めにすると破綻しにくくなりますが、時間は増えます。</small>
             </label>
             <label class="setting-field">
-              <span>通常チャットモデル</span>
+              <span data-i18n="settings.chatModel">通常チャットモデル</span>
               <select id="chat-model"></select>
-              <small>迷ったらサーバー既定かGemma 4。速さ優先ならQwen/Phiを選びます。</small>
+              <small data-i18n="settings.chatModelHelp">迷ったらサーバー既定かGemma 4。速さ優先ならQwenを選びます。</small>
             </label>
             <label class="setting-field">
-              <span>コード生成モデル</span>
+              <span data-i18n="settings.codingModel">コード生成モデル</span>
               <select id="coding-model"></select>
-              <small>フォルダー作業用です。複雑なコードはGemma 4 Coder推奨。要ダウンロード表示なら先に取得が必要です。</small>
+              <small data-i18n="settings.codingModelHelp">フォルダー作業用です。複雑なコードはGemma 4 Coder推奨。要ダウンロード表示なら先に取得が必要です。</small>
             </label>
             <label class="setting-field">
-              <span>翻訳モデル</span>
+              <span data-i18n="settings.translationModel">翻訳モデル</span>
               <select id="translation-model"></select>
-              <small>通常はサーバー自動で十分です。速さはQwen、高品質はGemma 4です。</small>
+              <small data-i18n="settings.translationModelHelp">通常はサーバー自動で十分です。速さはQwen、高品質はGemma 4です。</small>
             </label>
             <label class="setting-field">
-              <span>温度</span>
+              <span data-i18n="settings.temperature">温度</span>
               <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.7" />
-              <small>低いほど安定、高いほど表現に幅が出ます。</small>
+              <small data-i18n="settings.temperatureHelp">低いほど安定、高いほど表現に幅が出ます。</small>
             </label>
             <label class="setting-field">
               <span>Top P</span>
               <input id="top-p" type="number" min="0" max="1" step="0.05" value="0.9" />
-              <small>候補語の広がりを確率で絞ります。通常は0.8〜0.95で十分です。</small>
+              <small data-i18n="settings.topPHelp">候補語の広がりを確率で絞ります。通常は0.8〜0.95で十分です。</small>
             </label>
             <label class="setting-field">
               <span>Top K</span>
               <input id="top-k" type="number" min="1" max="200" step="1" value="40" />
-              <small>候補語の数を制限します。小さいほど安定しやすくなります。</small>
+              <small data-i18n="settings.topKHelp">候補語の数を制限します。小さいほど安定しやすくなります。</small>
             </label>
             <label class="setting-field">
-              <span>最大トークン</span>
+              <span data-i18n="settings.maxTokens">最大トークン</span>
               <input id="num-predict" type="number" min="16" max="8192" step="16" value="96" />
-              <small>1回の返信で生成できる長さです。コード生成では自動で増やします。</small>
+              <small data-i18n="settings.maxTokensHelp">1回の返信で生成できる長さです。コード生成では自動で増やします。</small>
             </label>
             <label class="setting-field">
-              <span>コンテキスト</span>
+              <span data-i18n="settings.context">コンテキスト</span>
               <input id="num-ctx" type="number" min="512" max="32768" step="512" value="2048" />
-              <small>モデルが一度に見られる文脈量です。大きいほど重くなります。</small>
+              <small data-i18n="settings.contextHelp">モデルが一度に見られる文脈量です。大きいほど重くなります。</small>
             </label>
             <label class="setting-field">
-              <span>記憶ターン</span>
+              <span data-i18n="settings.historyTurns">記憶ターン</span>
               <input id="history-turns" type="number" min="1" max="20" step="1" value="4" />
-              <small>過去の会話を何往復ぶん送るかです。増やすと文脈は保てますが遅くなります。</small>
+              <small data-i18n="settings.historyTurnsHelp">過去の会話を何往復ぶん送るかです。増やすと文脈は保てますが遅くなります。</small>
             </label>
             <label class="setting-field setting-toggle">
-              <span>Enterで送信</span>
+              <span data-i18n="settings.enterToSend">Enterで送信</span>
               <input id="enter-to-send" type="checkbox" />
-              <small>OFFではEnterは改行です。送信は↑ボタン、またはCmd/Ctrl + Enterを使います。日本語変換中は送信しません。</small>
+              <small data-i18n="settings.enterToSendHelp">OFFではEnterは改行です。送信は↑ボタン、またはCmd/Ctrl + Enterを使います。日本語変換中は送信しません。</small>
             </label>
           </div>
         </section>
@@ -160,33 +169,33 @@
         <aside class="workspace-panel" id="workspace-panel" hidden>
           <div class="panel-title">
             <div>
-              <strong>フォルダー編集</strong>
+              <strong data-i18n="workspace.editFolder">フォルダー編集</strong>
               <span id="workspace-folder-name">選択中フォルダー</span>
             </div>
-            <button class="ghost-button" id="workspace-close" type="button">閉じる</button>
+            <button class="ghost-button" id="workspace-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
           <label class="folder-name-editor">
-            <span>フォルダー名</span>
-            <input id="workspace-folder-title" type="text" placeholder="フォルダー名" />
+            <span data-i18n="workspace.folderName">フォルダー名</span>
+            <input id="workspace-folder-title" type="text" placeholder="フォルダー名" data-i18n-placeholder="workspace.folderName" />
           </label>
           <div class="workspace-picker">
             <label>
-              <span>参照するローカルフォルダー</span>
-              <input id="workspace-root" type="text" placeholder="フォルダーを選択してください" readonly />
+              <span data-i18n="workspace.localFolder">参照するローカルフォルダー</span>
+              <input id="workspace-root" type="text" placeholder="フォルダーを選択してください" data-i18n-placeholder="workspace.pickFolderPlaceholder" readonly />
             </label>
-            <button class="ghost-button" id="workspace-pick" type="button">フォルダーを選択</button>
-            <button class="ghost-button" id="workspace-load" type="button">再読込</button>
+            <button class="ghost-button" id="workspace-pick" type="button" data-i18n="workspace.pickFolder">フォルダーを選択</button>
+            <button class="ghost-button" id="workspace-load" type="button" data-i18n="workspace.reload">再読込</button>
           </div>
           <div class="workspace-status" id="workspace-status">フォルダー未選択</div>
           <div class="workspace-body">
             <div class="workspace-files" id="workspace-files"></div>
             <div class="workspace-write">
               <label>
-                <span>保存先ファイル</span>
+                <span data-i18n="workspace.savePath">保存先ファイル</span>
                 <input id="write-path" type="text" placeholder="src/example.py" />
               </label>
-              <textarea id="write-content" rows="7" placeholder="生成されたコードを貼り付けてから保存してください。"></textarea>
-              <button class="ghost-button" id="write-file" type="button">ファイルを保存</button>
+              <textarea id="write-content" rows="7" placeholder="生成されたコードを貼り付けてから保存してください。" data-i18n-placeholder="workspace.writePlaceholder"></textarea>
+              <button class="ghost-button" id="write-file" type="button" data-i18n="workspace.saveFile">ファイルを保存</button>
             </div>
           </div>
         </aside>
@@ -202,16 +211,19 @@
           <div class="image-strip" id="image-strip" hidden></div>
           <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
           <div class="composer-box">
-            <button class="attach-button" id="attach-image" type="button" title="画像を添付" aria-label="画像を添付">+</button>
-            <select class="composer-mode-select" id="composer-response-mode" title="応答モード" aria-label="応答モード">
-              <option value="auto">自動</option>
-              <option value="fast">高速</option>
-              <option value="balanced">標準</option>
-              <option value="quality">精度</option>
+            <button class="attach-button" id="attach-image" type="button" title="画像を添付" aria-label="画像を添付" data-i18n-title="composer.attachImage" data-i18n-aria-label="composer.attachImage">+</button>
+            <textarea id="prompt" rows="1" placeholder="Gemma 4 12B に送信。例: 赤いリンゴの画像を生成して" data-i18n-placeholder="composer.placeholder"></textarea>
+            <select class="composer-mode-select" id="composer-response-mode" title="応答モード" aria-label="応答モード" data-i18n-title="settings.responseMode" data-i18n-aria-label="settings.responseMode">
+              <option value="auto" data-i18n="mode.auto">自動</option>
+              <option value="fast" data-i18n="mode.fast">高速</option>
+              <option value="balanced" data-i18n="mode.balanced">標準</option>
+              <option value="quality" data-i18n="mode.qualityShort">精度</option>
             </select>
-            <textarea id="prompt" rows="1" placeholder="Gemma 4 12B に送信。例: 赤いリンゴの画像を生成して"></textarea>
-            <button class="send-button" id="send" type="submit" title="送信" aria-label="送信">↑</button>
-            <button class="stop-button" id="stop" type="button" title="停止" aria-label="停止" hidden>■</button>
+            <select class="composer-model-select" id="composer-model" title="使用モデル" aria-label="使用モデル" data-i18n-title="composer.model" data-i18n-aria-label="composer.model">
+              <option value="" data-i18n="model.auto">モデル自動</option>
+            </select>
+            <button class="send-button" id="send" type="submit" title="送信" aria-label="送信" data-i18n-title="common.send" data-i18n-aria-label="common.send">↑</button>
+            <button class="stop-button" id="stop" type="button" title="停止" aria-label="停止" data-i18n-title="common.stop" data-i18n-aria-label="common.stop" hidden>■</button>
           </div>
         </form>
       </main>
@@ -219,8 +231,8 @@
 
     <div class="undo-toast" id="undo-toast" hidden>
       <span id="undo-text"></span>
-      <button id="undo-delete" type="button">元に戻す</button>
-      <button class="undo-close" id="undo-close" type="button" title="閉じる" aria-label="閉じる">×</button>
+      <button id="undo-delete" type="button" data-i18n="common.undo">元に戻す</button>
+      <button class="undo-close" id="undo-close" type="button" title="閉じる" aria-label="閉じる" data-i18n-title="common.close" data-i18n-aria-label="common.close">×</button>
     </div>
 
     <script src="/app.js"></script>
