@@ -1,0 +1,303 @@
+import sys
+from pathlib import Path
+import base64
+import tempfile
+import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import server
+
+
+def test_asr_status_payload_shape() -> None:
+    payload = server.asr_status_payload()
+    assert payload["ok"] is True
+    assert "available" in payload
+    assert payload["status"] in {
+        "ready",
+        "not_configured",
+        "needs_dependencies",
+        "needs_compatible_nemo",
+        "needs_model_download",
+    }
+    assert payload["recommendedModel"] == server.DEFAULT_ASR_MODEL
+    assert payload["language"]
+    assert "runnerConfigured" in payload
+    assert isinstance(payload["requirements"], list)
+    assert {item["id"] for item in payload["requirements"]} >= {
+        "python",
+        "ffmpeg",
+        "torch",
+        "cython",
+        "packaging",
+        "nemo",
+        "nemotron_compat",
+        "asr_model_cache",
+    }
+    assert isinstance(payload["requirementsOk"], bool)
+    assert isinstance(payload["dependenciesOk"], bool)
+    assert isinstance(payload["modelCache"], dict)
+    assert isinstance(payload["runnableModels"], list)
+    assert server.DEFAULT_ASR_MODEL in payload["runnableModels"]
+    assert payload["setupDoc"].endswith("asr-nemotron-setup.ja.md")
+    assert isinstance(payload["candidates"], list)
+    assert {candidate["model"] for candidate in payload["candidates"]} >= {
+        "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        "whisper.cpp:tiny",
+        "whisper.cpp:large-v3-turbo",
+        "vosk",
+        "sherpa-onnx",
+    }
+    assert all(candidate.get("source") for candidate in payload["candidates"])
+    assert any(candidate.get("implemented") for candidate in payload["candidates"])
+    assert payload["nextStep"]
+
+
+def test_asr_model_normalization() -> None:
+    assert server.normalize_asr_model(server.DEFAULT_ASR_MODEL) == server.DEFAULT_ASR_MODEL
+    expected_whisper = server.WHISPER_CPP_FAST_MODEL if server.whisper_cpp_available() else (server.ASR_MODEL or server.DEFAULT_ASR_MODEL)
+    assert server.normalize_asr_model("whisper.cpp") == expected_whisper
+    assert server.normalize_asr_model(server.WHISPER_CPP_FAST_MODEL) == expected_whisper
+
+
+def test_whisper_cpp_status_shape() -> None:
+    status = server.whisper_cpp_status()
+    assert isinstance(status["available"], bool)
+    assert "binary" in status
+    assert "modelPath" in status
+    assert "modelSizeText" in status
+
+
+def test_asr_status_detects_nemotron_incompatible_nemo() -> None:
+    previous_runner = server.ASR_RUNNER
+    previous_status = server.asr_python_environment_status
+    try:
+        server.ASR_RUNNER = "python3 scripts/asr_nemotron_runner.py"
+        server.asr_python_environment_status = lambda: {
+            "version": "3.11.9",
+            "executable": "python3",
+            "modules": {
+                "torch": True,
+                "Cython": True,
+                "packaging": True,
+                "nemo.collections.asr": True,
+                "nemo.collections.asr.models.rnnt_bpe_models_prompt": False,
+            },
+        }
+        payload = server.asr_status_payload()
+        assert payload["available"] is False
+        assert payload["status"] == "needs_compatible_nemo"
+        assert "NeMo main" in payload["message"]
+        assert any(item["id"] == "nemotron_compat" and not item["ok"] for item in payload["requirements"])
+    finally:
+        server.ASR_RUNNER = previous_runner
+        server.asr_python_environment_status = previous_status
+
+
+def test_asr_runner_missing_is_clear() -> None:
+    previous_runner = server.ASR_RUNNER
+    try:
+        server.ASR_RUNNER = ""
+        try:
+            server.run_asr_transcription(base64.b64encode(b"fake audio").decode("ascii"), "audio/webm", server.DEFAULT_ASR_MODEL)
+        except RuntimeError as exc:
+            assert "GEMMA_ASR_RUNNER" in str(exc)
+        else:
+            raise AssertionError("missing ASR runner should fail clearly")
+    finally:
+        server.ASR_RUNNER = previous_runner
+
+
+def test_asr_suffix_for_mime() -> None:
+    assert server.asr_suffix_for_mime("audio/wav") == ".wav"
+    assert server.asr_suffix_for_mime("audio/mp4") == ".m4a"
+    assert server.asr_suffix_for_mime("audio/ogg; codecs=opus") == ".ogg"
+    assert server.asr_suffix_for_mime("audio/webm") == ".webm"
+
+
+def test_asr_setup_status_shape() -> None:
+    status = server.asr_setup_status()
+    assert status["ok"] is True
+    assert isinstance(status["job"], dict)
+
+
+def test_workspace_document_type_search_expands_terms() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "agreement.txt").write_text("業務委託の条件を記載します。\n", encoding="utf-8")
+        (root / "memo.txt").write_text("ただのメモです。\n", encoding="utf-8")
+        result = server.search_workspace_files(str(root), "契約書")
+        assert result["terms"][0] == "契約書"
+        assert "agreement" in [term.lower() for term in result["terms"]]
+        assert result["results"]
+        assert result["results"][0]["path"] == "agreement.txt"
+
+
+def write_minimal_docx(path: Path, paragraphs: list[str]) -> None:
+    paragraph_xml = "".join(
+        f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"
+        for text in paragraphs
+    )
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{paragraph_xml}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("word/document.xml", document_xml)
+
+
+def test_workspace_search_reads_docx_text() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_minimal_docx(root / "notes.docx", ["初回打ち合わせ", "秘密保持契約の確認をします。"])
+        result = server.search_workspace_files(str(root), "契約書")
+        assert result["results"]
+        assert result["results"][0]["path"] == "notes.docx"
+        assert "秘密保持契約" in result["results"][0]["preview"]
+
+
+def test_workspace_search_matches_binary_filename() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "契約書.pdf").write_bytes(b"%PDF-1.4\n%binary")
+        result = server.search_workspace_files(str(root), "契約書")
+        assert result["results"]
+        assert result["results"][0]["path"] == "契約書.pdf"
+        assert "ファイル名" in result["results"][0]["preview"]
+        assert result["results"][0]["matchType"] == "filename"
+        assert result["results"][0]["sourceKind"] == "pdf"
+        assert "pdfUnreadable" in result
+
+
+def test_pdf_text_falls_back_to_mdls() -> None:
+    class FakeRunResult:
+        returncode = 0
+        stdout = "秘密保持契約のPDF本文です。"
+
+    previous_which = server.shutil.which
+    previous_run = server.subprocess.run
+    try:
+        server.shutil.which = lambda name: "/usr/bin/mdls" if name == "mdls" else ""
+        server.subprocess.run = lambda *args, **kwargs: FakeRunResult()
+        assert server.extract_pdf_text_with_mdls(Path("dummy.pdf")) == "秘密保持契約のPDF本文です。"
+        capabilities = server.workspace_search_capabilities()
+        assert capabilities["pdf"] is True
+        assert capabilities["pdfBackend"] == "Spotlight"
+    finally:
+        server.shutil.which = previous_which
+        server.subprocess.run = previous_run
+
+
+def test_workspace_search_reads_pdf_text_with_mdls() -> None:
+    class FakeRunResult:
+        returncode = 0
+        stdout = "秘密保持契約のPDF本文です。"
+
+    previous_which = server.shutil.which
+    previous_run = server.subprocess.run
+    try:
+        server.shutil.which = lambda name: "/usr/bin/mdls" if name == "mdls" else ""
+        server.subprocess.run = lambda *args, **kwargs: FakeRunResult()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "document.pdf").write_bytes(b"%PDF-1.4\n%test")
+            result = server.search_workspace_files(str(root), "秘密保持契約")
+            assert result["results"]
+            assert result["results"][0]["path"] == "document.pdf"
+            assert "秘密保持契約" in result["results"][0]["preview"]
+            assert result["results"][0]["matchType"] == "body"
+            assert result["results"][0]["sourceKind"] == "pdf"
+            assert result["pdfUnreadable"] == 0
+    finally:
+        server.shutil.which = previous_which
+        server.subprocess.run = previous_run
+
+
+def test_workspace_context_instructs_source_citation() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "gundam.txt").write_text("ガンダムのメモです。\n", encoding="utf-8")
+        context = server.build_workspace_context({
+            "root": str(root),
+            "files": [],
+            "searchQuery": "gundam",
+        })
+        assert "根拠: path:line" in context
+        assert "gundam.txt:1" in context
+        assert "検索結果にない内容は推測せず" in context
+
+
+def test_workspace_context_uses_codegraph_summary_when_ready() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        previous_cache_dir = server.CODEGRAPH_APP_CACHE_DIR
+        try:
+            server.CODEGRAPH_APP_CACHE_DIR = root / ".test-codegraph-cache"
+            cache_path = server.codegraph_cache_path(root.resolve())
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                server.json.dumps({
+                    "stats": {"files": 1, "skipped": 0},
+                    "files": [{
+                        "path": "app.js",
+                        "language": "JavaScript",
+                        "symbols": ["startApp"],
+                        "imports": ["./ui.js"],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            context = server.build_workspace_context({
+                "root": str(root),
+                "files": [],
+                "codegraph": True,
+            })
+            assert "CODE UNDERSTANDING SUMMARY" in context
+            assert "Treat file paths and symbols here as local workspace evidence" in context
+            assert "app.js" in context
+            assert "startApp" in context
+        finally:
+            server.CODEGRAPH_APP_CACHE_DIR = previous_cache_dir
+
+
+def test_workspace_search_capabilities_shape() -> None:
+    capabilities = server.workspace_search_capabilities()
+    assert capabilities["text"] is True
+    assert capabilities["docx"] is True
+    assert "pdf" in capabilities
+    assert "pdfBackend" in capabilities
+    assert capabilities["filenameFallback"] is True
+    assert capabilities["imageOcr"] is False
+
+
+def test_external_llm_url_allows_only_localhost() -> None:
+    assert server.normalize_local_llm_base_url("") == server.OLLAMA_URL
+    assert server.normalize_local_llm_base_url("http://127.0.0.1:8080/") == "http://127.0.0.1:8080"
+    assert server.normalize_local_llm_base_url("http://localhost:8080") == "http://localhost:8080"
+    try:
+        server.normalize_local_llm_base_url("https://example.com")
+    except ValueError as exc:
+        assert "localhost" in str(exc) or "127.0.0.1" in str(exc)
+    else:
+        raise AssertionError("non-local LLM URL should be rejected")
+
+
+if __name__ == "__main__":
+    test_asr_status_payload_shape()
+    test_asr_model_normalization()
+    test_whisper_cpp_status_shape()
+    test_asr_status_detects_nemotron_incompatible_nemo()
+    test_asr_runner_missing_is_clear()
+    test_asr_suffix_for_mime()
+    test_asr_setup_status_shape()
+    test_workspace_document_type_search_expands_terms()
+    test_workspace_search_reads_docx_text()
+    test_workspace_search_matches_binary_filename()
+    test_pdf_text_falls_back_to_mdls()
+    test_workspace_search_reads_pdf_text_with_mdls()
+    test_workspace_context_instructs_source_citation()
+    test_workspace_context_uses_codegraph_summary_when_ready()
+    test_workspace_search_capabilities_shape()
+    test_external_llm_url_allows_only_localhost()
+    print("server helper tests passed")

@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import argparse
-from html import unescape
-from html.parser import HTMLParser
+import base64
+import binascii
+import importlib.util
 import json
 import mimetypes
 import os
+import queue
 import re
+import shutil
+import shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import random
@@ -22,11 +26,16 @@ import urllib.parse
 import urllib.request
 import uuid
 import webbrowser
+import zipfile
+import zlib
+import xml.etree.ElementTree as ET
+
+from search_tools import build_search_context, search_web
 
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.6.0")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.185")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -40,6 +49,66 @@ CODING_MODEL_CANDIDATES = [
 ]
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
+ASR_MODEL = os.environ.get("GEMMA_ASR_MODEL", "").strip()
+ASR_RUNNER = os.environ.get("GEMMA_ASR_RUNNER", "").strip()
+ASR_WORKER = os.environ.get("GEMMA_ASR_WORKER", "").strip()
+ASR_LANGUAGE = os.environ.get("GEMMA_ASR_LANGUAGE", "ja-JP").strip()
+ASR_TIMEOUT = int(os.environ.get("GEMMA_ASR_TIMEOUT", "180"))
+DEFAULT_ASR_MODEL = "nvidia/nemotron-3.5-asr-streaming-0.6b"
+WHISPER_CPP_MODEL = "whisper.cpp"
+WHISPER_CPP_FAST_MODEL = "whisper.cpp:tiny"
+WHISPER_CPP_ACCURATE_MODEL = "whisper.cpp:large-v3-turbo"
+WHISPER_CPP_BINARY = os.environ.get("GEMMA_WHISPER_CPP_BINARY", "").strip()
+WHISPER_CPP_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_MODEL", "").strip()
+WHISPER_CPP_FAST_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_FAST_MODEL", "").strip()
+WHISPER_CPP_ACCURATE_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_ACCURATE_MODEL", "").strip()
+ASR_MODEL_CANDIDATES = [
+    {
+        "model": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        "label": "NVIDIA Nemotron 3.5 ASR Streaming 0.6B",
+        "purpose": "高品質・多言語・ストリーミング",
+        "note": "600Mモデル。精度重視向け。NeMo/PyTorch導入が必要で学生PCでは重い可能性があります。",
+        "weight": "heavy",
+        "source": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
+        "implemented": True,
+    },
+    {
+        "model": "whisper.cpp:tiny",
+        "label": "Whisper 高速",
+        "purpose": "短い音声を速く文字起こし",
+        "note": "tinyモデル。速いですが、聞き間違いが出ることがあります。",
+        "weight": "light",
+        "source": "https://github.com/ggml-org/whisper.cpp",
+        "implemented": False,
+    },
+    {
+        "model": "whisper.cpp:large-v3-turbo",
+        "label": "Whisper 高精度",
+        "purpose": "正確さ重視の文字起こし",
+        "note": "large-v3-turboモデル。高速より遅いですが、日本語の精度が上がります。",
+        "weight": "medium",
+        "source": "https://github.com/ggml-org/whisper.cpp",
+        "implemented": False,
+    },
+    {
+        "model": "vosk",
+        "label": "Vosk",
+        "purpose": "軽量・オフライン・導入しやすい候補",
+        "note": "小型モデルは約50MBから。日本語を含む多言語に対応し、pip導入もしやすい候補です。",
+        "weight": "light",
+        "source": "https://alphacephei.com/vosk/",
+        "implemented": False,
+    },
+    {
+        "model": "sherpa-onnx",
+        "label": "sherpa-onnx",
+        "purpose": "拡張性重視のオフラインASR候補",
+        "note": "ONNX Runtimeベース。Mac/Windows/組み込み環境やWebSocketサーバーまで拡張しやすい候補です。",
+        "weight": "medium",
+        "source": "https://github.com/k2-fsa/sherpa-onnx",
+        "implemented": False,
+    },
+]
 DEFAULT_SYSTEM_PROMPT = (
     "あなたは簡潔で有用なアシスタントです。前置きなしで自然に短く答えてください。"
     "箇条書きは、比較・手順・整理が必要な場合だけ使ってください。"
@@ -56,18 +125,30 @@ PULLABLE_MODELS = [
 PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"]}
 MODEL_PULL_JOBS: dict[str, dict[str, object]] = {}
 MODEL_PULL_LOCK = threading.Lock()
+ASR_SETUP_JOB: dict[str, object] = {}
+ASR_SETUP_LOCK = threading.Lock()
+OCR_SETUP_JOB: dict[str, object] = {}
+OCR_SETUP_LOCK = threading.Lock()
+ASR_WORKER_PROCESS: subprocess.Popen | None = None
+ASR_WORKER_OUTPUTS: queue.Queue[str] = queue.Queue()
+ASR_WORKER_LOCK = threading.Lock()
 IMAGE_PROMPT_SYSTEM = (
     "Convert the user's image request into one concise English Stable Diffusion prompt. "
     "Preserve the exact subject. If the subject is simple, make it explicit and recognizable. "
     "Return only the prompt, with no quotes, no labels, and no explanation."
 )
-SEARCH_URL = "https://html.duckduckgo.com/html/"
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 DEFAULT_WEATHER_LOCATION = os.environ.get("GEMMA_WEATHER_LOCATION", "東京")
 MAX_TREE_FILES = 700
 MAX_FILE_BYTES = 120_000
 MAX_CONTEXT_CHARS = 80_000
+MAX_SEARCH_FILES = 2_000
+MAX_SEARCH_FILE_BYTES = 300_000
+MAX_DOCUMENT_CONTEXT_BYTES = 8_000_000
+MAX_ATTACHMENT_BYTES = 12_000_000
+MAX_SEARCH_RESULTS = 80
+MAX_OCR_PDF_PAGES = 3
 MAX_IMAGES_PER_MESSAGE = 4
 MAX_IMAGE_BASE64_CHARS = 12_000_000
 COMFYUI_DEFAULT_PREFIX = "Gemma4UI"
@@ -90,7 +171,41 @@ IGNORED_DIRS = {
     "vendor",
     ".venv",
     "venv",
+    ".codegraph",
 }
+CODEGRAPH_DIR_NAME = ".codegraph"
+CODEGRAPH_SUMMARY_FILE = "summary.json"
+CODEGRAPH_APP_CACHE_DIR = ROOT / ".gemma4-data" / "codegraph"
+CODEGRAPH_MAX_FILES = 350
+CODEGRAPH_MAX_FILE_BYTES = 220_000
+CODEGRAPH_MAX_SYMBOLS_PER_FILE = 24
+CODEGRAPH_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".go",
+    ".html",
+    ".java",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".php",
+    ".py",
+    ".rb",
+    ".rs",
+    ".svelte",
+    ".swift",
+    ".ts",
+    ".tsx",
+    ".vue",
+}
+
+
+def codegraph_cache_path(root_path: Path) -> Path:
+    cache_id = uuid.uuid5(uuid.NAMESPACE_URL, str(root_path)).hex
+    return CODEGRAPH_APP_CACHE_DIR / f"{cache_id}.json"
 TEXT_EXTENSIONS = {
     ".bat",
     ".c",
@@ -132,6 +247,8 @@ TEXT_EXTENSIONS = {
     ".yaml",
     ".yml",
 }
+SEARCHABLE_DOCUMENT_EXTENSIONS = {".docx", ".pdf"}
+OCR_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 WEATHER_CODES = {
     0: "快晴",
     1: "晴れ",
@@ -209,8 +326,668 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
     return json.loads(raw.decode("utf-8"))
 
 
-def ollama_json(path: str, payload: dict | None = None, timeout: int = 120) -> dict:
-    url = f"{OLLAMA_URL}{path}"
+def python_module_available(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
+def asr_runner_python_command() -> list[str]:
+    if ASR_RUNNER:
+        try:
+            parts = shlex.split(ASR_RUNNER)
+        except ValueError:
+            parts = []
+        if parts:
+            executable = parts[0]
+            if executable in {"python", "python3"}:
+                resolved = shutil.which(executable) or executable
+                return [resolved]
+            path = Path(executable)
+            if not path.is_absolute():
+                path = ROOT / path
+            return [str(path)]
+    return [sys.executable]
+
+
+def asr_python_environment_status() -> dict[str, object]:
+    command = asr_runner_python_command()
+    script = (
+        "import importlib.util, json, sys;"
+        "mods=["
+        "'torch',"
+        "'Cython',"
+        "'packaging',"
+        "'nemo.collections.asr',"
+        "'nemo.collections.asr.models.rnnt_bpe_models_prompt'"
+        "];"
+        "print(json.dumps({"
+        "'version': sys.version.split()[0],"
+        "'executable': sys.executable,"
+        "'modules': {m: importlib.util.find_spec(m) is not None for m in mods}"
+        "}))"
+    )
+    try:
+        result = subprocess.run(
+            [*command, "-c", script],
+            cwd=str(ROOT),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            payload = json.loads(result.stdout.strip() or "{}")
+            if isinstance(payload, dict):
+                return payload
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        pass
+    return {
+        "version": sys.version.split()[0],
+        "executable": command[0] if command else sys.executable,
+        "modules": {
+            "torch": python_module_available("torch"),
+            "Cython": python_module_available("Cython"),
+            "packaging": python_module_available("packaging"),
+            "nemo.collections.asr": python_module_available("nemo.collections.asr"),
+            "nemo.collections.asr.models.rnnt_bpe_models_prompt": python_module_available(
+                "nemo.collections.asr.models.rnnt_bpe_models_prompt"
+            ),
+        },
+    }
+
+
+def format_bytes(size: int) -> str:
+    units = ["B", "KB", "MB", "GB"]
+    value = float(max(size, 0))
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
+    return f"{size} B"
+
+
+def asr_model_cache_status(model: str) -> dict[str, object]:
+    model_name = (model or DEFAULT_ASR_MODEL).strip() or DEFAULT_ASR_MODEL
+    cache_home = Path(os.environ.get("HF_HOME") or (Path.home() / ".cache" / "huggingface"))
+    hub_root = cache_home / "hub"
+    model_dir = hub_root / f"models--{model_name.replace('/', '--')}"
+    files = []
+    if model_dir.exists():
+        files = [path for path in model_dir.rglob("*") if path.is_file() and path.suffix.lower() in {".nemo", ".safetensors", ".bin"}]
+    size = sum(path.stat().st_size for path in files if path.exists())
+    downloaded = bool(files)
+    return {
+        "model": model_name,
+        "downloaded": downloaded,
+        "cacheDir": str(model_dir),
+        "files": len(files),
+        "sizeBytes": size,
+        "sizeText": format_bytes(size) if downloaded else "",
+        "detail": f"DL済み / {format_bytes(size)} / {model_dir}" if downloaded else f"未取得 / {model_dir}",
+    }
+
+
+def whisper_cpp_binary_path() -> str:
+    candidates = [
+        WHISPER_CPP_BINARY,
+        shutil.which("whisper-cli") or "",
+        shutil.which("whisper-cpp") or "",
+        shutil.which("whisper") or "",
+        "/opt/homebrew/bin/whisper-cli",
+        "/usr/local/bin/whisper-cli",
+        "/opt/homebrew/opt/whisper-cpp/bin/whisper-cli",
+        "/usr/local/opt/whisper-cpp/bin/whisper-cli",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).expanduser().exists():
+            return str(Path(candidate).expanduser())
+    return ""
+
+
+def normalize_whisper_cpp_model(model: str) -> str:
+    requested = (model or "").strip()
+    if requested in {"", WHISPER_CPP_MODEL, WHISPER_CPP_FAST_MODEL}:
+        return WHISPER_CPP_FAST_MODEL
+    if requested == WHISPER_CPP_ACCURATE_MODEL:
+        return WHISPER_CPP_ACCURATE_MODEL
+    return WHISPER_CPP_FAST_MODEL
+
+
+def whisper_cpp_display_name(model: str) -> str:
+    normalized = normalize_whisper_cpp_model(model)
+    if normalized == WHISPER_CPP_ACCURATE_MODEL:
+        return "Whisper 高精度"
+    return "Whisper 高速"
+
+
+def is_whisper_cpp_model(model: str) -> bool:
+    return (model or "").strip() in {WHISPER_CPP_MODEL, WHISPER_CPP_FAST_MODEL, WHISPER_CPP_ACCURATE_MODEL}
+
+
+def whisper_cpp_model_path(model: str = WHISPER_CPP_FAST_MODEL) -> str:
+    normalized = normalize_whisper_cpp_model(model)
+    if normalized == WHISPER_CPP_ACCURATE_MODEL:
+        candidates = [
+            WHISPER_CPP_ACCURATE_MODEL_PATH,
+            str(ROOT / "models" / "whisper" / "ggml-large-v3-turbo.bin"),
+            str(ROOT / "models" / "whisper" / "ggml-large-v3-turbo-q5_0.bin"),
+            str(Path.home() / "Library" / "Application Support" / "Minimo" / "models" / "ggml-large-v3-turbo.bin"),
+            str(Path.home() / "Library" / "Application Support" / "com.prakashjoshipax.VoiceInk" / "WhisperModels" / "ggml-large-v3-turbo-q5_0.bin"),
+            str(Path.home() / "Library" / "Application Support" / "com.prakashjoshipax.VoiceInk" / "WhisperModels" / "ggml-large-v3.bin"),
+        ]
+    else:
+        candidates = [
+            WHISPER_CPP_MODEL_PATH,
+            WHISPER_CPP_FAST_MODEL_PATH,
+            str(ROOT / "models" / "whisper" / "ggml-tiny.bin"),
+            str(ROOT / "models" / "whisper" / "ggml-base.bin"),
+            str(Path.home() / "Library" / "Application Support" / "com.prakashjoshipax.VoiceInk" / "WhisperModels" / "ggml-tiny.bin"),
+        ]
+    for candidate in candidates:
+        if candidate and Path(candidate).expanduser().exists():
+            return str(Path(candidate).expanduser())
+    return ""
+
+
+def whisper_cpp_status(model: str = WHISPER_CPP_FAST_MODEL) -> dict[str, object]:
+    normalized = normalize_whisper_cpp_model(model)
+    binary = whisper_cpp_binary_path()
+    model_path = whisper_cpp_model_path(normalized)
+    return {
+        "available": bool(binary and model_path),
+        "binary": binary,
+        "model": normalized,
+        "modelPath": model_path,
+        "modelSizeText": format_bytes(Path(model_path).stat().st_size) if model_path else "",
+    }
+
+
+def whisper_cpp_available(model: str = WHISPER_CPP_FAST_MODEL) -> bool:
+    return bool(whisper_cpp_status(model).get("available"))
+
+
+def asr_candidates_payload() -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for candidate in ASR_MODEL_CANDIDATES:
+        item = dict(candidate)
+        if is_whisper_cpp_model(str(item.get("model") or "")):
+            ready = whisper_cpp_available(str(item.get("model") or ""))
+            item["implemented"] = ready
+            item["status"] = "ready" if ready else "needs_install"
+        candidates.append(item)
+    return candidates
+
+
+def runnable_asr_models() -> set[str]:
+    return {
+        str(candidate.get("model"))
+        for candidate in asr_candidates_payload()
+        if candidate.get("implemented") and candidate.get("model")
+    }
+
+
+def normalize_asr_model(model: str) -> str:
+    requested = (model or "").strip()
+    if is_whisper_cpp_model(requested):
+        normalized_whisper = normalize_whisper_cpp_model(requested)
+        return normalized_whisper if normalized_whisper in runnable_asr_models() else (ASR_MODEL or DEFAULT_ASR_MODEL)
+    return requested if requested in runnable_asr_models() else (ASR_MODEL or DEFAULT_ASR_MODEL)
+
+
+def whisper_cpp_dependency_status(model: str = WHISPER_CPP_FAST_MODEL) -> list[dict[str, object]]:
+    binary = whisper_cpp_binary_path()
+    model_path = whisper_cpp_model_path(model)
+    ffmpeg_path = shutil.which("ffmpeg")
+    return [
+        {
+            "id": "ffmpeg",
+            "label": "ffmpeg",
+            "ok": bool(ffmpeg_path),
+            "detail": ffmpeg_path or "",
+            "hint": "ブラウザ録音をWAVへ変換するために必要です。",
+        },
+        {
+            "id": "whisper_cpp",
+            "label": "whisper.cpp",
+            "ok": bool(binary),
+            "detail": binary,
+            "hint": "whisper.cpp の実行ファイルが必要です。Macでは brew install whisper-cpp で導入できます。",
+        },
+        {
+            "id": "whisper_model",
+            "label": "Whisperモデル",
+            "ok": bool(model_path),
+            "detail": (
+                f"{format_bytes(Path(model_path).stat().st_size)} / {model_path}"
+                if model_path
+                else ""
+            ),
+            "hint": "ggml-tiny.bin などのWhisperモデルが必要です。",
+        },
+    ]
+
+
+def asr_dependency_status(model: str | None = None) -> list[dict[str, object]]:
+    if is_whisper_cpp_model(str(model or "")):
+        return whisper_cpp_dependency_status(str(model or ""))
+
+    python_env = asr_python_environment_status()
+    modules = python_env.get("modules") if isinstance(python_env.get("modules"), dict) else {}
+    version_text = str(python_env.get("version") or "")
+    python_ok = tuple(int(part) for part in version_text.split(".")[:2] if part.isdigit()) >= (3, 11)
+    ffmpeg_path = shutil.which("ffmpeg")
+    model_cache = asr_model_cache_status(normalize_asr_model(ASR_MODEL or DEFAULT_ASR_MODEL))
+    requirements = [
+        {
+            "id": "python",
+            "label": "Python 3.11+",
+            "ok": python_ok,
+            "detail": f"{version_text} / {python_env.get('executable', '')}".strip(" /"),
+            "hint": "Python 3.11以上で起動してください。",
+        },
+        {
+            "id": "ffmpeg",
+            "label": "ffmpeg",
+            "ok": bool(ffmpeg_path),
+            "detail": ffmpeg_path or "",
+            "hint": "ブラウザ録音をWAVへ変換するために必要です。",
+        },
+        {
+            "id": "torch",
+            "label": "PyTorch",
+            "ok": bool(modules.get("torch")),
+            "detail": "",
+            "hint": "Nemotron/NeMoを実行するために必要です。",
+        },
+        {
+            "id": "cython",
+            "label": "Cython",
+            "ok": bool(modules.get("Cython")),
+            "detail": "",
+            "hint": "NeMoの導入に必要になることがあります。",
+        },
+        {
+            "id": "packaging",
+            "label": "packaging",
+            "ok": bool(modules.get("packaging")),
+            "detail": "",
+            "hint": "NeMo/PyTorch周辺の依存解決に必要です。",
+        },
+        {
+            "id": "nemo",
+            "label": "NVIDIA NeMo ASR",
+            "ok": bool(modules.get("nemo.collections.asr")),
+            "detail": "",
+            "hint": "nemo_toolkit[asr] を導入するとNemotronを実行できます。",
+        },
+        {
+            "id": "nemotron_compat",
+            "label": "Nemotron対応NeMo",
+            "ok": bool(modules.get("nemo.collections.asr.models.rnnt_bpe_models_prompt")),
+            "detail": "rnnt_bpe_models_prompt",
+            "hint": "Nemotron 3.5 ASRにはNeMo main/26.06相当が必要です。通常のnemo_toolkit[asr]だけでは不足する場合があります。",
+        },
+        {
+            "id": "asr_model_cache",
+            "label": "音声モデル本体",
+            "ok": bool(model_cache.get("downloaded")),
+            "detail": str(model_cache.get("detail") or ""),
+            "hint": "未取得の場合は初回文字起こし時に大きなモデルを取得します。通信量と時間がかかります。",
+        },
+    ]
+    return requirements
+
+
+def asr_status_payload() -> dict:
+    model = normalize_asr_model(ASR_MODEL or DEFAULT_ASR_MODEL)
+    configured = True if is_whisper_cpp_model(model) else bool(ASR_RUNNER or ASR_WORKER)
+    requirements = asr_dependency_status(model)
+    model_cache_ok = any(item.get("id") == "asr_model_cache" and item.get("ok") for item in requirements)
+    dependency_requirements_ok = all(
+        item.get("ok") for item in requirements if item.get("id") != "asr_model_cache"
+    )
+    requirements_ok = all(item.get("ok") for item in requirements)
+    nemotron_compat_ok = any(item.get("id") == "nemotron_compat" and item.get("ok") for item in requirements)
+    base_requirements_ok = all(
+        item.get("ok") for item in requirements if item.get("id") not in {"nemotron_compat", "asr_model_cache"}
+    )
+    needs_compatible_nemo = configured and base_requirements_ok and not nemotron_compat_ok
+    needs_model_download = configured and dependency_requirements_ok and not model_cache_ok
+    status = (
+        "ready"
+        if configured and requirements_ok
+        else "needs_compatible_nemo"
+        if needs_compatible_nemo
+        else "needs_model_download"
+        if needs_model_download
+        else "needs_dependencies"
+        if configured
+        else "not_configured"
+    )
+    return {
+        "ok": True,
+        "available": configured and requirements_ok,
+        "status": status,
+        "model": model,
+        "recommendedModel": model,
+        "runnerConfigured": configured,
+        "runner": ASR_RUNNER,
+        "workerConfigured": bool(ASR_WORKER),
+        "worker": ASR_WORKER,
+        "language": ASR_LANGUAGE,
+        "modelCache": whisper_cpp_status(model) if is_whisper_cpp_model(model) else asr_model_cache_status(model),
+        "runnableModels": sorted(runnable_asr_models()),
+        "requirements": requirements,
+        "requirementsOk": requirements_ok,
+        "dependenciesOk": dependency_requirements_ok,
+        "setupDoc": "docs/asr-nemotron-setup.ja.md",
+        "candidates": asr_candidates_payload(),
+        "message": (
+            f"{whisper_cpp_display_name(model)} は使用できます。モデル: {whisper_cpp_status(model).get('modelSizeText') or '検出済み'}"
+            if is_whisper_cpp_model(model) and requirements_ok
+            else "whisper.cpp を使うには実行ファイルとWhisperモデルが必要です。"
+            if is_whisper_cpp_model(model)
+            else
+            f"音声入力ランナーは設定済みです。{model} で文字起こしを試します。"
+            if configured and requirements_ok and not ASR_WORKER
+            else f"音声入力の常駐ワーカーは設定済みです。{model} は初回後の文字起こしが速くなります。"
+            if configured and requirements_ok
+            else "Nemotron 3.5 ASRに必要なNeMoクラスが見つかりません。NeMo main/26.06相当の導入が必要です。"
+            if needs_compatible_nemo
+            else f"{model} のモデル本体がまだ見つかりません。初回の文字起こし時にダウンロードが必要です。"
+            if needs_model_download
+            else "Nemotronランナーは設定済みですが、必要な依存がまだ不足しています。"
+            if configured
+            else "音声入力はまだ準備中です。Nemotronランナーを設定すると文字起こしを試せます。"
+        ),
+        "nextStep": (
+            "音声認識モデルをWhisperに切り替えて、短い録音で速度を確認します。"
+            if is_whisper_cpp_model(model) and requirements_ok
+            else "whisper.cpp の導入後、音声認識モデルで whisper.cpp を選びます。"
+            if is_whisper_cpp_model(model)
+            else
+            "音声ボタンで録音し、文字起こし結果が入力欄に入るか確認します。"
+            if configured and requirements_ok
+            else "設定画面のASRセットアップを更新し、NeMo main/26.06相当で再導入します。重い場合は whisper.cpp など軽量候補を使います。"
+            if needs_compatible_nemo
+            else "モデル本体を取得してから、マイクボタンで録音を試します。"
+            if needs_model_download
+            else "設定画面の不足項目を確認し、NeMo/PyTorch/ffmpeg を導入します。"
+            if configured
+            else "GEMMA_ASR_RUNNER に scripts/asr_nemotron_runner.py を指定し、NeMo/PyTorch/ffmpeg を導入します。"
+        ),
+    }
+
+
+def asr_suffix_for_mime(mime_type: str) -> str:
+    clean = (mime_type or "").split(";")[0].strip().lower()
+    if clean in {"audio/wav", "audio/wave", "audio/x-wav"}:
+        return ".wav"
+    if clean in {"audio/mp4", "audio/m4a", "audio/x-m4a"}:
+        return ".m4a"
+    if clean == "audio/ogg":
+        return ".ogg"
+    return ".webm"
+
+
+def ensure_wav_audio(audio_path: Path, mime_type: str) -> tuple[Path, Path | None]:
+    clean = (mime_type or "").split(";")[0].strip().lower()
+    if clean in {"audio/wav", "audio/wave", "audio/x-wav"} or audio_path.suffix.lower() == ".wav":
+        return audio_path, None
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("音声変換に必要なffmpegが見つかりません。")
+    temp_dir = Path(tempfile.mkdtemp(prefix="gemma4-asr-wav-"))
+    wav_path = temp_dir / "input.wav"
+    result = subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(audio_path),
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            str(wav_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise RuntimeError(result.stderr.strip() or "ffmpegで音声をWAVへ変換できませんでした。")
+    return wav_path, temp_dir
+
+
+def clean_whisper_cpp_output(text: str) -> str:
+    lines = []
+    for line in (text or "").splitlines():
+        clean = re.sub(r"^\s*\[[^\]]+\]\s*", "", line).strip()
+        if not clean:
+            continue
+        if clean.lower().startswith(("whisper_", "system_info:", "main:", "ggml_")):
+            continue
+        lines.append(clean)
+    return " ".join(" ".join(lines).split()).strip()
+
+
+def run_whisper_cpp_transcription(audio_path: Path, mime_type: str, model: str = WHISPER_CPP_FAST_MODEL) -> dict:
+    normalized_model = normalize_whisper_cpp_model(model)
+    status = whisper_cpp_status(normalized_model)
+    binary = str(status.get("binary") or "")
+    model_path = str(status.get("modelPath") or "")
+    if not binary:
+        raise RuntimeError("whisper.cpp の実行ファイルが見つかりません。Macでは brew install whisper-cpp で導入できます。")
+    if not model_path:
+        raise RuntimeError("Whisperモデルが見つかりません。ggml-tiny.bin などのモデルを配置してください。")
+    wav_path, temp_dir = ensure_wav_audio(audio_path, mime_type)
+    try:
+        language = "ja" if ASR_LANGUAGE.lower().startswith("ja") else ASR_LANGUAGE.split("-")[0]
+        command = [
+            binary,
+            "-m",
+            model_path,
+            "-f",
+            str(wav_path),
+            "-l",
+            language or "auto",
+            "-nt",
+            "-np",
+            "--no-gpu",
+        ]
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=ASR_TIMEOUT,
+            check=False,
+        )
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        text = clean_whisper_cpp_output(stdout) or clean_whisper_cpp_output(stderr)
+        if result.returncode != 0:
+            raise RuntimeError(stderr.strip() or stdout.strip() or "whisper.cpp が文字起こしに失敗しました。")
+        if not text:
+            raise RuntimeError("whisper.cpp の文字起こし結果が空でした。")
+        return {
+            "ok": True,
+            "text": text,
+            "model": normalized_model,
+            "language": ASR_LANGUAGE,
+            "engine": WHISPER_CPP_MODEL,
+            "binary": binary,
+            "modelPath": model_path,
+        }
+    finally:
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def start_asr_worker_process() -> subprocess.Popen:
+    global ASR_WORKER_PROCESS
+    if not ASR_WORKER:
+        raise RuntimeError("ASR常駐ワーカーが未設定です。")
+    if ASR_WORKER_PROCESS and ASR_WORKER_PROCESS.poll() is None:
+        return ASR_WORKER_PROCESS
+
+    command = shlex.split(ASR_WORKER)
+    if not command:
+        raise RuntimeError("ASR常駐ワーカーの起動コマンドが空です。")
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    ASR_WORKER_PROCESS = process
+
+    def read_worker_stdout() -> None:
+        if not process.stdout:
+            return
+        for line in process.stdout:
+            line = line.strip()
+            if line:
+                ASR_WORKER_OUTPUTS.put(line)
+
+    threading.Thread(target=read_worker_stdout, daemon=True).start()
+    return process
+
+
+def run_asr_worker_transcription(audio_path: Path, mime_type: str, model: str) -> dict:
+    with ASR_WORKER_LOCK:
+        while not ASR_WORKER_OUTPUTS.empty():
+            try:
+                ASR_WORKER_OUTPUTS.get_nowait()
+            except queue.Empty:
+                break
+        process = start_asr_worker_process()
+        if not process.stdin:
+            raise RuntimeError("ASR常駐ワーカーへ入力できません。")
+        request = {
+            "audio": str(audio_path),
+            "mimeType": mime_type or "audio/webm",
+            "model": model,
+            "language": ASR_LANGUAGE,
+        }
+        process.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+        process.stdin.flush()
+
+        deadline = time.time() + ASR_TIMEOUT
+        last_line = ""
+        while time.time() < deadline:
+            try:
+                line = ASR_WORKER_OUTPUTS.get(timeout=min(1, max(0.1, deadline - time.time())))
+            except queue.Empty:
+                if process.poll() is not None:
+                    raise RuntimeError("ASR常駐ワーカーが終了しました。")
+                continue
+            last_line = line
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not payload.get("ok"):
+                raise RuntimeError(str(payload.get("error") or "ASR常駐ワーカーが文字起こしできませんでした。"))
+            return payload
+        raise TimeoutError(f"ASR常駐ワーカーが{ASR_TIMEOUT}秒以内に応答しませんでした: {last_line[:160]}")
+
+
+def run_asr_transcription(audio_base64: str, mime_type: str, model: str) -> dict:
+    if not is_whisper_cpp_model(model) and not ASR_RUNNER and not ASR_WORKER:
+        raise RuntimeError(
+            "Nemotronで音声を受け取りましたが、ASRランナーが未設定です。"
+            "GEMMA_ASR_RUNNER に scripts/asr_nemotron_runner.py を指定してください。"
+        )
+    if not audio_base64.strip():
+        raise ValueError("音声データが空です。もう一度録音してください。")
+    try:
+        audio_bytes = base64.b64decode(audio_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("音声データを読み取れませんでした。") from exc
+
+    suffix = asr_suffix_for_mime(mime_type)
+    with tempfile.NamedTemporaryFile("wb", suffix=suffix, delete=False) as handle:
+        handle.write(audio_bytes)
+        audio_path = Path(handle.name)
+    try:
+        if is_whisper_cpp_model(model):
+            payload = run_whisper_cpp_transcription(audio_path, mime_type, model)
+        elif ASR_WORKER:
+            payload = run_asr_worker_transcription(audio_path, mime_type, model)
+        else:
+            command = shlex.split(ASR_RUNNER) + [
+                "--audio",
+                str(audio_path),
+                "--model",
+                model,
+                "--mime-type",
+                mime_type or "audio/webm",
+                "--language",
+                ASR_LANGUAGE,
+            ]
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=ASR_TIMEOUT,
+                check=False,
+            )
+            stdout = (result.stdout or "").strip()
+            stderr = (result.stderr or "").strip()
+            if result.returncode != 0:
+                if stdout:
+                    try:
+                        error_payload = json.loads(stdout)
+                        raise RuntimeError(str(error_payload.get("error") or stdout))
+                    except json.JSONDecodeError:
+                        pass
+                raise RuntimeError(stderr or stdout or "ASRランナーが失敗しました。")
+            try:
+                payload = json.loads(stdout)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"ASRランナーの出力を読み取れませんでした: {stdout[:300]}") from exc
+            if not payload.get("ok"):
+                raise RuntimeError(str(payload.get("error") or "ASRランナーが文字起こしできませんでした。"))
+        return {
+            "ok": True,
+            "text": str(payload.get("text") or "").strip(),
+            "model": model,
+            "language": payload.get("language") or ASR_LANGUAGE,
+            "mimeType": mime_type or "audio/webm",
+            "audioBytesApprox": len(audio_bytes),
+        }
+    finally:
+        try:
+            audio_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def normalize_local_llm_base_url(raw_url: str) -> str:
+    value = str(raw_url or "").strip().rstrip("/")
+    if not value:
+        return OLLAMA_URL
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("URLは http://127.0.0.1:ポート または http://localhost:ポート の形式にしてください。")
+    host = (parsed.hostname or "").lower()
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("安全のため、外部LLMサーバーはこのPC上の localhost / 127.0.0.1 のみ指定できます。")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def ollama_json(path: str, payload: dict | None = None, timeout: int = 120, base_url: str | None = None) -> dict:
+    url = f"{base_url or OLLAMA_URL}{path}"
     data = None
     headers = {"Accept": "application/json"}
     if payload is not None:
@@ -221,8 +998,8 @@ def ollama_json(path: str, payload: dict | None = None, timeout: int = 120) -> d
         return json.loads(response.read().decode("utf-8"))
 
 
-def ollama_stream(path: str, payload: dict, timeout: int = 600):
-    url = f"{OLLAMA_URL}{path}"
+def ollama_stream(path: str, payload: dict, timeout: int = 600, base_url: str | None = None):
+    url = f"{base_url or OLLAMA_URL}{path}"
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -299,13 +1076,38 @@ def translation_target_from_text(text: str) -> str:
         return "English"
     if re.search(r"和訳|日本語に|日本語へ|to\s+japanese|into\s+japanese", text, flags=re.IGNORECASE):
         return "Japanese"
-    return ""
+    source = strip_translation_instruction(text)
+    japanese_chars = len(re.findall(r"[\u3040-\u30ff\u3400-\u9fff]", source))
+    latin_chars = len(re.findall(r"[A-Za-z]", source))
+    if latin_chars > 0 and japanese_chars == 0:
+        return "Japanese"
+    if japanese_chars > 0 and latin_chars == 0:
+        return "English"
+    if latin_chars > japanese_chars * 2:
+        return "Japanese"
+    if japanese_chars > 0:
+        return "English"
+    return "Japanese"
 
 
 def strip_translation_instruction(text: str) -> str:
     cleaned = text.strip()
+    lines = cleaned.splitlines()
+    instruction_re = re.compile(
+        r"^\s*(?:"
+        r"日本語\s*に\s*(?:やく|訳|翻訳)?\s*して(?:ください|下さい)?|"
+        r"英語\s*に\s*(?:やく|訳|翻訳)?\s*して(?:ください|下さい)?|"
+        r"英訳|和訳|翻訳|訳|"
+        r"(?:please\s+)?translate(?:\s+(?:this|it|the\s+following|to\s+\w+|into\s+\w+))*"
+        r")\s*[。.!！?？]*\s*(?:[:：\-]\s*)?$",
+        flags=re.IGNORECASE,
+    )
+    while lines and (not lines[0].strip() or instruction_re.match(lines[0])):
+        lines.pop(0)
+    if lines:
+        cleaned = "\n".join(lines).strip()
     cleaned = re.sub(
-        r"^\s*(?:英訳|和訳|翻訳|訳)(?:して|してください|して下さい|お願いします|してほしい)?"
+        r"^\s*(?:日本語\s*に\s*(?:やく|訳|翻訳)?\s*して|英語\s*に\s*(?:やく|訳|翻訳)?\s*して|英訳|和訳|翻訳|訳)(?:して|してください|して下さい|お願いします|してほしい)?"
         r"\s*[。.!！?？]*\s*(?:[:：\-]\s*)?",
         "",
         cleaned,
@@ -371,87 +1173,6 @@ def comfyui_free_memory() -> bool:
         return False
 
 
-class DuckDuckGoParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.results: list[dict[str, str]] = []
-        self._current: dict[str, str] | None = None
-        self._capture: str | None = None
-        self._parts: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attrs_dict = {key: value or "" for key, value in attrs}
-        class_name = attrs_dict.get("class", "")
-        if tag == "a" and "result__a" in class_name:
-            self._current = {"title": "", "url": self._clean_url(attrs_dict.get("href", "")), "snippet": ""}
-            self._capture = "title"
-            self._parts = []
-        elif self._current is not None and "result__snippet" in class_name:
-            self._capture = "snippet"
-            self._parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._capture:
-            self._parts.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if self._capture == "title" and tag == "a" and self._current is not None:
-            self._current["title"] = self._clean_text(" ".join(self._parts))
-            if self._current["title"] and self._current["url"]:
-                self.results.append(self._current)
-            self._capture = None
-            self._parts = []
-        elif self._capture == "snippet" and tag in {"a", "div"} and self._current is not None:
-            self._current["snippet"] = self._clean_text(" ".join(self._parts))
-            self._capture = None
-            self._parts = []
-
-    @staticmethod
-    def _clean_text(value: str) -> str:
-        return " ".join(unescape(value).split())
-
-    @staticmethod
-    def _clean_url(value: str) -> str:
-        value = unescape(value)
-        parsed = urllib.parse.urlparse(value)
-        query = urllib.parse.parse_qs(parsed.query)
-        if "uddg" in query:
-            return query["uddg"][0]
-        return value
-
-
-def search_web(query: str, max_results: int = 4) -> list[dict[str, str]]:
-    query = query.strip()
-    if not query:
-        return []
-    max_results = max(1, min(max_results, 8))
-    data = urllib.parse.urlencode({"q": query}).encode("utf-8")
-    request = urllib.request.Request(
-        SEARCH_URL,
-        data=data,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "Mozilla/5.0 Gemma4LocalWebUI/1.0",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        html = response.read().decode("utf-8", errors="replace")
-    parser = DuckDuckGoParser()
-    parser.feed(html)
-    deduped: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for result in parser.results:
-        url = result.get("url", "")
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        deduped.append(result)
-        if len(deduped) >= max_results:
-            break
-    return deduped
-
-
 def weather_description(code: object) -> str:
     try:
         return WEATHER_CODES.get(int(code), f"不明な天気コード {code}")
@@ -511,10 +1232,34 @@ def geocode_location(location: str) -> dict:
     }
 
 
-def fetch_weather(location: str, day_offset: int = 0) -> dict:
+def weather_place_from_coordinates(coordinates: object) -> dict | None:
+    if not isinstance(coordinates, dict):
+        return None
+    try:
+        latitude = float(coordinates.get("latitude"))
+        longitude = float(coordinates.get("longitude"))
+        accuracy_value = coordinates.get("accuracy")
+        accuracy = float(accuracy_value) if accuracy_value is not None else None
+    except Exception:
+        return None
+    if latitude < -90 or latitude > 90 or longitude < -180 or longitude > 180:
+        return None
+    return {
+        "name": "現在地",
+        "admin1": "",
+        "country": "",
+        "latitude": latitude,
+        "longitude": longitude,
+        "timezone": "auto",
+        "locationSource": "browser",
+        "accuracy": accuracy if accuracy and accuracy > 0 else None,
+    }
+
+
+def fetch_weather(location: str, day_offset: int = 0, coordinates: object = None) -> dict:
     day_offset = max(0, min(day_offset, 6))
     forecast_days = 7 if day_offset >= 2 else day_offset + 1
-    place = geocode_location(location)
+    place = weather_place_from_coordinates(coordinates) or geocode_location(location)
     query = urllib.parse.urlencode(
         {
             "latitude": place["latitude"],
@@ -567,6 +1312,12 @@ def fetch_weather(location: str, day_offset: int = 0) -> dict:
         "timezone": forecast.get("timezone") or place["timezone"],
         "dayOffset": day_offset,
         "period": "week" if day_offset >= 2 else "day",
+        "locationSource": place.get("locationSource") or "geocoding",
+        "coordinates": {
+            "latitude": place["latitude"],
+            "longitude": place["longitude"],
+            "accuracy": place.get("accuracy"),
+        },
         "current": {
             "time": current.get("time"),
             "weather": weather_description(current.get("weather_code")),
@@ -594,6 +1345,19 @@ def build_weather_answer(weather: dict) -> str:
     current = weather["current"]
     target = weather["target"]
     unit = current.get("temperatureUnit") or "°C"
+    source_note = ""
+    if weather.get("locationSource") == "browser":
+        coordinates = weather.get("coordinates") or {}
+        latitude = coordinates.get("latitude")
+        longitude = coordinates.get("longitude")
+        accuracy = coordinates.get("accuracy")
+        coordinate_note = ""
+        if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+            coordinate_note = f"（緯度 {latitude:.4f} / 経度 {longitude:.4f}"
+            if isinstance(accuracy, (int, float)):
+                coordinate_note += f" / 精度 約{round(accuracy)}m"
+            coordinate_note += "）"
+        source_note = f"位置情報: ブラウザの現在地{coordinate_note}"
     if weather.get("period") == "week":
         lines = [
             f"{weather['location']}の今週の予報です。",
@@ -619,28 +1383,15 @@ def build_weather_answer(weather: dict) -> str:
             f"風速は{current['windSpeed']} km/h、降水量は{current['precipitation']} mmです。",
             f"更新時刻: {current['time']}（{weather['timezone']}） / 出典: {weather['source']}",
         ]
+    if source_note:
+        lines.append(source_note)
     return "\n".join(lines)
-
-
-def build_search_context(results: list[dict[str, str]]) -> str:
-    if not results:
-        return "Web search was requested, but no search results were found."
-    lines = [
-        "Web search results follow. Use them as current context. Cite source numbers when relying on them.",
-    ]
-    for index, result in enumerate(results, start=1):
-        lines.append(
-            f"[{index}] {result.get('title', '').strip()}\n"
-            f"URL: {result.get('url', '').strip()}\n"
-            f"Snippet: {result.get('snippet', '').strip()}"
-        )
-    return "\n\n".join(lines)
 
 
 def resolve_workspace_root(root: str) -> Path:
     path = Path(root).expanduser().resolve()
     if not path.exists() or not path.is_dir():
-        raise ValueError("workspace root must be an existing directory")
+        raise ValueError("フォルダーが見つかりません。フォルダー編集で参照先を選び直してください。")
     return path
 
 
@@ -693,6 +1444,7 @@ def is_probably_text(path: Path) -> bool:
 
 def workspace_tree(root: str) -> dict:
     root_path = resolve_workspace_root(root)
+    search_capabilities = workspace_search_capabilities()
     files: list[dict[str, object]] = []
     skipped = 0
     for current, dirs, filenames in os.walk(root_path):
@@ -710,11 +1462,26 @@ def workspace_tree(root: str) -> dict:
             if not stat.S_ISREG(info.st_mode):
                 continue
             rel = path.relative_to(root_path).as_posix()
+            suffix = path.suffix.lower()
+            is_document = suffix in SEARCHABLE_DOCUMENT_EXTENSIONS
+            is_ocr_image = suffix in OCR_IMAGE_EXTENSIONS
+            is_text_file = info.st_size <= MAX_FILE_BYTES and is_probably_text(path)
+            can_read_document = is_document and info.st_size <= MAX_DOCUMENT_CONTEXT_BYTES and (
+                suffix == ".docx" or bool(search_capabilities.get("pdf"))
+            )
+            can_read_ocr_image = is_ocr_image and info.st_size <= MAX_DOCUMENT_CONTEXT_BYTES and bool(
+                search_capabilities.get("imageOcr")
+            )
             files.append(
                 {
                     "path": rel,
                     "size": info.st_size,
-                    "text": info.st_size <= MAX_FILE_BYTES and is_probably_text(path),
+                    "text": is_text_file or can_read_document or can_read_ocr_image,
+                    "kind": (
+                        suffix.lstrip(".")
+                        if is_document
+                        else ("image" if is_ocr_image else ("text" if is_text_file else "binary"))
+                    ),
                 }
             )
             if len(files) >= MAX_TREE_FILES:
@@ -723,11 +1490,720 @@ def workspace_tree(root: str) -> dict:
     return {"root": str(root_path), "files": files, "truncated": False, "skipped": skipped}
 
 
+DOCUMENT_SEARCH_TERMS = {
+    "契約書": ["契約書", "契約", "合意書", "覚書", "NDA", "秘密保持", "業務委託", "agreement", "contract"],
+    "contract": ["contract", "agreement", "nda", "契約書", "契約", "秘密保持", "業務委託"],
+    "agreement": ["agreement", "contract", "nda", "契約書", "契約", "合意書", "覚書"],
+    "請求書": ["請求書", "請求", "invoice", "billing", "支払", "振込"],
+    "invoice": ["invoice", "billing", "請求書", "請求", "支払"],
+    "仕様書": ["仕様書", "仕様", "要件", "設計書", "specification", "spec", "requirements"],
+    "spec": ["spec", "specification", "requirements", "仕様書", "仕様", "要件"],
+    "specification": ["specification", "spec", "requirements", "仕様書", "仕様", "要件"],
+    "見積書": ["見積書", "見積", "estimate", "quotation", "quote"],
+    "estimate": ["estimate", "quotation", "quote", "見積書", "見積"],
+    "quotation": ["quotation", "estimate", "quote", "見積書", "見積"],
+    "領収書": ["領収書", "領収", "receipt", "支払", "入金"],
+    "receipt": ["receipt", "領収書", "領収", "支払", "入金"],
+    "議事録": ["議事録", "会議メモ", "会議", "minutes", "meeting notes"],
+    "minutes": ["minutes", "meeting notes", "議事録", "会議メモ", "会議"],
+}
+
+
+def search_query_terms(query: str) -> list[str]:
+    base = str(query or "").strip()
+    if not base:
+        return []
+    terms: list[str] = []
+    seen: set[str] = set()
+    for term in [base, *DOCUMENT_SEARCH_TERMS.get(base.lower(), []), *DOCUMENT_SEARCH_TERMS.get(base, [])]:
+        normalized = str(term or "").strip()
+        key = normalized.lower()
+        if normalized and key not in seen:
+            seen.add(key)
+            terms.append(normalized)
+    return terms[:14]
+
+
+def extract_docx_text(path: Path) -> str:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            xml_bytes = archive.read("word/document.xml")
+    except (OSError, KeyError, zipfile.BadZipFile):
+        return ""
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError:
+        return ""
+    paragraphs: list[str] = []
+    for paragraph in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
+        parts = [
+            text.text or ""
+            for text in paragraph.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+        ]
+        line = "".join(parts).strip()
+        if line:
+            paragraphs.append(line)
+    return "\n".join(paragraphs)
+
+
+def available_tesseract_languages(tesseract_binary: str) -> list[str]:
+    if not tesseract_binary:
+        return []
+    try:
+        result = subprocess.run(
+            [tesseract_binary, "--list-langs"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    languages: list[str] = []
+    for line in (result.stdout or "").splitlines():
+        value = line.strip()
+        if not value or value.lower().startswith("list of available languages"):
+            continue
+        languages.append(value)
+    return languages
+
+
+def preferred_ocr_language(languages: list[str]) -> str:
+    available = set(languages)
+    if {"jpn", "eng"}.issubset(available):
+        return "jpn+eng"
+    if "jpn" in available:
+        return "jpn"
+    if "eng" in available:
+        return "eng"
+    return languages[0] if languages else "eng"
+
+
+def ocr_capabilities() -> dict[str, object]:
+    tesseract_binary = shutil.which("tesseract") or ""
+    pdftoppm_binary = shutil.which("pdftoppm") or ""
+    languages = available_tesseract_languages(tesseract_binary)
+    language = preferred_ocr_language(languages)
+    image_available = bool(tesseract_binary)
+    pdf_available = bool(tesseract_binary and pdftoppm_binary)
+    missing: list[str] = []
+    if not tesseract_binary:
+        missing.append("Tesseract")
+    if not pdftoppm_binary:
+        missing.append("Poppler(pdftoppm)")
+    return {
+        "available": image_available or pdf_available,
+        "image": image_available,
+        "pdf": pdf_available,
+        "engine": "Tesseract" if tesseract_binary else "",
+        "tesseract": tesseract_binary,
+        "pdftoppm": pdftoppm_binary,
+        "language": language,
+        "languages": languages[:24],
+        "missing": missing,
+    }
+
+
+def extract_image_ocr_text(path: Path) -> str:
+    capabilities = ocr_capabilities()
+    tesseract_binary = str(capabilities.get("tesseract") or "")
+    if not tesseract_binary:
+        return ""
+    try:
+        result = subprocess.run(
+            [
+                tesseract_binary,
+                str(path),
+                "stdout",
+                "-l",
+                str(capabilities.get("language") or "eng"),
+                "--psm",
+                "6",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    text = (result.stdout or "").strip()
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
+
+def extract_pdf_ocr_text(path: Path) -> str:
+    capabilities = ocr_capabilities()
+    pdftoppm_binary = str(capabilities.get("pdftoppm") or "")
+    if not pdftoppm_binary or not capabilities.get("pdf"):
+        return ""
+    texts: list[str] = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="gemma4-pdf-ocr-") as tmp_dir:
+            output_prefix = Path(tmp_dir) / "page"
+            result = subprocess.run(
+                [
+                    pdftoppm_binary,
+                    "-f",
+                    "1",
+                    "-l",
+                    str(MAX_OCR_PDF_PAGES),
+                    "-r",
+                    "180",
+                    "-png",
+                    str(path),
+                    str(output_prefix),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=90,
+                check=False,
+            )
+            if result.returncode != 0:
+                return ""
+            for image_path in sorted(Path(tmp_dir).glob("page-*.png"))[:MAX_OCR_PDF_PAGES]:
+                text = extract_image_ocr_text(image_path)
+                if text:
+                    texts.append(text)
+    except Exception:
+        return ""
+    return "\n\n".join(texts).strip()
+
+
+def extract_pdf_text(path: Path) -> str:
+    try:
+        from pypdf import PdfReader  # type: ignore
+    except ImportError:
+        text = extract_pdf_text_with_pdftotext(path)
+        return (
+            usable_pdf_text(text)
+            or usable_pdf_text(extract_pdf_text_with_mdls(path))
+            or extract_pdf_text_from_streams(path)
+            or extract_pdf_ocr_text(path)
+        )
+    try:
+        reader = PdfReader(str(path))
+        text = "\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
+        return usable_pdf_text(text) or extract_pdf_text_from_streams(path) or extract_pdf_ocr_text(path)
+    except Exception:
+        text = extract_pdf_text_with_pdftotext(path)
+        return (
+            usable_pdf_text(text)
+            or usable_pdf_text(extract_pdf_text_with_mdls(path))
+            or extract_pdf_text_from_streams(path)
+            or extract_pdf_ocr_text(path)
+        )
+
+
+def extract_pdf_text_with_pdftotext(path: Path) -> str:
+    binary = shutil.which("pdftotext")
+    if not binary:
+        return ""
+    try:
+        result = subprocess.run(
+            [binary, "-layout", str(path), "-"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return (result.stdout or "").strip()
+
+
+def extract_pdf_text_with_mdls(path: Path) -> str:
+    binary = shutil.which("mdls")
+    if not binary:
+        return ""
+    try:
+        result = subprocess.run(
+            [binary, "-raw", "-name", "kMDItemTextContent", str(path)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    text = (result.stdout or "").strip()
+    if not text or text == "(null)":
+        return ""
+    return text
+
+
+def decode_pdf_string(value: bytes) -> str:
+    if not value:
+        return ""
+    value = re.sub(rb"\\([nrtbf()\\])", lambda match: {
+        b"n": b"\n",
+        b"r": b"\r",
+        b"t": b"\t",
+        b"b": b"\b",
+        b"f": b"\f",
+        b"(": b"(",
+        b")": b")",
+        b"\\": b"\\",
+    }.get(match.group(1), match.group(1)), value)
+    if value.startswith(b"\xfe\xff"):
+        try:
+            return value[2:].decode("utf-16-be", errors="ignore")
+        except Exception:
+            pass
+    for encoding in ("utf-8", "shift_jis", "latin-1"):
+        try:
+            return value.decode(encoding, errors="ignore")
+        except Exception:
+            continue
+    return ""
+
+
+def decode_pdf_hex_string(value: bytes) -> str:
+    cleaned = re.sub(rb"\s+", b"", value)
+    if len(cleaned) % 2:
+        cleaned += b"0"
+    try:
+        raw = bytes.fromhex(cleaned.decode("ascii"))
+    except Exception:
+        return ""
+    return decode_pdf_string(raw)
+
+
+def usable_pdf_text(text: str) -> str:
+    text = (text or "").strip()
+    return text if pdf_text_looks_readable(text) else ""
+
+
+def pdf_text_looks_readable(text: str) -> bool:
+    sample = re.sub(r"\s+", "", text or "")
+    if len(sample) < 20:
+        return False
+    cjk_count = len(re.findall(r"[ぁ-んァ-ヶ一-龠ー]", sample))
+    cjk_ratio = cjk_count / max(len(sample), 1)
+    symbols = len(re.findall(r"[#%+<>{}\\^_`|~]", sample))
+    letters = len(re.findall(r"[A-Za-z]", sample))
+    if symbols / max(len(sample), 1) > 0.08 and cjk_ratio < 0.08:
+        return False
+    if letters >= 40:
+        words = re.findall(r"[A-Za-z]{3,}", text)
+        long_words = [word for word in words if len(word) >= 6]
+        word_text = "".join(long_words or words)
+        vowel_count = len(re.findall(r"[AEIOUaeiou]", word_text))
+        if word_text and vowel_count / max(len(word_text), 1) < 0.18 and cjk_ratio < 0.2:
+            return False
+    if cjk_count >= 10 and cjk_ratio > 0.05:
+        return True
+    return True
+
+
+def extract_pdf_text_from_streams(path: Path) -> str:
+    try:
+        raw = path.read_bytes()
+    except Exception:
+        return ""
+    chunks: list[bytes] = []
+    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", raw, flags=re.S):
+        chunk = match.group(1)
+        try:
+            chunk = zlib.decompress(chunk)
+        except Exception:
+            pass
+        chunks.append(chunk)
+    chunks.append(raw)
+    texts: list[str] = []
+    for chunk in chunks:
+        for match in re.finditer(rb"\((?:\\.|[^\\)]){2,}\)", chunk, flags=re.S):
+            value = match.group(0)[1:-1]
+            text = decode_pdf_string(value).strip()
+            if text:
+                texts.append(text)
+        for match in re.finditer(rb"<([0-9A-Fa-f\s]{4,})>", chunk):
+            text = decode_pdf_hex_string(match.group(1)).strip()
+            if text:
+                texts.append(text)
+    text = "\n".join(texts)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if not pdf_text_looks_readable(text):
+        return ""
+    return text
+
+
+def workspace_search_capabilities() -> dict[str, object]:
+    pdf_backend = ""
+    if python_module_available("pypdf"):
+        pdf_backend = "pypdf"
+    elif shutil.which("pdftotext"):
+        pdf_backend = "pdftotext"
+    elif shutil.which("mdls"):
+        pdf_backend = "Spotlight"
+    ocr = ocr_capabilities()
+    pdf_available = bool(pdf_backend) or bool(ocr.get("pdf"))
+    if not pdf_backend and ocr.get("pdf"):
+        pdf_backend = "OCR"
+    return {
+        "text": True,
+        "docx": True,
+        "pdf": pdf_available,
+        "pdfBackend": pdf_backend,
+        "filenameFallback": True,
+        "imageOcr": bool(ocr.get("image")),
+        "pdfOcr": bool(ocr.get("pdf")),
+        "ocr": ocr,
+    }
+
+
+def searchable_workspace_lines(path: Path) -> list[str] | None:
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        return extract_docx_text(path).splitlines()
+    if suffix == ".pdf":
+        return extract_pdf_text(path).splitlines()
+    if suffix in OCR_IMAGE_EXTENSIONS:
+        text = extract_image_ocr_text(path)
+        return text.splitlines() if text else None
+    if not is_probably_text(path):
+        return None
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+
+
+def append_workspace_search_result(
+    results: list[dict[str, object]],
+    seen: set[tuple[str, int]],
+    rel: str,
+    line_index: int,
+    preview: str,
+    match_type: str = "body",
+    source_kind: str = "text",
+) -> bool:
+    key = (rel, line_index)
+    if key in seen:
+        return False
+    seen.add(key)
+    results.append({
+        "path": rel,
+        "line": line_index,
+        "preview": preview.strip()[:240],
+        "matchType": match_type,
+        "sourceKind": source_kind,
+    })
+    return True
+
+
+def workspace_search_response(
+    root_path: Path,
+    needle: str,
+    needles: list[str],
+    results: list[dict[str, object]],
+    scanned: int,
+    skipped: int,
+    truncated: bool,
+    pdf_unreadable: int,
+) -> dict:
+    return {
+        "root": str(root_path),
+        "query": needle,
+        "terms": needles,
+        "results": results,
+        "scanned": scanned,
+        "skipped": skipped,
+        "truncated": truncated,
+        "pdfUnreadable": pdf_unreadable,
+        "pdfBackend": workspace_search_capabilities().get("pdfBackend", ""),
+    }
+
+
+def search_workspace_files(root: str, query: str) -> dict:
+    root_path = resolve_workspace_root(root)
+    needle = str(query or "").strip()
+    if not needle:
+        raise ValueError("検索キーワードを入力してください。")
+    needles = search_query_terms(needle)
+    needle_lowers = [term.lower() for term in needles]
+    results: list[dict[str, object]] = []
+    scanned = 0
+    skipped = 0
+    pdf_unreadable = 0
+    truncated = False
+    seen: set[tuple[str, int]] = set()
+    for current, dirs, filenames in os.walk(root_path):
+        dirs[:] = sorted(name for name in dirs if name not in IGNORED_DIRS and not name.startswith(".DS_Store"))
+        for filename in sorted(filenames):
+            if filename == ".DS_Store":
+                continue
+            path = Path(current) / filename
+            try:
+                info = path.stat()
+            except OSError:
+                skipped += 1
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            rel = path.relative_to(root_path).as_posix()
+            suffix = path.suffix.lower()
+            filename_matches = any(term in rel.lower() for term in needle_lowers)
+            if filename_matches:
+                append_workspace_search_result(
+                    results,
+                    seen,
+                    rel,
+                    0,
+                    "ファイル名に検索語が含まれています。",
+                    "filename",
+                    suffix.lstrip(".") or "file",
+                )
+                if len(results) >= MAX_SEARCH_RESULTS:
+                    truncated = True
+                    return workspace_search_response(root_path, needle, needles, results, scanned, skipped, truncated, pdf_unreadable)
+            if info.st_size > MAX_SEARCH_FILE_BYTES:
+                skipped += 1
+                continue
+            lines = searchable_workspace_lines(path)
+            if lines is None:
+                skipped += 1
+                continue
+            if suffix == ".pdf" and not lines:
+                pdf_unreadable += 1
+            scanned += 1
+            for line_index, line in enumerate(lines, start=1):
+                haystack = f"{rel}\n{line}".lower()
+                if not any(term in haystack for term in needle_lowers):
+                    continue
+                append_workspace_search_result(
+                    results,
+                    seen,
+                    rel,
+                    line_index,
+                    line,
+                    "body",
+                    suffix.lstrip(".") or "text",
+                )
+                if len(results) >= MAX_SEARCH_RESULTS:
+                    truncated = True
+                    return workspace_search_response(root_path, needle, needles, results, scanned, skipped, truncated, pdf_unreadable)
+            if scanned >= MAX_SEARCH_FILES:
+                truncated = True
+                return workspace_search_response(root_path, needle, needles, results, scanned, skipped, truncated, pdf_unreadable)
+    return workspace_search_response(root_path, needle, needles, results, scanned, skipped, truncated, pdf_unreadable)
+
+
+def language_for_path(path: Path) -> str:
+    suffix = path.suffix.lower()
+    return {
+        ".css": "CSS",
+        ".html": "HTML",
+        ".js": "JavaScript",
+        ".jsx": "JavaScript JSX",
+        ".mjs": "JavaScript",
+        ".py": "Python",
+        ".ts": "TypeScript",
+        ".tsx": "TypeScript TSX",
+        ".vue": "Vue",
+        ".svelte": "Svelte",
+        ".rs": "Rust",
+        ".go": "Go",
+        ".swift": "Swift",
+        ".java": "Java",
+        ".cs": "C#",
+        ".php": "PHP",
+        ".rb": "Ruby",
+    }.get(suffix, suffix.lstrip(".").upper() or "Text")
+
+
+def extract_code_symbols(text: str, suffix: str) -> list[str]:
+    patterns = [
+        r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(",
+        r"^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)\b",
+        r"^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(",
+        r"^\s*def\s+([A-Za-z_][\w]*)\s*\(",
+        r"^\s*class\s+([A-Za-z_][\w]*)\s*[:\(]",
+        r"^\s*func\s+([A-Za-z_][\w]*)\s*\(",
+        r"^\s*fn\s+([A-Za-z_][\w]*)\s*\(",
+    ]
+    symbols: list[str] = []
+    for line in text.splitlines():
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if match:
+                name = match.group(1)
+                if name not in symbols:
+                    symbols.append(name)
+                break
+        if len(symbols) >= CODEGRAPH_MAX_SYMBOLS_PER_FILE:
+            break
+    return symbols
+
+
+def extract_code_imports(text: str) -> list[str]:
+    patterns = [
+        r"^\s*import\s+(?:.+?\s+from\s+)?[\"']([^\"']+)[\"']",
+        r"^\s*export\s+.+?\s+from\s+[\"']([^\"']+)[\"']",
+        r"require\(\s*[\"']([^\"']+)[\"']\s*\)",
+        r"^\s*from\s+([A-Za-z0-9_\.]+)\s+import\s+",
+        r"^\s*import\s+([A-Za-z0-9_\.]+)",
+        r"^\s*@import\s+[\"']([^\"']+)[\"']",
+    ]
+    imports: list[str] = []
+    for line in text.splitlines():
+        for pattern in patterns:
+            match = re.search(pattern, line)
+            if match:
+                value = match.group(1)
+                if value and value not in imports:
+                    imports.append(value)
+                break
+        if len(imports) >= 24:
+            break
+    return imports
+
+
+def build_codegraph_summary(root: str) -> dict:
+    root_path = resolve_workspace_root(root)
+    files: list[dict[str, object]] = []
+    skipped = 0
+    total_bytes = 0
+    for current, dirs, filenames in os.walk(root_path):
+        dirs[:] = sorted(name for name in dirs if name not in IGNORED_DIRS and not name.startswith(".DS_Store"))
+        for filename in sorted(filenames):
+            if filename == ".DS_Store":
+                continue
+            path = Path(current) / filename
+            suffix = path.suffix.lower()
+            if suffix not in CODEGRAPH_EXTENSIONS:
+                continue
+            try:
+                info = path.stat()
+            except OSError:
+                skipped += 1
+                continue
+            if not stat.S_ISREG(info.st_mode) or info.st_size > CODEGRAPH_MAX_FILE_BYTES:
+                skipped += 1
+                continue
+            if not is_probably_text(path):
+                skipped += 1
+                continue
+            rel = path.relative_to(root_path).as_posix()
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                skipped += 1
+                continue
+            total_bytes += info.st_size
+            files.append({
+                "path": rel,
+                "language": language_for_path(path),
+                "size": info.st_size,
+                "symbols": extract_code_symbols(content, suffix),
+                "imports": extract_code_imports(content),
+            })
+            if len(files) >= CODEGRAPH_MAX_FILES:
+                skipped += 1
+                break
+        if len(files) >= CODEGRAPH_MAX_FILES:
+            break
+    summary = {
+        "version": 1,
+        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "rootName": root_path.name,
+        "stats": {
+            "files": len(files),
+            "skipped": skipped,
+            "bytes": total_bytes,
+        },
+        "files": files,
+    }
+    storage = "workspace"
+    output_dir = root_path / CODEGRAPH_DIR_NAME
+    output_path = output_dir / CODEGRAPH_SUMMARY_FILE
+    try:
+        output_dir.mkdir(exist_ok=True)
+        output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as workspace_error:
+        storage = "app"
+        output_path = codegraph_cache_path(root_path)
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as cache_error:
+            raise ValueError(
+                "コード理解の解析結果を保存できませんでした。"
+                f"対象フォルダーとアプリ管理フォルダーの書き込み権限を確認してください: {workspace_error}; {cache_error}"
+            ) from cache_error
+    return {
+        "root": str(root_path),
+        "path": f"{CODEGRAPH_DIR_NAME}/{CODEGRAPH_SUMMARY_FILE}" if storage == "workspace" else str(output_path),
+        "storage": storage,
+        "summary": summary,
+    }
+
+
+def read_codegraph_summary(root: str) -> dict:
+    root_path = resolve_workspace_root(root)
+    summary_path = root_path / CODEGRAPH_DIR_NAME / CODEGRAPH_SUMMARY_FILE
+    if summary_path.exists():
+        return json.loads(summary_path.read_text(encoding="utf-8"))
+    cache_path = codegraph_cache_path(root_path)
+    if cache_path.exists():
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    raise ValueError("コード理解はまだ準備されていません。フォルダー編集で「準備する」を押してください。")
+
+
 def read_workspace_file(root: str, relative_path: str) -> dict:
     path = resolve_workspace_file(root, relative_path)
     if not path.exists() or not path.is_file():
         raise ValueError("file does not exist")
     size = path.stat().st_size
+    suffix = path.suffix.lower()
+    if suffix in SEARCHABLE_DOCUMENT_EXTENSIONS:
+        if size > MAX_DOCUMENT_CONTEXT_BYTES:
+            raise ValueError(f"document is too large to read ({size} bytes)")
+        if suffix == ".docx":
+            content = extract_docx_text(path)
+        else:
+            content = extract_pdf_text(path)
+        if not content.strip():
+            if suffix == ".pdf":
+                ocr = ocr_capabilities()
+                missing = " / ".join(str(item) for item in ocr.get("missing", []) or [])
+                raise ValueError(
+                    "PDF本文を読み取れませんでした。画像だけのPDFや文字化けするPDFはOCRが必要です。"
+                    f"OCRプラグインのために {missing or 'Tesseract / Poppler'} を導入してください。"
+                )
+            raise ValueError("document text could not be extracted")
+        return {
+            "path": relative_path,
+            "size": size,
+            "content": content,
+        }
+    if suffix in OCR_IMAGE_EXTENSIONS:
+        if size > MAX_DOCUMENT_CONTEXT_BYTES:
+            raise ValueError(f"image is too large to read with OCR ({size} bytes)")
+        content = extract_image_ocr_text(path)
+        if not content.strip():
+            raise ValueError("OCR text could not be extracted. Install Tesseract or choose a clearer image.")
+        return {
+            "path": relative_path,
+            "size": size,
+            "content": content,
+        }
     if size > MAX_FILE_BYTES:
         raise ValueError(f"file is too large to read in UI ({size} bytes)")
     if not is_probably_text(path):
@@ -739,6 +2215,52 @@ def read_workspace_file(root: str, relative_path: str) -> dict:
     }
 
 
+def read_attached_file(name: str, mime: str, payload_base64: str) -> dict:
+    safe_name = Path(name or "attachment").name
+    if not payload_base64:
+        raise ValueError("attachment data is empty")
+    try:
+        raw = base64.b64decode(payload_base64, validate=True)
+    except binascii.Error as exc:
+        raise ValueError("attachment data is invalid") from exc
+    size = len(raw)
+    if size > MAX_ATTACHMENT_BYTES:
+        raise ValueError(f"attachment is too large ({size} bytes)")
+    suffix = Path(safe_name).suffix.lower()
+    kind = "PDF" if suffix == ".pdf" or mime == "application/pdf" else "DOCX" if suffix == ".docx" else "TEXT"
+    if suffix in {".txt", ".md", ".markdown"} or str(mime).startswith("text/"):
+        content = raw.decode("utf-8", errors="replace")
+        return {"name": safe_name, "kind": kind, "size": size, "content": content}
+    if suffix not in {".pdf", ".docx"} and mime != "application/pdf":
+        raise ValueError("unsupported attachment type")
+    with tempfile.NamedTemporaryFile(suffix=suffix or ".pdf", delete=False) as handle:
+        handle.write(raw)
+        temp_path = Path(handle.name)
+    try:
+        content = extract_docx_text(temp_path) if suffix == ".docx" else extract_pdf_text(temp_path)
+        if not content.strip():
+            if suffix == ".pdf" or mime == "application/pdf":
+                ocr = ocr_capabilities()
+                missing = " / ".join(str(item) for item in ocr.get("missing", []) or [])
+                if ocr.get("pdf"):
+                    raise ValueError(
+                        "PDF本文を読み取れませんでした。画像だけのPDFや文字がつぶれたPDFの可能性があります。"
+                        "必要なら「設定」→「プラグイン」→「画像文字読み取り（OCR）」を確認してください。"
+                    )
+                raise ValueError(
+                    "PDF本文を読み取れませんでした。画像だけのPDFを読むにはOCRが必要です。"
+                    "「設定」→「プラグイン」→「画像文字読み取り（OCR）」を追加またはセットアップしてください。"
+                    f"不足: {missing or 'Tesseract / Poppler'}"
+                )
+            raise ValueError("添付ファイルの本文を読み取れませんでした。別形式で保存し直すか、テキストとして貼り付けてください。")
+        return {"name": safe_name, "kind": kind, "size": size, "content": content}
+    finally:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+
+
 def write_workspace_file(root: str, relative_path: str, content: str) -> dict:
     if not relative_path or relative_path.endswith("/"):
         raise ValueError("relative file path is required")
@@ -746,6 +2268,22 @@ def write_workspace_file(root: str, relative_path: str, content: str) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return {"path": path.relative_to(resolve_workspace_root(root)).as_posix(), "size": len(content.encode("utf-8"))}
+
+
+def reveal_workspace_path(root: str, relative_path: str) -> dict:
+    root_path = resolve_workspace_root(root)
+    path = resolve_workspace_file(root, relative_path) if relative_path else root_path
+    target = path if path.exists() else path.parent
+    if not target.exists():
+        target = root_path
+    if sys.platform == "darwin":
+        args = ["open", "-R", str(path)] if path.exists() else ["open", str(target)]
+    elif sys.platform.startswith("win"):
+        args = ["explorer", f"/select,{path}"] if path.exists() else ["explorer", str(target)]
+    else:
+        args = ["xdg-open", str(target if target.is_dir() else target.parent)]
+    subprocess.Popen(args)
+    return {"path": path.relative_to(root_path).as_posix() if path != root_path else "", "opened": str(target)}
 
 
 SCRIPT_RE = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script>", re.IGNORECASE | re.DOTALL)
@@ -857,6 +2395,68 @@ def build_workspace_context(workspace: dict) -> str:
             "multiple files."
         ),
     ]
+    if workspace.get("codegraph"):
+        try:
+            summary = read_codegraph_summary(str(root_path))
+            files = summary.get("files", []) if isinstance(summary, dict) else []
+            stats = summary.get("stats", {}) if isinstance(summary, dict) else {}
+            graph_lines = [
+                "",
+                "--- CODE UNDERSTANDING SUMMARY ---",
+                "Use this summary to understand project structure. Treat file paths and symbols here as local workspace evidence.",
+                "When answering code questions, mention the relevant file path when it helps. Do not invent files or functions that are not in the summary or selected files.",
+                f"Analyzed files: {stats.get('files', len(files))}, skipped: {stats.get('skipped', 0)}",
+            ]
+            for item in files[:30]:
+                if not isinstance(item, dict):
+                    continue
+                details = []
+                symbols = item.get("symbols") if isinstance(item.get("symbols"), list) else []
+                imports = item.get("imports") if isinstance(item.get("imports"), list) else []
+                if symbols:
+                    details.append("symbols: " + ", ".join(str(value) for value in symbols[:8]))
+                if imports:
+                    details.append("imports: " + ", ".join(str(value) for value in imports[:8]))
+                detail = f" ({'; '.join(details)})" if details else ""
+                graph_lines.append(f"- {item.get('path', '')} [{item.get('language', '')}]{detail}")
+            if len(files) > 30:
+                graph_lines.append(f"- ... {len(files) - 30} more files")
+            parts.append("\n".join(graph_lines))
+        except Exception as exc:
+            parts.append(f"\n--- CODE UNDERSTANDING SUMMARY ---\n[Not ready: {exc}]")
+    search_query = str(workspace.get("searchQuery") or "").strip()
+    if search_query:
+        try:
+            search_data = search_workspace_files(str(root_path), search_query)
+            results = search_data.get("results", [])
+            result_count = len(results) if isinstance(results, list) else 0
+            search_lines = [
+                "",
+                "--- フォルダー内検索結果 ---",
+                (
+                    "以下はユーザーのフォルダー内を検索した結果です。回答するときは、この結果から分かることだけを短く答えてください。"
+                    "本文一致の根拠は `path:line`、ファイル名一致の根拠は `path` だけで示してください。"
+                    "複数候補がある場合は、候補を2〜4件に絞って短い理由を並べてください。"
+                    "検索結果にない内容は推測せず、見つからないと伝えてください。"
+                ),
+                f"検索語: {search_query}",
+                f"ヒット数: {result_count}件 / 調査したファイル: {search_data.get('scanned', 0)}件 / スキップ: {search_data.get('skipped', 0)}件",
+            ]
+            for item in results[:12]:
+                if not isinstance(item, dict):
+                    continue
+                path_value = item.get("path", "")
+                if item.get("matchType") == "filename":
+                    search_lines.append(f"- {path_value} (ファイル名一致) {item.get('preview', '')}")
+                else:
+                    search_lines.append(f"- {path_value}:{item.get('line', '')} {item.get('preview', '')}")
+            if search_data.get("truncated"):
+                search_lines.append("- 結果が多いため一部だけ表示しています。")
+            if not result_count:
+                search_lines.append("- 一致する文字は見つかりませんでした。")
+            parts.append("\n".join(search_lines))
+        except Exception as exc:
+            parts.append(f"\n--- フォルダー内検索結果 ---\n[検索に失敗しました: {exc}]")
     used = sum(len(part) for part in parts)
     for relative_path in selected[:16]:
         rel = str(relative_path)
@@ -1176,6 +2776,7 @@ def health_payload() -> dict:
                 if model
             ],
             "pullableModels": PULLABLE_MODELS,
+            "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": installed,
             "codingModelInstalled": coding_model in models,
             "translationModelInstalled": translation_model in models,
@@ -1200,6 +2801,7 @@ def health_payload() -> dict:
                 if model
             ],
             "pullableModels": PULLABLE_MODELS,
+            "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": False,
             "codingModelInstalled": False,
             "translationModelInstalled": False,
@@ -1288,6 +2890,167 @@ def start_model_pull(model: str) -> dict:
     return {"ok": True, "model": model, "status": "running", "message": "ダウンロードを開始しました。"}
 
 
+def asr_setup_status() -> dict:
+    with ASR_SETUP_LOCK:
+        job = dict(ASR_SETUP_JOB)
+    return {"ok": True, "job": job}
+
+
+def run_asr_setup() -> None:
+    script = ROOT / "scripts" / "setup-asr-nemotron-mac.sh"
+    with ASR_SETUP_LOCK:
+        ASR_SETUP_JOB.update({
+            "status": "running",
+            "message": "ASRセットアップを開始しました。",
+            "startedAt": time.time(),
+            "finishedAt": None,
+        })
+    try:
+        process = subprocess.Popen(
+            ["bash", str(script)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        last_line = ""
+        if process.stdout:
+            for line in process.stdout:
+                last_line = line.strip() or last_line
+                if last_line:
+                    with ASR_SETUP_LOCK:
+                        ASR_SETUP_JOB.update({"message": last_line})
+        code = process.wait()
+        with ASR_SETUP_LOCK:
+            ASR_SETUP_JOB.update({
+                "status": "done" if code == 0 else "error",
+                "message": "ASRセットアップが完了しました。" if code == 0 else last_line or f"ASRセットアップが終了コード {code} で失敗しました。",
+                "finishedAt": time.time(),
+            })
+    except Exception as exc:
+        with ASR_SETUP_LOCK:
+            ASR_SETUP_JOB.update({"status": "error", "message": str(exc), "finishedAt": time.time()})
+
+
+def start_asr_setup() -> dict:
+    if sys.platform != "darwin":
+        raise RuntimeError("ASRセットアップの自動実行は現在Mac用です。Windowsでは docs/asr-nemotron-setup.ja.md の手順を使ってください。")
+    script = ROOT / "scripts" / "setup-asr-nemotron-mac.sh"
+    if not script.exists():
+        raise RuntimeError("ASRセットアップスクリプトが見つかりません。")
+    with ASR_SETUP_LOCK:
+        existing = ASR_SETUP_JOB.get("status")
+        if existing == "running":
+            return {"ok": True, "status": "running", "message": str(ASR_SETUP_JOB.get("message", ""))}
+        ASR_SETUP_JOB.clear()
+        ASR_SETUP_JOB.update({
+            "status": "queued",
+            "message": "ASRセットアップ待機中です。",
+            "startedAt": time.time(),
+            "finishedAt": None,
+        })
+    thread = threading.Thread(target=run_asr_setup, daemon=True)
+    thread.start()
+    return {"ok": True, "status": "running", "message": "ASRセットアップを開始しました。"}
+
+
+def ocr_setup_status() -> dict:
+    with OCR_SETUP_LOCK:
+        job = dict(OCR_SETUP_JOB)
+    return {"ok": True, "job": job, "ocr": ocr_capabilities()}
+
+
+def run_ocr_setup() -> None:
+    script = ROOT / "scripts" / "setup-ocr-mac.sh"
+    with OCR_SETUP_LOCK:
+        OCR_SETUP_JOB.update({
+            "status": "running",
+            "message": "OCRセットアップを開始しました。",
+            "step": 0,
+            "total": 5,
+            "percent": 0,
+            "logs": ["OCRセットアップを開始しました。"],
+            "startedAt": time.time(),
+            "finishedAt": None,
+        })
+    try:
+        process = subprocess.Popen(
+            ["bash", str(script)],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        last_line = ""
+        if process.stdout:
+            for line in process.stdout:
+                last_line = line.strip() or last_line
+                if last_line:
+                    progress_match = re.match(r"^PROGRESS\s+(\d+)/(\d+)\s+(.+)$", last_line)
+                    with OCR_SETUP_LOCK:
+                        logs = list(OCR_SETUP_JOB.get("logs") or [])
+                        if progress_match:
+                            step = int(progress_match.group(1))
+                            total = max(int(progress_match.group(2)), 1)
+                            message = progress_match.group(3)
+                            logs.append(message)
+                            OCR_SETUP_JOB.update({
+                                "message": message,
+                                "step": step,
+                                "total": total,
+                                "percent": min(99, round(step / total * 100)),
+                                "logs": logs[-8:],
+                            })
+                        else:
+                            logs.append(last_line)
+                            OCR_SETUP_JOB.update({"message": last_line, "logs": logs[-8:]})
+        code = process.wait()
+        with OCR_SETUP_LOCK:
+            logs = list(OCR_SETUP_JOB.get("logs") or [])
+            final_message = "OCRセットアップが完了しました。" if code == 0 else last_line or f"OCRセットアップが終了コード {code} で失敗しました。"
+            logs.append(final_message)
+            OCR_SETUP_JOB.update({
+                "status": "done" if code == 0 else "error",
+                "message": final_message,
+                "percent": 100 if code == 0 else int(OCR_SETUP_JOB.get("percent") or 0),
+                "logs": logs[-8:],
+                "finishedAt": time.time(),
+            })
+    except Exception as exc:
+        with OCR_SETUP_LOCK:
+            logs = list(OCR_SETUP_JOB.get("logs") or [])
+            logs.append(str(exc))
+            OCR_SETUP_JOB.update({"status": "error", "message": str(exc), "logs": logs[-8:], "finishedAt": time.time()})
+
+
+def start_ocr_setup() -> dict:
+    if sys.platform != "darwin":
+        raise RuntimeError("OCRセットアップの自動実行は現在Mac用です。WindowsではTesseractとPopplerを手動で導入してください。")
+    script = ROOT / "scripts" / "setup-ocr-mac.sh"
+    if not script.exists():
+        raise RuntimeError("OCRセットアップスクリプトが見つかりません。")
+    with OCR_SETUP_LOCK:
+        existing = OCR_SETUP_JOB.get("status")
+        if existing == "running":
+            return {"ok": True, "status": "running", "message": str(OCR_SETUP_JOB.get("message", ""))}
+        OCR_SETUP_JOB.clear()
+        OCR_SETUP_JOB.update({
+            "status": "queued",
+            "message": "OCRセットアップ待機中です。",
+            "step": 0,
+            "total": 5,
+            "percent": 0,
+            "logs": ["OCRセットアップ待機中です。"],
+            "startedAt": time.time(),
+            "finishedAt": None,
+        })
+    thread = threading.Thread(target=run_ocr_setup, daemon=True)
+    thread.start()
+    return {"ok": True, "status": "running", "message": "OCRセットアップを開始しました。"}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "GemmaWebUI/1.0"
 
@@ -1299,6 +3062,15 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/health":
             payload = health_payload()
             json_response(self, 200 if payload["ok"] else 503, payload)
+            return
+        if parsed.path == "/api/asr/status":
+            json_response(self, 200, asr_status_payload())
+            return
+        if parsed.path == "/api/asr/setup/status":
+            json_response(self, 200, asr_setup_status())
+            return
+        if parsed.path == "/api/ocr/setup/status":
+            json_response(self, 200, ocr_setup_status())
             return
         if parsed.path == "/api/models/pull/status":
             json_response(self, 200, model_pull_status())
@@ -1332,6 +3104,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1347,6 +3120,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/models/pull":
             self.handle_model_pull()
+            return
+        if self.path == "/api/llm/check":
+            self.handle_llm_check()
+            return
+        if self.path == "/api/asr/transcribe":
+            self.handle_asr_transcribe()
+            return
+        if self.path == "/api/asr/setup":
+            self.handle_asr_setup()
+            return
+        if self.path == "/api/ocr/setup":
+            self.handle_ocr_setup()
+            return
+        if self.path == "/api/attachment/read":
+            self.handle_attachment_read()
             return
         if self.path.startswith("/api/workspace/"):
             self.handle_workspace()
@@ -1380,7 +3168,16 @@ class Handler(BaseHTTPRequestHandler):
 
             prompt_messages = [{"role": "system", "content": system_prompt}]
             if is_translation_task and translation_target:
-                prompt_messages.append({"role": "system", "content": f"Translate the user's text into {translation_target}. Return only the translation."})
+                prompt_messages.append({
+                    "role": "system",
+                    "content": (
+                        f"Translate every sentence of the user's source text into {translation_target}. "
+                        f"Every translated sentence must be written in {translation_target}. "
+                        f"Do not leave source-language sentences untranslated. "
+                        f"Do not paraphrase or rewrite it in the source language. "
+                        f"Do not summarize, omit, or save anything. Return only the {translation_target} translation."
+                    ),
+                })
             if use_web_search:
                 search_context = build_search_context(search_results)
                 if search_error:
@@ -1404,6 +3201,11 @@ class Handler(BaseHTTPRequestHandler):
                 selected_model = select_coding_model()
             else:
                 selected_model = MODEL
+            try:
+                llm_base_url = normalize_local_llm_base_url(str(body.get("llm_base_url") or ""))
+            except ValueError as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
 
             payload = {
                 "model": selected_model,
@@ -1439,7 +3241,7 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
                 content_parts: list[str] = []
-                with ollama_stream("/api/chat", payload=payload, timeout=600) as stream:
+                with ollama_stream("/api/chat", payload=payload, timeout=600, base_url=llm_base_url) as stream:
                     for raw_line in stream:
                         line = raw_line.decode("utf-8", errors="replace").strip()
                         if not line:
@@ -1473,7 +3275,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             payload["stream"] = False
-            response = ollama_json("/api/chat", payload=payload, timeout=600)
+            response = ollama_json("/api/chat", payload=payload, timeout=600, base_url=llm_base_url)
             message = response.get("message", {})
             if is_translation_task and isinstance(message, dict):
                 message = {**message, "content": clean_translation_output(str(message.get("content", "")))}
@@ -1517,6 +3319,69 @@ class Handler(BaseHTTPRequestHandler):
             body = read_json_body(self)
             result = start_model_pull(str(body.get("model", "")).strip())
             json_response(self, 200, result)
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc)})
+
+    def handle_llm_check(self) -> None:
+        try:
+            body = read_json_body(self)
+            base_url = normalize_local_llm_base_url(str(body.get("url") or ""))
+            version = ollama_json("/api/version", timeout=5, base_url=base_url)
+            tags = ollama_json("/api/tags", timeout=5, base_url=base_url)
+            models = [
+                str(item.get("name"))
+                for item in tags.get("models", [])
+                if isinstance(item, dict) and item.get("name")
+            ]
+            json_response(
+                self,
+                200,
+                {
+                    "ok": True,
+                    "url": base_url,
+                    "version": version.get("version", ""),
+                    "models": models,
+                },
+            )
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc)})
+
+    def handle_asr_transcribe(self) -> None:
+        try:
+            body = read_json_body(self)
+            model = normalize_asr_model(str(body.get("model") or ASR_MODEL or DEFAULT_ASR_MODEL))
+            audio_base64 = str(body.get("audioBase64") or "").strip()
+            mime_type = str(body.get("mimeType") or "audio/webm").strip()
+            result = run_asr_transcription(audio_base64, mime_type, model)
+            json_response(self, 200, result)
+        except RuntimeError as exc:
+            json_response(self, 501, {"ok": False, "error": str(exc), "asr": asr_status_payload()})
+        except ValueError as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc), "asr": asr_status_payload()})
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc)})
+
+    def handle_asr_setup(self) -> None:
+        try:
+            json_response(self, 200, start_asr_setup())
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc), "setup": asr_setup_status()})
+
+    def handle_ocr_setup(self) -> None:
+        try:
+            json_response(self, 200, start_ocr_setup())
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc), "setup": ocr_setup_status()})
+
+    def handle_attachment_read(self) -> None:
+        try:
+            body = read_json_body(self)
+            result = read_attached_file(
+                str(body.get("name") or ""),
+                str(body.get("mime") or ""),
+                str(body.get("base64") or ""),
+            )
+            json_response(self, 200, {"ok": True, **result})
         except Exception as exc:
             json_response(self, 400, {"ok": False, "error": str(exc)})
 
@@ -1568,8 +3433,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = read_json_body(self)
             query = str(body.get("query") or "")
-            location, day_offset = weather_request_parts(query, str(body.get("location") or ""))
-            weather = fetch_weather(location, day_offset)
+            explicit_location = str(body.get("location") or "")
+            parsed_location = weather_location_from_query(query) if query else ""
+            location, day_offset = weather_request_parts(query, explicit_location)
+            coordinates = body.get("coordinates") if not parsed_location and not explicit_location.strip() else None
+            weather = fetch_weather(location, day_offset, coordinates)
             json_response(self, 200, {"ok": True, "answer": build_weather_answer(weather), "weather": weather})
         except Exception as exc:
             json_response(self, 500, {"ok": False, "error": str(exc)})
@@ -1587,6 +3455,9 @@ class Handler(BaseHTTPRequestHandler):
                     200,
                     {"ok": True, **read_workspace_file(str(body.get("root", "")), str(body.get("path", "")))},
                 )
+            elif self.path == "/api/workspace/search":
+                result = search_workspace_files(str(body.get("root", "")), str(body.get("query", "")))
+                json_response(self, 200, {"ok": True, **result})
             elif self.path == "/api/workspace/write":
                 result = write_workspace_file(
                     str(body.get("root", "")),
@@ -1594,9 +3465,18 @@ class Handler(BaseHTTPRequestHandler):
                     str(body.get("content", "")),
                 )
                 json_response(self, 200, {"ok": True, **result})
+            elif self.path == "/api/workspace/reveal":
+                result = reveal_workspace_path(str(body.get("root", "")), str(body.get("path", "")))
+                json_response(self, 200, {"ok": True, **result})
             elif self.path == "/api/workspace/validate":
                 result = validate_workspace_files(str(body.get("root", "")), body.get("files", []))
                 json_response(self, 200, result)
+            elif self.path == "/api/workspace/codegraph/init":
+                result = build_codegraph_summary(str(body.get("root", "")))
+                json_response(self, 200, {"ok": True, **result})
+            elif self.path == "/api/workspace/codegraph/read":
+                summary = read_codegraph_summary(str(body.get("root", "")))
+                json_response(self, 200, {"ok": True, "summary": summary})
             else:
                 self.send_error(404)
         except Exception as exc:

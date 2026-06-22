@@ -276,6 +276,55 @@ Gemma4_12B_All_Start.bat
 
 通常は `steps=8` で軽く生成します。品質を上げたい場合は `steps=20` などを指定してください。
 
+## 学習データの書き出し
+
+設定画面の「学習データ」から、Gemmaに教えるための学習セットを作れます。
+
+学習セットは、すぐにモデルを書き換えるものではありません。まずは「修正例」や「良い回答例」を名前つきで保存し、フォルダーに適用してチャット時のヒントとして使います。
+
+十分に例が集まったら、「学習用ファイル」として書き出します。このファイルは、Gemmaに教えたい会話例をまとめたノートのようなものです。書き出しただけでは、まだモデルは変わりません。次の段階で中身を整え、その後ファインチューニング処理に使うと、新しいモデルを作れます。
+
+基本の流れ:
+
+1. 設定で学習セットを作成します。
+2. Gemmaの回答下にある「修正して学習」から正しい回答を保存します。
+3. 学習セットをフォルダーに適用します。
+4. そのフォルダーのチャットでは、保存した修正例を参照します。
+5. 例が集まったら学習用ファイルとして書き出します。
+6. 次の段階で、学習用ファイルから新しいモデルを作ります。
+7. 完成したモデルを設定の「モデル」から選び、チャットやフォルダーで使います。
+
+現時点のアプリで直接できるのは 1〜5 です。6〜7 は次の実装段階で、ターミナルを使わずに画面から実行できるようにする予定です。
+
+対象は以下から選べます。
+
+- 現在のチャット
+- 現在のフォルダー
+- すべてのチャット
+- 選択中の学習セット
+
+書き出したファイルは、1行ごとに「ユーザーの質問」と「正しい回答」が入った学習用メモです。ふだんは中身を直接編集する必要はありません。
+
+開発者向けには `JSONL` という形式で保存しています。これは、たくさんの会話例を学習処理が読み取りやすい形で並べたものです。
+
+```json
+{"messages":[{"role":"system","content":"..."},{"role":"user","content":"..."},{"role":"assistant","content":"..."}],"metadata":{"task":"translation","model":"gemma4:12b"}}
+```
+
+新しいモデルを作る前に、空行やエラー回答を取り除いて整えます。今は下のコマンドで整えますが、今後はUIから実行できるようにします。
+
+```sh
+python3 scripts/standardize_training_data.py gemma4-training-active-YYYYMMDD-HHMMSS.jsonl
+```
+
+メタ情報も残したい場合:
+
+```sh
+python3 scripts/standardize_training_data.py gemma4-training-active-YYYYMMDD-HHMMSS.jsonl --keep-metadata
+```
+
+まずは成功した翻訳、自然な短文応答、正しく保存できたコード生成など、質の良い例だけを残すのがおすすめです。
+
 ## よくあるトラブル
 
 ### Python が見つからない
@@ -328,11 +377,29 @@ python3 server.py --host 127.0.0.1 --port 54876
 
 主なファイル:
 
-- `server.py`: ローカルHTTPサーバー、Ollama連携、Web検索、フォルダー読み書き
+- `server.py`: ローカルHTTPサーバー、Ollama連携、フォルダー読み書き、天気/画像生成API
+- `search_tools.py`: Web検索の取得、HTML解析、検索結果コンテキスト生成
 - `web/index.html`: UI
-- `web/app.js`: チャット、フォルダー、設定、画像入力
+- `web/app.js`: アプリ状態、イベント登録、各モジュールの接続
+- `web/messages.js`: チャット表示
+- `web/sidebar.js`: フォルダー/チャット一覧
+- `web/settings.js`: 設定画面とモデル取得表示
+- `web/workspace.js`: ローカルフォルダー、保存、プレビュー、コード抽出
+- `web/training.js`: 学習セット、修正例、学習用ファイル書き出し
+- `web/search.js`: Web検索のフロント側状態、検索結果整形、検索時の生成設定
+- `web/weather.js`: 天気判定、場所抽出、現在地保存
+- `web/composer.js`: 入力欄、添付画像、送信操作
 - `web/styles.css`: 画面スタイル
-- `scripts/`: セットアップ、確認、補助スクリプト
+- `scripts/test-*.js`: フロント側ヘルパーの退行テスト
+- `scripts/test_search_tools.py`: サーバー側Web検索処理の退行テスト
+
+変更後の確認:
+
+```sh
+node scripts/test-router.js && node scripts/test-workspace-helpers.js && node scripts/test-sidebar-helpers.js && node scripts/test-management-helpers.js && node scripts/test-submit-classification.js && node scripts/test-model-selection.js && node scripts/test-training-export.js && node scripts/test-weather-helpers.js && node scripts/test-settings-helpers.js && node scripts/test-search-helpers.js
+python3 scripts/test_search_tools.py
+python3 -m py_compile server.py search_tools.py scripts/standardize_training_data.py
+```
 
 ## GitHubに含めないもの
 

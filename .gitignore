@@ -15,6 +15,7 @@ temp/
 
 # Python virtual environments
 .venv/
+.venv-asr/
 venv/
 env/
 
@@ -30,9 +31,12 @@ models/
 # Local editor/project state
 .idea/
 .vscode/
+.codegraph/
+.gemma4-data/
 
 # Temporary downloads
 downloads/
+Asset/
 tmp/
 *.zip
 *.tar

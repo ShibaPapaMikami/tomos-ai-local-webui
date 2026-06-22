@@ -185,6 +185,55 @@ Optional parameters:
 - `steps=20`
 - `seed=123`
 
+## Exporting Training Data
+
+Open Settings and use the Training data section to create training sets for Gemma.
+
+A training set does not immediately rewrite the model. It first stores named corrections and good answer examples, then applies them to a folder as chat-time hints.
+
+When you have enough good examples, export a training file. Think of this file as a notebook of conversations you want Gemma to learn from. Exporting it does not change the model yet. In the next step, clean the file, then use fine-tuning to create a new model.
+
+Basic flow:
+
+1. Create a training set in Settings.
+2. Use Correct and learn below a Gemma reply to save the corrected answer.
+3. Apply the training set to a folder.
+4. Chats in that folder use the saved corrections as hints.
+5. Export a training file when you have enough examples.
+6. In the next stage, create a new model from that training file.
+7. Choose the finished model in Settings > Models, then use it for chats or folders.
+
+The current app directly supports steps 1-5. Steps 6-7 are the next implementation stage, with a goal of running them from the UI without terminal commands.
+
+You can export:
+
+- Current chat
+- Current folder
+- All chats
+- Selected training set
+
+The exported file is a training notebook with one user question and one correct answer per line. In normal use, students do not need to edit it directly.
+
+For developers, it is stored as `JSONL`: a format that lists many conversation examples in a way training tools can read.
+
+```json
+{"messages":[{"role":"system","content":"..."},{"role":"user","content":"..."},{"role":"assistant","content":"..."}],"metadata":{"task":"translation","model":"gemma4:12b"}}
+```
+
+Before creating a new model, clean the file by removing empty or failed examples. For now, use this command; a UI action is planned for a later version:
+
+```sh
+python3 scripts/standardize_training_data.py gemma4-training-active-YYYYMMDD-HHMMSS.jsonl
+```
+
+Keep metadata for filtering or debugging:
+
+```sh
+python3 scripts/standardize_training_data.py gemma4-training-active-YYYYMMDD-HHMMSS.jsonl --keep-metadata
+```
+
+Start with high-quality examples: successful translations, natural short replies, and code generations that saved and validated correctly.
+
 ## Troubleshooting
 
 ### Python is not found
@@ -237,11 +286,29 @@ Ask once from CLI:
 
 Main files:
 
-- `server.py`: local HTTP server, Ollama integration, web search, folder read/write
+- `server.py`: local HTTP server, Ollama integration, folder read/write, weather and image APIs
+- `search_tools.py`: web search fetching, HTML parsing, and search-context generation
 - `web/index.html`: UI
-- `web/app.js`: chat, folders, settings, image input
+- `web/app.js`: app state, event wiring, and module coordination
+- `web/messages.js`: chat rendering
+- `web/sidebar.js`: folders and chat list
+- `web/settings.js`: settings panel and model download UI
+- `web/workspace.js`: local folders, saving, previews, and code extraction
+- `web/training.js`: training sets, corrections, and training-file export
+- `web/search.js`: frontend web-search state, result normalization, and search generation settings
+- `web/weather.js`: weather detection, place extraction, and saved browser location
+- `web/composer.js`: input box, image attachments, and submit behavior
 - `web/styles.css`: visual styles
-- `scripts/`: setup, checks, helper scripts
+- `scripts/test-*.js`: regression tests for frontend helpers
+- `scripts/test_search_tools.py`: regression tests for server-side search helpers
+
+Recommended checks after changes:
+
+```sh
+node scripts/test-router.js && node scripts/test-workspace-helpers.js && node scripts/test-submit-classification.js && node scripts/test-model-selection.js && node scripts/test-training-export.js && node scripts/test-weather-helpers.js && node scripts/test-settings-helpers.js && node scripts/test-search-helpers.js
+python3 scripts/test_search_tools.py
+python3 -m py_compile server.py search_tools.py scripts/standardize_training_data.py
+```
 
 ## Not Included in GitHub
 

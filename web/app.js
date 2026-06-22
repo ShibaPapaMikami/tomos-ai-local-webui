@@ -1,6 +1,28 @@
+function initialAsrPartialMode() {
+  const saved = localStorage.getItem("gemma4.asrPartialMode") || "";
+  const migrationKey = "gemma4.asrPartialModeMigratedToLocal";
+  if (localStorage.getItem(migrationKey) !== "true" && (!saved || saved === "browser" || saved === "nemotron")) {
+    localStorage.setItem(migrationKey, "true");
+    localStorage.setItem("gemma4.asrPartialMode", "local");
+    return "local";
+  }
+  const normalized = window.GEMMA_ASR?.normalizePartialTranscriptionMode?.(saved || "local") || "local";
+  if (saved && saved !== normalized) {
+    localStorage.setItem("gemma4.asrPartialMode", normalized);
+  }
+  return normalized;
+}
+
 const state = {
   folders: loadFolders(),
   sessions: loadSessions(),
+  trainingSets: loadTrainingSets(),
+  character: window.GEMMA_CHARACTER?.loadCharacter?.() || { name: "Gemma" },
+  characterMemorySets: window.GEMMA_CHARACTER?.loadMemorySets?.() || [],
+  characterMemoryFilter: "all",
+  characterMemoryQuery: "",
+  studyPacks: window.GEMMA_MANAGEMENT?.loadStudyPacks?.() || {},
+  plugins: window.GEMMA_MANAGEMENT?.loadPlugins?.() || {},
   activeId: null,
   activeFolderId: localStorage.getItem("gemma4.activeFolderId") || null,
   busy: false,
@@ -9,15 +31,18 @@ const state = {
   timerId: null,
   abortController: null,
   progressLabel: "生成中",
+  progressReason: "",
   progressElapsedSeconds: 0,
   workspaceOpen: false,
   workspaceRoot: "",
   workspaceFiles: [],
   workspaceNote: "",
+  workspacePreviewSearchIndex: 0,
   selectedFiles: new Set(),
   editingFolderId: null,
   editingSessionId: null,
   sidebarQuery: "",
+  collapsedFolderIds: new Set(loadCollapsedFolderIds()),
   sidebarHidden: localStorage.getItem("gemma4.sidebarHidden") === "true",
   sidebarWidth: Number(localStorage.getItem("gemma4.sidebarWidth")) || 268,
   language: localStorage.getItem("gemma4.language") || "ja",
@@ -30,6 +55,9 @@ const state = {
     translation: localStorage.getItem("gemma4.model.translation") || "",
   },
   composerModel: localStorage.getItem("gemma4.composerModel") || "",
+  externalLlmUrl: localStorage.getItem("gemma4.externalLlmUrl") || "",
+  externalLlmStatus: "",
+  activeTrainingSetId: localStorage.getItem("gemma4.activeTrainingSetId") || "",
   serverModels: {
     chat: "gemma4:12b",
     coding: "gemma4:12b",
@@ -44,331 +72,106 @@ const state = {
   appInfo: {
     version: "",
     commit: "",
+    searchCapabilities: null,
   },
+  asrStatus: {
+    status: "checking",
+    candidates: [],
+  },
+  asrModel: localStorage.getItem("gemma4.asrModel") || "",
+  micGain: Number(localStorage.getItem("gemma4.micGain")) || 1,
+  micDeviceId: localStorage.getItem("gemma4.micDeviceId") || "",
+  partialIntervalSeconds: Number(localStorage.getItem("gemma4.asrPartialIntervalSeconds")) || 3,
+  partialMode: initialAsrPartialMode(),
+  micDevices: [],
+  asrSetupJob: {},
+  asrSetupTimer: null,
   enterToSend: localStorage.getItem("gemma4.enterToSend") === "true",
+  weatherLocation: window.GEMMA_WEATHER?.loadSavedWeatherLocation?.() || null,
   lastDeleted: null,
   pendingImages: [],
+  pendingFiles: [],
+  correctionDraft: null,
+  memoryCandidate: null,
 };
+
+let stopMicLevelMonitor = null;
 
 const WORKSPACE_PLAN_TIMEOUT_MS = 120000;
 const WORKSPACE_FILE_TIMEOUT_MS = 300000;
 const SIMPLE_WORKSPACE_FILE_TIMEOUT_MS = 120000;
 
 const SYSTEM_PROMPTS = {
-  ja: "あなたは簡潔で有用なアシスタントです。前置きなしで自然に短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。",
+  ja: "あなたは簡潔で有用なAIです。前置きなしで自然に短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。",
   en: "You are a concise and helpful assistant. Answer directly and naturally. Use bullet points only when comparison, steps, or structured explanation are useful.",
 };
 
-const I18N = {
-  ja: {
-    "brand.subtitle": "12B ローカル",
-    "common.close": "閉じる",
-    "common.settings": "設定",
-    "common.send": "送信",
-    "common.stop": "停止",
-    "common.undo": "元に戻す",
-    "sidebar.folderButton": "フォルダー",
-    "sidebar.search": "検索",
-    "sidebar.searchPlaceholder": "フォルダー / チャットを検索",
-    "sidebar.treeTitle": "フォルダーとチャット",
-    "sidebar.show": "サイドバーを表示",
-    "sidebar.hide": "サイドバーを隠す",
-    "sidebar.showShort": "サイドバー",
-    "top.webSearch": "Web検索",
-    "top.webSearchTitle": "Web検索を使う",
-    "top.clear": "クリア",
-    "top.clearTitle": "チャットをクリア",
-    "settings.description": "応答の速さ、精度、文脈量を調整します。",
-    "settings.versionChecking": "バージョン確認中",
-    "settings.language": "表示言語",
-    "settings.languageHelp": "UIの表示言語を切り替えます。会話内容や保存済みの名前は変更しません。",
-    "settings.theme": "テーマ",
-    "settings.themeHelp": "画面の配色を切り替えます。",
-    "settings.responseMode": "応答モード",
-    "settings.responseModeHelp": "高速は短文向け、精度優先は設計や調査向けです。自動では内容で切り替えます。",
-    "settings.thinking": "思考量",
-    "settings.thinkingHelp": "コード作成や修正では深めにすると破綻しにくくなりますが、時間は増えます。",
-    "settings.chatModel": "通常チャットモデル",
-    "settings.chatModelHelp": "迷ったらサーバー既定かGemma 4。速さ優先ならQwenを選びます。",
-    "settings.codingModel": "コード生成モデル",
-    "settings.codingModelHelp": "フォルダー作業用です。複雑なコードはGemma 4 Coder推奨。要ダウンロード表示なら先に取得が必要です。",
-    "settings.translationModel": "翻訳モデル",
-    "settings.translationModelHelp": "通常はサーバー自動で十分です。速さはQwen、高品質はGemma 4です。",
-    "settings.systemPrompt": "システム指示",
-    "settings.systemPromptHelp": "全ての返信に共通して効く基本ルールです。長くすると応答が少し重くなります。",
-    "settings.temperature": "温度",
-    "settings.temperatureHelp": "低いほど安定、高いほど表現に幅が出ます。",
-    "settings.topPHelp": "候補語の広がりを確率で絞ります。通常は0.8〜0.95で十分です。",
-    "settings.topKHelp": "候補語の数を制限します。小さいほど安定しやすくなります。",
-    "settings.maxTokens": "最大トークン",
-    "settings.maxTokensHelp": "1回の返信で生成できる長さです。コード生成では自動で増やします。",
-    "settings.context": "コンテキスト",
-    "settings.contextHelp": "モデルが一度に見られる文脈量です。大きいほど重くなります。",
-    "settings.historyTurns": "記憶ターン",
-    "settings.historyTurnsHelp": "過去の会話を何往復ぶん送るかです。増やすと文脈は保てますが遅くなります。",
-    "settings.enterToSend": "Enterで送信",
-    "settings.enterToSendHelp": "OFFではEnterは改行です。送信は↑ボタン、またはCmd/Ctrl + Enterを使います。日本語変換中は送信しません。",
-    "settings.modelDownload": "モデルをダウンロード",
-    "theme.dark": "ダーク",
-    "theme.light": "ライト",
-    "theme.green": "グリーン",
-    "mode.auto": "自動",
-    "mode.fast": "高速",
-    "mode.balanced": "標準",
-    "mode.quality": "精度優先",
-    "mode.qualityShort": "精度",
-    "thinking.low": "軽め",
-    "thinking.high": "深く",
-    "model.auto": "モデル自動",
-    "model.serverDefault": "サーバー既定",
-    "model.serverAuto": "サーバー自動",
-    "model.missing": "未取得",
-    "model.downloadRequired": "要ダウンロード",
-    "model.installed": "取得済み",
-    "model.downloading": "取得中",
-    "model.download": "ダウンロード",
-    "model.gemmaStandard": "推奨・標準",
-    "model.gemmaCoding": "標準・すぐ使える",
-    "model.gemmaTranslation": "高品質・遅め",
-    "model.qwenFast": "高速・軽い",
-    "model.qwenTranslation": "翻訳推奨・高速",
-    "model.coderRecommended": "コード推奨",
-    "task.chat": "チャット",
-    "task.coding": "コード生成",
-    "task.translation": "翻訳",
-    "workspace.editFolder": "フォルダー編集",
-    "workspace.selectedFolder": "選択中フォルダー",
-    "workspace.noFolder": "フォルダー未選択",
-    "workspace.folderName": "フォルダー名",
-    "workspace.localFolder": "参照するローカルフォルダー",
-    "workspace.pickFolderPlaceholder": "フォルダーを選択してください",
-    "workspace.pickFolder": "フォルダーを選択",
-    "workspace.reload": "再読込",
-    "workspace.notConfigured": "{name} のローカルアクセスは未設定です。",
-    "workspace.loaded": "{name}: {files}件のファイルを読み込み、{selected}件を文脈に追加中。",
-    "workspace.empty": "このフォルダーは空です。生成したファイルはここへ保存できます。",
-    "workspace.binary": " バイナリ/大容量",
-    "workspace.savePath": "保存先ファイル",
-    "workspace.writePlaceholder": "生成されたコードを貼り付けてから保存してください。",
-    "workspace.saveFile": "ファイルを保存",
-    "workspace.waitingPick": "フォルダー選択を待機中...",
-    "workspace.loading": "フォルダーを読み込み中...",
-    "workspace.saved": "{path} を保存しました（{size}バイト）。",
-    "workspace.saveError": "保存エラー",
-    "workspace.savedTo": "{path} に保存しました（{size}バイト）。",
-    "workspace.cannotInferSavePath": "保存先ファイル名が判断できませんでした。保存欄にコードを入れました。保存先ファイルを入力して「ファイルを保存」を押してください。",
-    "composer.attachImage": "画像を添付",
-    "composer.removeAttachment": "添付を削除",
-    "composer.attachedImage": "添付画像",
-    "image.generated": "画像を生成しました。",
-    "composer.placeholder": "Gemma 4 12B に送信。例: 赤いリンゴの画像を生成して",
-    "composer.model": "使用モデル",
-    "chat.new": "新規チャット",
-    "chat.emptySubtitle": "Ollama経由のローカルチャット",
-    "chat.you": "あなた",
-    "chat.generatingRole": "Gemma ・ 生成中",
-    "chat.generating": "生成中",
-    "chat.streamingStatus": "{label} ・ {seconds}秒 ・ 順次表示中 ・ ■ で停止",
-    "chat.duration": "所要時間",
-    "chat.model": "モデル",
-    "chat.task": "用途",
-    "chat.mode": "モード",
-    "chat.preview": "動作確認",
-    "folder.new": "新規フォルダー",
-    "folder.default": "既定フォルダー",
-    "folder.untitled": "名称未設定",
-    "folder.none": "フォルダーなし",
-    "folder.localReady": "ローカル設定済み",
-    "folder.localMissing": "ローカル未設定",
-    "folder.add": "追加",
-    "folder.addTitle": "このフォルダーにチャットを追加",
-    "folder.edit": "編集",
-    "folder.editTitle": "フォルダー名を変更",
-    "folder.delete": "削除",
-    "folder.deleteTitle": "フォルダーを削除",
-    "folder.deleteConfirm": "「{name}」と中のチャット{count}件を削除しますか？",
-    "chat.editTitle": "チャット名を変更",
-    "chat.deleteTitle": "チャットを削除",
-    "chat.none": "チャットなし",
-    "chat.deleteConfirm": "「{name}」を削除しますか？",
-    "undo.deleted": "{target}「{label}」を削除しました。",
-    "status.checking": "確認中",
-    "status.available": "使用可能",
-    "status.codingMissing": "コード用モデル未取得",
-    "status.modelMissing": "モデル未取得",
-    "status.offline": "オフライン",
-    "progress.generating": "生成中",
-    "progress.fast": "高速生成中",
-    "progress.quality": "精度優先で生成中",
-    "progress.lightweight": "軽量モデルで生成中",
-    "progress.translation": "翻訳中",
-    "progress.coding": "コード生成中",
-    "progress.search": "検索 + 生成中",
-    "progress.workspace": "生成・検証中",
-    "progress.image": "画像生成中",
-    "progress.weather": "天気取得中",
-    "progress.saving": "保存中",
-    "progress.stopping": "停止中",
-    "error.prefix": "エラー",
+const SYSTEM_PROMPT_TEMPLATES = {
+  default: {
+    ja: SYSTEM_PROMPTS.ja,
+    en: SYSTEM_PROMPTS.en,
   },
-  en: {
-    "brand.subtitle": "12B local",
-    "common.close": "Close",
-    "common.settings": "Settings",
-    "common.send": "Send",
-    "common.stop": "Stop",
-    "common.undo": "Undo",
-    "sidebar.folderButton": "Folder",
-    "sidebar.search": "Search",
-    "sidebar.searchPlaceholder": "Search folders / chats",
-    "sidebar.treeTitle": "Folders and chats",
-    "sidebar.show": "Show sidebar",
-    "sidebar.hide": "Hide sidebar",
-    "sidebar.showShort": "Sidebar",
-    "top.webSearch": "Web",
-    "top.webSearchTitle": "Use web search",
-    "top.clear": "Clear",
-    "top.clearTitle": "Clear chat",
-    "settings.description": "Tune response speed, accuracy, and context size.",
-    "settings.versionChecking": "Checking version",
-    "settings.language": "Display language",
-    "settings.languageHelp": "Changes the UI language. Chat content and saved names are not translated.",
-    "settings.theme": "Theme",
-    "settings.themeHelp": "Switch the screen color theme.",
-    "settings.responseMode": "Response mode",
-    "settings.responseModeHelp": "Fast is for short replies; quality is for design and research. Auto switches by request.",
-    "settings.thinking": "Reasoning effort",
-    "settings.thinkingHelp": "Deeper is safer for coding and edits, but takes longer.",
-    "settings.chatModel": "Chat model",
-    "settings.chatModelHelp": "Use server default or Gemma 4 when unsure. Pick Qwen for speed.",
-    "settings.codingModel": "Coding model",
-    "settings.codingModelHelp": "Used for folder work. Gemma 4 Coder is recommended for complex code. Download it first if marked required.",
-    "settings.translationModel": "Translation model",
-    "settings.translationModelHelp": "Server auto is usually enough. Qwen is faster; Gemma 4 is higher quality.",
-    "settings.systemPrompt": "System prompt",
-    "settings.systemPromptHelp": "Base rules applied to every reply. Longer prompts can slow responses slightly.",
-    "settings.temperature": "Temperature",
-    "settings.temperatureHelp": "Lower is more stable; higher gives more variation.",
-    "settings.topPHelp": "Limits candidate token spread by probability. 0.8-0.95 is usually enough.",
-    "settings.topKHelp": "Limits the number of candidate tokens. Lower is more stable.",
-    "settings.maxTokens": "Max tokens",
-    "settings.maxTokensHelp": "Maximum length for one reply. Coding raises this automatically.",
-    "settings.context": "Context",
-    "settings.contextHelp": "How much context the model can see at once. Larger is heavier.",
-    "settings.historyTurns": "History turns",
-    "settings.historyTurnsHelp": "How many previous turns to send. More preserves context but slows down.",
-    "settings.enterToSend": "Enter to send",
-    "settings.enterToSendHelp": "Off means Enter inserts a newline. Use ↑ or Cmd/Ctrl + Enter to send. IME confirmation will not send.",
-    "settings.modelDownload": "Download models",
-    "theme.dark": "Dark",
-    "theme.light": "Light",
-    "theme.green": "Green",
-    "mode.auto": "Auto",
-    "mode.fast": "Fast",
-    "mode.balanced": "Standard",
-    "mode.quality": "Quality",
-    "mode.qualityShort": "Quality",
-    "thinking.low": "Light",
-    "thinking.high": "Deep",
-    "model.auto": "Model auto",
-    "model.serverDefault": "Server default",
-    "model.serverAuto": "Server auto",
-    "model.missing": "not installed",
-    "model.downloadRequired": "download required",
-    "model.installed": "Installed",
-    "model.downloading": "Downloading",
-    "model.download": "Download",
-    "model.gemmaStandard": "recommended standard",
-    "model.gemmaCoding": "standard, ready to use",
-    "model.gemmaTranslation": "higher quality, slower",
-    "model.qwenFast": "fast and light",
-    "model.qwenTranslation": "translation recommended, fast",
-    "model.coderRecommended": "recommended for code",
-    "task.chat": "Chat",
-    "task.coding": "Coding",
-    "task.translation": "Translation",
-    "workspace.editFolder": "Folder settings",
-    "workspace.selectedFolder": "Selected folder",
-    "workspace.noFolder": "No folder selected",
-    "workspace.folderName": "Folder name",
-    "workspace.localFolder": "Local folder to access",
-    "workspace.pickFolderPlaceholder": "Choose a folder",
-    "workspace.pickFolder": "Choose folder",
-    "workspace.reload": "Reload",
-    "workspace.notConfigured": "Local access is not set for {name}.",
-    "workspace.loaded": "{name}: loaded {files} files, {selected} added to context.",
-    "workspace.empty": "This folder is empty. Generated files can be saved here.",
-    "workspace.binary": " binary/large",
-    "workspace.savePath": "Save path",
-    "workspace.writePlaceholder": "Paste generated code here before saving.",
-    "workspace.saveFile": "Save file",
-    "workspace.waitingPick": "Waiting for folder selection...",
-    "workspace.loading": "Loading folder...",
-    "workspace.saved": "Saved {path} ({size} bytes).",
-    "workspace.saveError": "Save error",
-    "workspace.savedTo": "Saved to {path} ({size} bytes).",
-    "workspace.cannotInferSavePath": "Could not determine the save path. I put the code in the save box. Enter a save path and press Save file.",
-    "composer.attachImage": "Attach image",
-    "composer.removeAttachment": "Remove attachment",
-    "composer.attachedImage": "Attached image",
-    "image.generated": "Image generated.",
-    "composer.placeholder": "Message Gemma 4 12B. Example: generate an image of a red apple",
-    "composer.model": "Model",
-    "chat.new": "New chat",
-    "chat.emptySubtitle": "Local chat through Ollama",
-    "chat.you": "You",
-    "chat.generatingRole": "Gemma ・ generating",
-    "chat.generating": "Generating",
-    "chat.streamingStatus": "{label} ・ {seconds}s ・ streaming ・ ■ to stop",
-    "chat.duration": "Time",
-    "chat.model": "Model",
-    "chat.task": "Task",
-    "chat.mode": "Mode",
-    "chat.preview": "Preview",
-    "folder.new": "New folder",
-    "folder.default": "Default folder",
-    "folder.untitled": "Untitled",
-    "folder.none": "No folders",
-    "folder.localReady": "Local access set",
-    "folder.localMissing": "Local access not set",
-    "folder.add": "Add",
-    "folder.addTitle": "Add a chat to this folder",
-    "folder.edit": "Edit",
-    "folder.editTitle": "Rename folder",
-    "folder.delete": "Delete",
-    "folder.deleteTitle": "Delete folder",
-    "folder.deleteConfirm": "Delete “{name}” and {count} chats inside it?",
-    "chat.editTitle": "Rename chat",
-    "chat.deleteTitle": "Delete chat",
-    "chat.none": "No chats",
-    "chat.deleteConfirm": "Delete “{name}”?",
-    "undo.deleted": "Deleted {target} “{label}”.",
-    "status.checking": "Checking",
-    "status.available": "Available",
-    "status.codingMissing": "Coding model missing",
-    "status.modelMissing": "Model missing",
-    "status.offline": "Offline",
-    "progress.generating": "Generating",
-    "progress.fast": "Fast generation",
-    "progress.quality": "Generating with quality",
-    "progress.lightweight": "Generating with lightweight model",
-    "progress.translation": "Translating",
-    "progress.coding": "Generating code",
-    "progress.search": "Searching + generating",
-    "progress.workspace": "Generating and validating",
-    "progress.image": "Generating image",
-    "progress.weather": "Getting weather",
-    "progress.saving": "Saving",
-    "progress.stopping": "Stopping",
-    "error.prefix": "Error",
+  teacher: {
+    ja: "あなたは学生を支えるAIです。マイキャラ設定の名前と話し方を使いながら、やさしい先生のように説明してください。難しい言葉はかみ砕き、必要な時だけ例を入れてください。正確でないことは作らず、分からない時は確認をすすめてください。",
+    en: "You are an AI that supports students. Use the configured character name and speaking style, while explaining like a friendly teacher. Rephrase difficult terms simply and add examples only when useful. Do not invent uncertain facts; suggest verification when needed.",
+  },
+  concise: {
+    ja: "あなたは簡潔で有用なAIです。マイキャラ設定の名前と話し方を使いながら、前置きなしで短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。分からないことは作らず、分からないと伝えてください。",
+    en: "You are a concise and helpful AI. Use the configured character name and speaking style, while answering briefly without preamble. Use bullets only for comparisons, steps, or structured explanations. Do not invent unknown facts; say when you do not know.",
+  },
+  detailed: {
+    ja: "あなたは学生を支えるAIです。マイキャラ設定の名前と話し方を使いながら、理由・手順・注意点を分かりやすく説明してください。長くなりすぎないように区切り、正確でないことは作らず、必要ならWeb検索や学習セットへの登録を提案してください。",
+    en: "You are an AI that supports students. Use the configured character name and speaking style, while explaining reasons, steps, and cautions clearly. Keep long answers segmented. Do not invent uncertain facts; suggest web search or adding a learning-set correction when useful.",
   },
 };
 
+const AUTO_SAVE_SETTING_KEYS = {
+  systemPrompt: "gemma4.systemPrompt",
+  temperature: "gemma4.temperature",
+  topP: "gemma4.topP",
+  topK: "gemma4.topK",
+  numPredict: "gemma4.numPredict",
+  numCtx: "gemma4.numCtx",
+  historyTurns: "gemma4.historyTurns",
+};
+
+const I18N = window.GEMMA_I18N || {};
+const {
+  attachmentKind,
+  supportedAttachmentFile,
+  extractAttachmentContents,
+  attachmentContextFromResults,
+  isVagueAttachmentQuestion,
+  isAttachmentTranscriptRequest,
+  messageWithAttachmentContext,
+  attachmentPreviewLines,
+  attachmentSummarySources,
+  attachmentAnswerLooksBroken,
+  lastReadableAttachment,
+  lastAttachmentReference,
+  directAttachmentAnswer,
+  directAttachmentTranscriptAnswer,
+  unreadablePreviousAttachmentAnswer,
+  isAttachmentFollowupRequest,
+} = window.GEMMA_ATTACHMENTS || {};
+
 const els = {
+  workspace: document.querySelector(".workspace"),
   sidebar: document.querySelector("#sidebar"),
   sidebarResizer: document.querySelector("#sidebar-resizer"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
   sidebarCollapse: document.querySelector("#sidebar-collapse"),
+  settingsMenuToggle: document.querySelector("#settings-menu-toggle"),
+  settingsMenuBack: document.querySelector("#settings-menu-back"),
+  sidebarSettingsMenu: document.querySelector("#sidebar-settings-menu"),
+  responseSettingsToggle: document.querySelector("#response-settings-toggle"),
+  responseSettingsPanel: document.querySelector("#response-settings-panel"),
+  responseSettingsClose: document.querySelector("#response-settings-close"),
+  responseSettingsBody: document.querySelector("#response-settings-body"),
+  responseSettingsGrid: document.querySelector("#response-settings-grid"),
+  languageModelSettingsGrid: document.querySelector("#language-model-settings-grid"),
+  languageModelDownloadView: document.querySelector("#language-model-download-view"),
+  languageModelExternalView: document.querySelector("#language-model-external-view"),
   sidebarSearch: document.querySelector("#sidebar-search"),
   messages: document.querySelector("#messages"),
   prompt: document.querySelector("#prompt"),
@@ -378,6 +181,8 @@ const els = {
   imageStrip: document.querySelector("#image-strip"),
   imageInput: document.querySelector("#image-input"),
   attachImage: document.querySelector("#attach-image"),
+  voiceInput: document.querySelector("#voice-input"),
+  composerStatus: document.querySelector("#composer-status"),
   send: document.querySelector("#send"),
   stop: document.querySelector("#stop"),
   newFolder: document.querySelector("#new-folder"),
@@ -385,6 +190,7 @@ const els = {
   sessionList: document.querySelector("#session-list"),
   chatTitle: document.querySelector("#chat-title"),
   chatMeta: document.querySelector("#chat-meta"),
+  sidebarAppVersion: document.querySelector("#sidebar-app-version"),
   statusDot: document.querySelector("#status-dot"),
   statusText: document.querySelector("#status-text"),
   clearChat: document.querySelector("#clear-chat"),
@@ -396,11 +202,29 @@ const els = {
   workspaceRoot: document.querySelector("#workspace-root"),
   workspacePick: document.querySelector("#workspace-pick"),
   workspaceLoad: document.querySelector("#workspace-load"),
+  workspaceTrainingSet: document.querySelector("#workspace-training-set"),
+  workspaceCodegraphRow: document.querySelector("#workspace-codegraph-row"),
+  workspaceCodegraphEnabled: document.querySelector("#workspace-codegraph-enabled"),
+  workspaceCodegraphPrepare: document.querySelector("#workspace-codegraph-prepare"),
+  workspaceCodegraphStatus: document.querySelector("#workspace-codegraph-status"),
+  workspaceSearchRow: document.querySelector("#workspace-search-row"),
+  workspaceSearchQuery: document.querySelector("#workspace-search-query"),
+  workspaceSearchRun: document.querySelector("#workspace-search-run"),
+  workspaceSearchStatus: document.querySelector("#workspace-search-status"),
+  workspaceSearchResults: document.querySelector("#workspace-search-results"),
   workspaceStatus: document.querySelector("#workspace-status"),
   workspaceFiles: document.querySelector("#workspace-files"),
+  workspacePreview: document.querySelector("#workspace-preview"),
+  workspacePreviewPath: document.querySelector("#workspace-preview-path"),
+  workspacePreviewSearch: document.querySelector("#workspace-preview-search"),
+  workspacePreviewSearchCount: document.querySelector("#workspace-preview-search-count"),
+  workspacePreviewPrev: document.querySelector("#workspace-preview-prev"),
+  workspacePreviewNext: document.querySelector("#workspace-preview-next"),
+  workspacePreviewContent: document.querySelector("#workspace-preview-content"),
   writePath: document.querySelector("#write-path"),
   writeContent: document.querySelector("#write-content"),
   writeFile: document.querySelector("#write-file"),
+  revealPath: document.querySelector("#reveal-path"),
   undoToast: document.querySelector("#undo-toast"),
   undoText: document.querySelector("#undo-text"),
   undoDelete: document.querySelector("#undo-delete"),
@@ -408,8 +232,63 @@ const els = {
   settingsToggle: document.querySelector("#settings-toggle"),
   settingsClose: document.querySelector("#settings-close"),
   settingsPanel: document.querySelector("#settings-panel"),
+  asrToggle: document.querySelector("#asr-toggle"),
+  asrPanel: document.querySelector("#asr-panel"),
+  asrClose: document.querySelector("#asr-close"),
+  characterToggle: document.querySelector("#character-toggle"),
+  characterPanel: document.querySelector("#character-panel"),
+  characterClose: document.querySelector("#character-close"),
+  characterName: document.querySelector("#character-name"),
+  characterUserName: document.querySelector("#character-user-name"),
+  characterSelfName: document.querySelector("#character-self-name"),
+  characterGender: document.querySelector("#character-gender"),
+  characterAvatar: document.querySelector("#character-avatar"),
+  characterAvatarPreview: document.querySelector("#character-avatar-preview"),
+  characterChatPreviewAvatar: document.querySelector("#character-chat-preview-avatar"),
+  characterChatPreviewName: document.querySelector("#character-chat-preview-name"),
+  characterChatPreviewText: document.querySelector("#character-chat-preview-text"),
+  characterAvatarPick: document.querySelector("#character-avatar-pick"),
+  characterAvatarClear: document.querySelector("#character-avatar-clear"),
+  characterAvatarFile: document.querySelector("#character-avatar-file"),
+  characterTone: document.querySelector("#character-tone"),
+  characterMemoryMode: document.querySelector("#character-memory-mode"),
+  characterMemoryModeChoices: document.querySelectorAll("input[name='character-memory-mode-choice']"),
+  characterPersonality: document.querySelector("#character-personality"),
+  characterSystemAddon: document.querySelector("#character-system-addon"),
+  characterSave: document.querySelector("#character-save"),
+  characterMemoryNew: document.querySelector("#character-memory-new"),
+  characterMemoryAdd: document.querySelector("#character-memory-add"),
+  characterMemoryFilters: document.querySelector("#character-memory-filters"),
+  characterMemorySearch: document.querySelector("#character-memory-search"),
+  characterMemoryList: document.querySelector("#character-memory-list"),
+  studyPacksToggle: document.querySelector("#study-packs-toggle"),
+  studyPacksPanel: document.querySelector("#study-packs-panel"),
+  studyPacksClose: document.querySelector("#study-packs-close"),
+  trainingManagementToggle: document.querySelector("#training-panel-toggle"),
+  trainingManagementPanel: document.querySelector("#training-management-panel"),
+  trainingManagementClose: document.querySelector("#training-management-close"),
+  trainingManagementBody: document.querySelector("#training-management-body"),
+  pluginsToggle: document.querySelector("#plugins-toggle"),
+  pluginsPanel: document.querySelector("#plugins-panel"),
+  pluginsClose: document.querySelector("#plugins-close"),
+  languageModelsToggle: document.querySelector("#language-models-toggle"),
+  languageModelsPanel: document.querySelector("#language-models-panel"),
+  languageModelsClose: document.querySelector("#language-models-close"),
+  languageModelsBody: document.querySelector("#language-models-body"),
+  codegraphPluginToggle: document.querySelector("#codegraph-plugin-toggle"),
+  codegraphPluginStatus: document.querySelector("#codegraph-plugin-status"),
   settingsMeta: document.querySelector("#settings-meta"),
+  searchCapabilities: document.querySelector("#search-capabilities"),
+  asrSettings: document.querySelector("#asr-settings"),
+  weatherLocationUse: document.querySelector("#weather-location-use"),
+  weatherLocationStatus: document.querySelector("#weather-location-status"),
   modelInstaller: document.querySelector("#model-installer"),
+  externalLlmSettings: document.querySelector("#external-llm-settings"),
+  externalLlmUrl: document.querySelector("#external-llm-url"),
+  externalLlmCheck: document.querySelector("#external-llm-check"),
+  externalLlmClear: document.querySelector("#external-llm-clear"),
+  externalLlmCopyModel: document.querySelector("#external-llm-copy-model"),
+  externalLlmStatus: document.querySelector("#external-llm-status"),
   languageSelect: document.querySelector("#language-select"),
   themeSelect: document.querySelector("#theme-select"),
   responseMode: document.querySelector("#response-mode"),
@@ -419,6 +298,7 @@ const els = {
   chatModel: document.querySelector("#chat-model"),
   codingModel: document.querySelector("#coding-model"),
   translationModel: document.querySelector("#translation-model"),
+  systemPromptTemplate: document.querySelector("#system-prompt-template"),
   systemPrompt: document.querySelector("#system-prompt"),
   temperature: document.querySelector("#temperature"),
   topP: document.querySelector("#top-p"),
@@ -427,6 +307,28 @@ const els = {
   numCtx: document.querySelector("#num-ctx"),
   historyTurns: document.querySelector("#history-turns"),
   enterToSend: document.querySelector("#enter-to-send"),
+  trainingSetName: document.querySelector("#training-set-name"),
+  trainingSetCreate: document.querySelector("#training-set-create"),
+  trainingSetSelect: document.querySelector("#training-set-select"),
+  trainingSetRename: document.querySelector("#training-set-rename"),
+  trainingSetDelete: document.querySelector("#training-set-delete"),
+  trainingExportScope: document.querySelector("#training-export-scope"),
+  trainingExport: document.querySelector("#training-export"),
+  trainingSetSummary: document.querySelector("#training-set-summary"),
+  trainingExamples: document.querySelector("#training-examples"),
+  trainingExampleList: document.querySelector("#training-example-list"),
+  trainingStatus: document.querySelector("#training-status"),
+  correctionModal: document.querySelector("#correction-modal"),
+  correctionTrainingSet: document.querySelector("#correction-training-set"),
+  correctionText: document.querySelector("#correction-text"),
+  correctionClose: document.querySelector("#correction-close"),
+  correctionCancel: document.querySelector("#correction-cancel"),
+  correctionSave: document.querySelector("#correction-save"),
+  memoryCandidateModal: document.querySelector("#memory-candidate-modal"),
+  memoryCandidateText: document.querySelector("#memory-candidate-text"),
+  memoryCandidateClose: document.querySelector("#memory-candidate-close"),
+  memoryCandidateDiscard: document.querySelector("#memory-candidate-discard"),
+  memoryCandidateSave: document.querySelector("#memory-candidate-save"),
 };
 
 if (window.matchMedia("(max-width: 760px)").matches && localStorage.getItem("gemma4.sidebarHidden") === null) {
@@ -459,18 +361,139 @@ function applyI18n() {
   if (els.languageSelect) els.languageSelect.value = state.language;
 }
 
+function moveSettingsSections() {
+  const moveField = (source, target) => {
+    const field = source?.closest?.(".setting-field");
+    if (field && target && field.parentElement !== target) target.append(field);
+  };
+
+  if (els.responseSettingsBody) {
+    moveField(els.systemPrompt, els.responseSettingsBody);
+  }
+  [
+    els.responseMode,
+    els.thinkingMode,
+    els.temperature,
+    els.topP,
+    els.topK,
+    els.numPredict,
+    els.numCtx,
+    els.historyTurns,
+    els.enterToSend,
+  ].forEach((control) => moveField(control, els.responseSettingsGrid));
+
+  [
+    els.chatModel,
+    els.codingModel,
+    els.translationModel,
+  ].forEach((control) => moveField(control, els.languageModelSettingsGrid));
+
+  if (els.languageModelDownloadView && els.modelInstaller && els.modelInstaller.parentElement !== els.languageModelDownloadView) {
+    els.languageModelDownloadView.append(els.modelInstaller);
+  }
+  if (els.languageModelExternalView && els.externalLlmSettings && els.externalLlmSettings.parentElement !== els.languageModelExternalView) {
+    els.languageModelExternalView.append(els.externalLlmSettings);
+  }
+
+  if (els.pluginsPanel && els.searchCapabilities && els.searchCapabilities.parentElement !== els.pluginsPanel) {
+    const pluginBody = els.pluginsPanel.querySelector(".plugin-candidates");
+    els.pluginsPanel.insertBefore(els.searchCapabilities, pluginBody || els.pluginsPanel.lastElementChild);
+  }
+
+  if (els.trainingManagementPanel && els.trainingSetName) {
+    const trainingPanel = els.trainingSetName.closest(".training-panel");
+    const target = els.trainingManagementBody;
+    if (trainingPanel && target && trainingPanel.parentElement !== target) {
+      target.append(trainingPanel);
+    }
+  }
+}
+
+function allSystemPromptTemplateTexts() {
+  return Object.values(SYSTEM_PROMPT_TEMPLATES)
+    .flatMap((template) => Object.values(template));
+}
+
+function systemPromptTemplateText(templateId, language = state.language) {
+  const template = SYSTEM_PROMPT_TEMPLATES[templateId] || SYSTEM_PROMPT_TEMPLATES.default;
+  return template[language] || template.ja || SYSTEM_PROMPTS.ja;
+}
+
+function detectSystemPromptTemplate(value) {
+  const text = (value || "").trim();
+  for (const [id, template] of Object.entries(SYSTEM_PROMPT_TEMPLATES)) {
+    if (Object.values(template).some((candidate) => candidate.trim() === text)) return id;
+  }
+  return "custom";
+}
+
+function syncSystemPromptTemplate() {
+  if (!els.systemPromptTemplate || !els.systemPrompt) return;
+  els.systemPromptTemplate.value = detectSystemPromptTemplate(els.systemPrompt.value);
+}
+
+function saveSystemPromptSetting() {
+  if (!els.systemPrompt) return;
+  localStorage.setItem(AUTO_SAVE_SETTING_KEYS.systemPrompt, els.systemPrompt.value);
+}
+
+function applySystemPromptTemplate(templateId) {
+  if (!els.systemPrompt) return;
+  if (templateId === "custom") {
+    syncSystemPromptTemplate();
+    return;
+  }
+  els.systemPrompt.value = systemPromptTemplateText(templateId);
+  syncSystemPromptTemplate();
+  saveSystemPromptSetting();
+}
+
+function restoreSelectSetting(select, storageKey) {
+  if (!select) return;
+  const saved = localStorage.getItem(storageKey);
+  if (!saved) return;
+  const hasOption = [...select.options].some((option) => option.value === saved);
+  if (hasOption) select.value = saved;
+}
+
+function restoreAutoSavedSettings() {
+  if (els.systemPrompt) {
+    const savedPrompt = localStorage.getItem(AUTO_SAVE_SETTING_KEYS.systemPrompt);
+    if (savedPrompt) els.systemPrompt.value = savedPrompt;
+  }
+  restoreSelectSetting(els.temperature, AUTO_SAVE_SETTING_KEYS.temperature);
+  restoreSelectSetting(els.topP, AUTO_SAVE_SETTING_KEYS.topP);
+  restoreSelectSetting(els.topK, AUTO_SAVE_SETTING_KEYS.topK);
+  restoreSelectSetting(els.numPredict, AUTO_SAVE_SETTING_KEYS.numPredict);
+  restoreSelectSetting(els.numCtx, AUTO_SAVE_SETTING_KEYS.numCtx);
+  restoreSelectSetting(els.historyTurns, AUTO_SAVE_SETTING_KEYS.historyTurns);
+  syncSystemPromptTemplate();
+}
+
+function saveSelectSetting(select, storageKey) {
+  if (!select) return;
+  localStorage.setItem(storageKey, select.value);
+}
+
 function setLanguage(language) {
   const next = I18N[language] ? language : "ja";
   const currentPrompt = els.systemPrompt?.value || "";
   state.language = next;
   localStorage.setItem("gemma4.language", state.language);
-  if (els.systemPrompt && Object.values(SYSTEM_PROMPTS).includes(currentPrompt)) {
-    els.systemPrompt.value = SYSTEM_PROMPTS[state.language] || SYSTEM_PROMPTS.ja;
+  const currentTemplate = detectSystemPromptTemplate(currentPrompt);
+  if (els.systemPrompt && currentTemplate !== "custom") {
+    els.systemPrompt.value = systemPromptTemplateText(currentTemplate, state.language);
+    saveSystemPromptSetting();
   }
+  syncSystemPromptTemplate();
   applyI18n();
   syncModelInputs();
   renderSettingsMeta();
   renderModelInstaller();
+  renderAsrSettingsPanel();
+  renderStudyPacksPanel();
+  renderPluginsPanel();
+  renderWeatherLocationStatus();
   render();
 }
 
@@ -490,6 +513,18 @@ function loadFolders() {
   }
 }
 
+function loadCollapsedFolderIds() {
+  try {
+    return JSON.parse(localStorage.getItem("gemma4.collapsedFolderIds") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function loadTrainingSets() {
+  return window.GEMMA_TRAINING?.loadTrainingSets?.() || [];
+}
+
 function saveSessions() {
   localStorage.setItem("gemma4.sessions", JSON.stringify(state.sessions));
 }
@@ -498,6 +533,22 @@ function saveFolders() {
   localStorage.setItem("gemma4.folders", JSON.stringify(state.folders));
   localStorage.setItem("gemma4.activeFolderId", state.activeFolderId || "");
   localStorage.setItem("gemma4.foldersInitialized", "true");
+}
+
+function saveCollapsedFolders() {
+  localStorage.setItem("gemma4.collapsedFolderIds", JSON.stringify([...state.collapsedFolderIds]));
+}
+
+function saveTrainingSets() {
+  window.GEMMA_TRAINING?.saveTrainingSets?.({
+    sets: state.trainingSets,
+    activeTrainingSetId: state.activeTrainingSetId,
+  });
+}
+
+function saveCharacterState() {
+  state.character = window.GEMMA_CHARACTER?.saveCharacter?.(state.character) || state.character;
+  state.characterMemorySets = window.GEMMA_CHARACTER?.saveMemorySets?.(state.characterMemorySets) || state.characterMemorySets;
 }
 
 function saveWorkspacePrefs() {
@@ -509,22 +560,669 @@ function saveWorkspacePrefs() {
 }
 
 function createFolder(name = t("folder.new")) {
-  const folder = {
-    id: crypto.randomUUID(),
+  const folderState = window.GEMMA_SIDEBAR.createFolderInState({
+    state,
     name,
-    workspaceRoot: "",
-    selectedFiles: [],
-    createdAt: Date.now(),
-  };
-  state.folders.unshift(folder);
-  state.activeFolderId = folder.id;
+    createId: () => crypto.randomUUID(),
+    now: () => Date.now(),
+  });
+  state.folders = folderState.folders;
+  state.activeFolderId = folderState.activeFolderId;
   syncWorkspaceFromActiveFolder();
   saveFolders();
-  return folder;
+  return folderState.folder;
 }
 
 function activeFolder() {
   return state.folders.find((folder) => folder.id === state.activeFolderId) || state.folders[0] || null;
+}
+
+function characterAddressPrefix() {
+  const userName = String(state.character?.userName || "").trim();
+  return userName ? `${userName}、` : "";
+}
+
+function characterUncertainAnswer() {
+  const prefix = characterAddressPrefix();
+  return `${prefix}正確な情報を持っていないから、ここでは答えきれないよ。「Web検索」をONにするか、「修正して学習」で正しい情報を教えてね。`;
+}
+
+function applyCharacterToneToToolReply(content) {
+  const text = String(content || "").trim();
+  if (!text || state.language === "en") return text;
+  if (text === t("training.uncertainAnswer")) return characterUncertainAnswer();
+  const normalized = text.replace(/\s+/g, "").replace(/[。.!！]+$/g, "");
+  if (/^(確認できません|わかりません|分かりません|不明です|確認できない)$/.test(normalized)) {
+    return characterUncertainAnswer();
+  }
+  const prefix = characterAddressPrefix();
+  if (!prefix || text.startsWith(prefix)) return text;
+  return `${prefix}${text}`;
+}
+
+function workspaceFileKindFromText(text) {
+  return workspaceFileKindFromTextApi?.(text, {
+    hasLookupIntent: hasExplicitWorkspaceLookupIntent,
+    isExcludedRequest: isCharacterPreferenceRequest,
+  }) || "";
+}
+
+function attachmentReplyOptions() {
+  return {
+    toneReply: applyCharacterToneToToolReply,
+    compactContent: compactWorkspaceContent,
+    isCharacterPreference: isCharacterPreferenceRequest,
+  };
+}
+
+function pushAssistantReply(session, { content, sources, durationSeconds, runMeta }) {
+  session.messages.push({
+    role: "assistant",
+    content,
+    ...(sources ? { sources } : {}),
+    durationSeconds,
+    runMeta,
+  });
+}
+
+function attachmentRunMeta(requestOptions, modelReason) {
+  return {
+    model: "attachment-reader",
+    modelLabel: "添付ファイル読み取り",
+    task: "attachment",
+    taskLabel: "添付ファイル",
+    responseMode: requestOptions.responseMode,
+    responseModeLabel: responseModeLabel(requestOptions.responseMode),
+    thinkingMode: requestOptions.thinkingMode,
+    modelReason,
+    codeUnderstanding: false,
+  };
+}
+
+function workspaceFileKindAnswer(text) {
+  const kind = workspaceFileKindFromText(text);
+  if (!kind || !state.workspaceRoot || !Array.isArray(state.workspaceFiles)) {
+    return null;
+  }
+  const matches = state.workspaceFiles.filter((file) => workspaceFileMatchesKind(file, kind));
+  const folderName = activeFolder()?.name || "このフォルダー";
+  const label = workspaceFileKindLabel(kind);
+  const sources = matches.slice(0, 8).map((file) => ({
+    type: "workspace",
+    title: file.path,
+    path: file.path,
+    line: "",
+    snippet: `${label}ファイル`,
+  }));
+  if (!matches.length) {
+    return {
+      content: applyCharacterToneToToolReply(`${folderName}フォルダーには${label}ファイルは見つからなかったよ。`),
+      sources,
+    };
+  }
+  const visible = matches.slice(0, 8).map((file) => {
+    const size = workspaceFormatBytes(file.size);
+    return `- ${file.path}${size ? ` (${size})` : ""}`;
+  });
+  const more = matches.length > visible.length ? `\nほかに${matches.length - visible.length}件あるよ。` : "";
+  return {
+    content: applyCharacterToneToToolReply(`${folderName}フォルダーには${label}ファイルが${matches.length}件あるよ。\n${visible.join("\n")}${more}`),
+    sources,
+  };
+}
+
+function workspaceFilesForKind(kind) {
+  if (!kind || !Array.isArray(state.workspaceFiles)) return [];
+  return state.workspaceFiles.filter((file) => workspaceFileMatchesKind(file, kind));
+}
+
+function isWorkspaceFileContentRequest(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized || isCharacterPreferenceRequest(normalized)) return false;
+  return /(情報|内容|中身|本文|要約|説明|読んで|開いて|見せて|何が書いて|どんなこと|どんな内容|どんな中身|教えて|おしえて|文字起こし|全文|書き起こし)/i.test(normalized);
+}
+
+function isWorkspaceTranscriptRequest(text) {
+  const normalized = String(text || "").trim();
+  return /(文字起こし|書き起こし|全文|本文をそのまま|そのまま表示|原文)/i.test(normalized);
+}
+
+function workspaceSourceKind(source) {
+  const path = String(source?.path || source?.title || "").toLowerCase();
+  const snippet = String(source?.snippet || "").toLowerCase();
+  if (path.endsWith(".pdf") || snippet.includes("pdf")) return "pdf";
+  if (/\.(doc|docx)$/.test(path) || snippet.includes("word")) return "word";
+  if (/\.(txt|md|csv|json|html?|css|js|ts|py)$/.test(path)) return "text";
+  return "";
+}
+
+function isReadableWorkspaceSource(source) {
+  return source?.type === "workspace"
+    && source?.path
+    && source?.sourceType !== "codegraph"
+    && Boolean(workspaceSourceKind(source));
+}
+
+function lastReadableWorkspaceSource(session) {
+  const messages = Array.isArray(session?.messages) ? session.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const sources = Array.isArray(messages[index]?.sources) ? messages[index].sources : [];
+    const readable = sources.find((source) => isReadableWorkspaceSource(source));
+    if (readable) return readable;
+  }
+  return null;
+}
+
+function isWorkspaceSourceContentFollowup(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized || !state.workspaceRoot || isCharacterPreferenceRequest(normalized)) return false;
+  return /^(どんな内容|どんな中身|内容[は？?]*|中身[は？?]*|要約|要約して|読んで|開いて|見せて|何が書いて|何が入って|どんなこと)/.test(normalized)
+    || /(内容|中身|要約|本文).{0,12}(教えて|知りたい|見せて|読んで|確認)/.test(normalized)
+    || /この(?:PDF|ファイル|資料|文書)|さっきの(?:PDF|ファイル|資料|文書)|それの(?:内容|中身|要約)/.test(normalized);
+}
+
+async function readWorkspaceSourceContent(source) {
+  const path = String(source?.path || "").trim();
+  if (!state.workspaceRoot || !path) throw new Error(t("workspace.sourceOpenError"));
+  const response = await fetch("/api/workspace/read", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root: state.workspaceRoot, path }),
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok) throw new Error(data.error || t("workspace.sourceOpenError"));
+  return data;
+}
+
+function workspaceTranscriptAction({ path, content }) {
+  return buildWorkspaceTranscriptAction?.({
+    root: state.workspaceRoot,
+    path,
+    content,
+  }) || null;
+}
+
+async function handleWorkspaceSourceFollowup(text) {
+  let session = activeSession();
+  if (!isWorkspaceSourceContentFollowup(text)) return false;
+  if (!session) {
+    newSession();
+    session = activeSession();
+  }
+  const source = lastReadableWorkspaceSource(session);
+  if (!source) return false;
+
+  session.messages.push({ role: "user", content: text });
+  updateSessionTitle(session, text);
+  state.busy = true;
+  startProgressTimer("ファイルを読んでいます", source.path);
+  saveSessions();
+  render();
+
+  try {
+    const data = await readWorkspaceSourceContent(source);
+    const transcriptMode = isWorkspaceTranscriptRequest(text);
+    const sourceContent = data.content || "";
+    const summary = transcriptMode
+      ? workspaceContentTranscript(data.content || "")
+      : workspaceContentSummary(data.content || "");
+    const path = data.path || source.path;
+    const transcriptAction = transcriptMode ? workspaceTranscriptAction({ path, content: sourceContent }) : null;
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    const readLabel = transcriptMode ? "文字起こししたよ" : "内容を読んだよ";
+    const content = summary
+      ? characterizeToolAnswer(`${path} の${readLabel}。\n\n${summary}`, { type: "workspace" })
+      : characterizeToolAnswer(`${path} は見つけたよ。ただ、本文はうまく読み取れなかったんだ。画像だけのPDF、保護されたPDF、特殊な文字埋め込みのPDFだと、OCRが必要になることがあるよ。`, { type: "workspace" });
+    session.messages.push({
+      role: "assistant",
+      content,
+      sources: [{
+        type: "workspace",
+        title: path,
+        path,
+        line: source.line || "",
+        snippet: summary ? summary.slice(0, 180) : source.snippet || "",
+      }],
+      workspaceTranscript: transcriptAction,
+      durationSeconds,
+      runMeta: {
+        model: "local-file-reader",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: state.responseMode,
+        responseModeLabel: responseModeLabel(state.responseMode),
+        thinkingMode: state.thinkingMode,
+        modelReason: t("model.reasonWorkspaceLookup"),
+        codeUnderstanding: false,
+      },
+    });
+  } catch (error) {
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    session.messages.push({
+      role: "assistant",
+      content: characterizeToolAnswer(`${source.path} は見つけたよ。ただ、本文はうまく読み取れなかったんだ。画像だけのPDF、保護されたPDF、特殊な文字埋め込みのPDFだと、OCRが必要になることがあるよ。`, { type: "workspace" }),
+      sources: [{
+        type: "workspace",
+        title: source.title || source.path,
+        path: source.path,
+        line: source.line || "",
+        snippet: source.snippet || "",
+      }],
+      durationSeconds,
+      runMeta: {
+        model: "local-file-reader",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: state.responseMode,
+        responseModeLabel: responseModeLabel(state.responseMode),
+        thinkingMode: state.thinkingMode,
+        modelReason: error?.message || t("workspace.sourceOpenError"),
+        codeUnderstanding: false,
+      },
+    });
+  } finally {
+    state.busy = false;
+    stopProgressTimer();
+    saveSessions();
+    render();
+  }
+  return true;
+}
+
+async function handleWorkspaceFileKindContentRequest(text, requestOptions) {
+  if (requestOptions?.codingMode || requestOptions?.translationMode) return false;
+  if (!state.workspaceRoot || !isWorkspaceLookupRequest(text) || !isWorkspaceFileContentRequest(text)) return false;
+  const kind = workspaceFileKindFromText(text);
+  if (!kind) return false;
+  if (!state.workspaceFiles.length) await loadWorkspace();
+  const matches = workspaceFilesForKind(kind);
+  if (!matches.length) return false;
+
+  const session = activeSession();
+  const label = workspaceFileKindLabel(kind);
+  const visibleSources = matches.slice(0, 8).map((file) => ({
+    type: "workspace",
+    title: file.path,
+    path: file.path,
+    line: "",
+    snippet: `${label}ファイル`,
+  }));
+
+  if (matches.length > 1) {
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    const visible = matches.slice(0, 8).map((file) => {
+      const size = workspaceFormatBytes(file.size);
+      return `- ${file.path}${size ? ` (${size})` : ""}`;
+    });
+    const more = matches.length > visible.length ? `\nほかに${matches.length - visible.length}件あるよ。` : "";
+    session.messages.push({
+      role: "assistant",
+      content: applyCharacterToneToToolReply(`${label}ファイルが${matches.length}件あるよ。どのファイルの内容を読むか、ファイル名で教えてね。\n${visible.join("\n")}${more}`),
+      sources: visibleSources,
+      durationSeconds,
+      runMeta: {
+        model: "local-fast-search",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: requestOptions.responseMode,
+        responseModeLabel: responseModeLabel(requestOptions.responseMode),
+        thinkingMode: requestOptions.thinkingMode,
+        modelReason: t("model.reasonWorkspaceLookup"),
+        codeUnderstanding: false,
+      },
+    });
+    return true;
+  }
+
+  const file = matches[0];
+  startProgressTimer("ファイルを読んでいます", file.path);
+  try {
+    const data = await readWorkspaceSourceContent({ path: file.path });
+    const transcriptMode = isWorkspaceTranscriptRequest(text);
+    const path = data.path || file.path;
+    const sourceContent = data.content || "";
+    const summary = transcriptMode
+      ? workspaceContentTranscript(sourceContent)
+      : workspaceContentSummary(data.content || "");
+    const transcriptAction = transcriptMode ? workspaceTranscriptAction({ path, content: sourceContent }) : null;
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    const readLabel = transcriptMode ? "文字起こししたよ" : "内容を読んだよ";
+    const content = summary
+      ? characterizeToolAnswer(`${path} の${readLabel}。\n\n${summary}`, { type: "workspace" })
+      : characterizeToolAnswer(`${path} は見つけたよ。ただ、本文はうまく読み取れなかったんだ。画像だけのPDF、保護されたPDF、特殊な文字埋め込みのPDFだと、OCRが必要になることがあるよ。`, { type: "workspace" });
+    session.messages.push({
+      role: "assistant",
+      content,
+      sources: [{
+        type: "workspace",
+        title: path,
+        path,
+        line: "",
+        snippet: summary ? summary.slice(0, 180) : `${label}ファイル`,
+      }],
+      workspaceTranscript: transcriptAction,
+      durationSeconds,
+      runMeta: {
+        model: "local-file-reader",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: requestOptions.responseMode,
+        responseModeLabel: responseModeLabel(requestOptions.responseMode),
+        thinkingMode: requestOptions.thinkingMode,
+        modelReason: t("model.reasonWorkspaceLookup"),
+        codeUnderstanding: false,
+      },
+    });
+  } catch {
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    session.messages.push({
+      role: "assistant",
+      content: characterizeToolAnswer(`${file.path} は見つけたよ。ただ、本文はうまく読み取れなかったんだ。画像だけのPDF、保護されたPDF、特殊な文字埋め込みのPDFだと、OCRが必要になることがあるよ。`, { type: "workspace" }),
+      sources: visibleSources,
+      durationSeconds,
+      runMeta: {
+        model: "local-file-reader",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: requestOptions.responseMode,
+        responseModeLabel: responseModeLabel(requestOptions.responseMode),
+        thinkingMode: requestOptions.thinkingMode,
+        modelReason: t("workspace.sourceOpenError"),
+        codeUnderstanding: false,
+      },
+    });
+  }
+  return true;
+}
+
+async function handleWorkspaceSearchContentRequest(text, sources, requestOptions) {
+  if (requestOptions?.codingMode || requestOptions?.translationMode) return false;
+  if (!state.workspaceRoot || !isWorkspaceLookupRequest(text) || !isWorkspaceFileContentRequest(text)) return false;
+  const readableSources = (Array.isArray(sources) ? sources : [])
+    .filter((source) => isReadableWorkspaceSource(source));
+  if (!readableSources.length) return false;
+
+  const session = activeSession();
+  const transcriptMode = isWorkspaceTranscriptRequest(text);
+  const pdfSources = readableSources.filter((source) => workspaceSourceKind(source) === "pdf");
+  const candidates = pdfSources.length ? pdfSources : readableSources;
+
+  if (candidates.length > 1 && !/この|それ|さっき|先ほど|1件|ひとつ|一つ/i.test(String(text || ""))) {
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    const visible = candidates.slice(0, 8).map((source) => `- ${source.path}`);
+    const more = candidates.length > visible.length ? `\nほかに${candidates.length - visible.length}件あるよ。` : "";
+    session.messages.push({
+      role: "assistant",
+      content: applyCharacterToneToToolReply(`読めそうなファイルが${candidates.length}件あるよ。どれを読むか、ファイル名で教えてね。\n${visible.join("\n")}${more}`),
+      sources: candidates.slice(0, 8),
+      durationSeconds,
+      runMeta: {
+        model: "local-fast-search",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: requestOptions.responseMode,
+        responseModeLabel: responseModeLabel(requestOptions.responseMode),
+        thinkingMode: requestOptions.thinkingMode,
+        modelReason: t("model.reasonWorkspaceLookup"),
+        codeUnderstanding: false,
+      },
+    });
+    return true;
+  }
+
+  const source = candidates[0];
+  startProgressTimer("ファイルを読んでいます", source.path);
+  try {
+    const data = await readWorkspaceSourceContent(source);
+    const path = data.path || source.path;
+    const sourceContent = data.content || "";
+    const summary = transcriptMode
+      ? workspaceContentTranscript(sourceContent)
+      : workspaceContentSummary(sourceContent);
+    const transcriptAction = transcriptMode ? workspaceTranscriptAction({ path, content: sourceContent }) : null;
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    const readLabel = transcriptMode ? "文字起こししたよ" : "内容を読んだよ";
+    const content = summary
+      ? characterizeToolAnswer(`${path} の${readLabel}。\n\n${summary}`, { type: "workspace" })
+      : characterizeToolAnswer(`${path} は見つけたよ。ただ、本文はうまく読み取れなかったんだ。画像だけのPDF、保護されたPDF、特殊な文字埋め込みのPDFだと、OCRが必要になることがあるよ。`, { type: "workspace" });
+    session.messages.push({
+      role: "assistant",
+      content,
+      sources: [{
+        ...source,
+        title: path,
+        path,
+        line: "",
+        snippet: summary ? summary.slice(0, 180) : source.snippet || "",
+      }],
+      workspaceTranscript: transcriptAction,
+      durationSeconds,
+      runMeta: {
+        model: "local-file-reader",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: requestOptions.responseMode,
+        responseModeLabel: responseModeLabel(requestOptions.responseMode),
+        thinkingMode: requestOptions.thinkingMode,
+        modelReason: t("model.reasonWorkspaceLookup"),
+        codeUnderstanding: false,
+      },
+    });
+  } catch {
+    const durationSeconds = (Date.now() - state.startedAt) / 1000;
+    session.messages.push({
+      role: "assistant",
+      content: characterizeToolAnswer(`${source.path} は見つけたよ。ただ、本文はうまく読み取れなかったんだ。画像だけのPDF、保護されたPDF、特殊な文字埋め込みのPDFだと、OCRが必要になることがあるよ。`, { type: "workspace" }),
+      sources: [source],
+      durationSeconds,
+      runMeta: {
+        model: "local-file-reader",
+        modelLabel: t("workspace.chatSearchModel"),
+        task: "search",
+        taskLabel: t("workspace.fastSearch"),
+        responseMode: requestOptions.responseMode,
+        responseModeLabel: responseModeLabel(requestOptions.responseMode),
+        thinkingMode: requestOptions.thinkingMode,
+        modelReason: t("workspace.sourceOpenError"),
+        codeUnderstanding: false,
+      },
+    });
+  } finally {
+    stopProgressTimer();
+    state.busy = false;
+    saveSessions();
+    render();
+  }
+  return true;
+}
+
+function workspaceSearchQueryFromText(text) {
+  const folder = activeFolder();
+  const fastSearchReady = Boolean(state.plugins?.["fast-search"]?.installed);
+  if (!state.workspaceRoot || !fastSearchReady || !folder) return "";
+  if ((isWorkspaceBuildRequest(text) && !isWorkspaceLookupRequest(text)) || isTranslationRequest(text)) return "";
+  const normalized = String(text || "").trim();
+  if (!hasExplicitWorkspaceLookupIntent(normalized) || isCharacterPreferenceRequest(normalized)) {
+    return "";
+  }
+  const fileKind = workspaceFileKindFromText(normalized);
+  if (fileKind) return fileKind === "word" ? "doc" : fileKind;
+  const quoted = normalized.match(/[「『"']([^「」『』"']{1,80})[」』"']/);
+  if (quoted?.[1]) return quoted[1].trim();
+  const fileName = normalized.match(/\b([A-Za-z0-9_.-]+\.(?:txt|md|pdf|docx?|html|css|js|jsx|ts|tsx|py|json|csv))\b/i);
+  if (fileName?.[1]) return fileName[1].trim();
+  const documentType = normalized.match(/(契約書|請求書|仕様書|見積書|領収書|議事録|PDF|pdf|Word|ワード|docx?|contract|agreement|invoice|specification|spec|estimate|quotation|receipt|minutes)/i);
+  if (documentType?.[1]) return documentType[1].trim();
+  const beforeFileWord = normalized.match(/([A-Za-z0-9_.-]{2,80}|[ぁ-んァ-ヶ一-龠ー]{2,40})\s*(?:という|の)?\s*(?:ファイル|file)/i);
+  if (beforeFileWord?.[1]) return beforeFileWord[1].trim();
+  const beforeFile = normalized.match(/([A-Za-z0-9_.-]{2,80}|[ぁ-んァ-ヶ一-龠ー]{2,40})\s*(?:は|って|が|を)?\s*(?:どの|どこ|含ま|書か|記載|検索|探)/i);
+  if (beforeFile?.[1]) return beforeFile[1].trim();
+  const afterSearch = normalized.match(/(?:検索|探|find|search)\s*(?:して|する|している|for)?\s*[:：]?\s*([A-Za-z0-9_.-]{2,80}|[ぁ-んァ-ヶ一-龠ー]{2,40})/i);
+  if (afterSearch?.[1]) return afterSearch[1].trim();
+  return "";
+}
+
+function workspacePayload(text = "") {
+  const codegraph = activeFolder()?.plugins?.codegraph || {};
+  return {
+    root: state.workspaceRoot,
+    files: [...state.selectedFiles],
+    codegraph: Boolean(codegraph.enabled && codegraph.status === "ready"),
+    searchQuery: workspaceSearchQueryFromText(text),
+  };
+}
+
+async function workspaceSearchSourcesForChat(workspace) {
+  if (!workspace?.root || !workspace?.searchQuery) return [];
+  try {
+    const response = await fetch("/api/workspace/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root: workspace.root, query: workspace.searchQuery }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok || !Array.isArray(data.results)) return [];
+    return data.results.slice(0, 8).map((item) => ({
+      type: "workspace",
+      title: item.matchType === "body" && item.line ? `${item.path || ""}:${item.line || ""}` : String(item.path || ""),
+      path: String(item.path || ""),
+      line: item.matchType === "body" ? (item.line || "") : "",
+      snippet: String(item.preview || ""),
+      matchType: String(item.matchType || ""),
+      sourceKind: String(item.sourceKind || ""),
+    })).filter((source) => source.path);
+  } catch {
+    return [];
+  }
+}
+
+function workspaceSearchAnswer(workspace, sources) {
+  if (!workspace?.searchQuery) return "";
+  if (!sources.length) {
+    return applyCharacterToneToToolReply(t("workspace.chatSearchNoResults", { query: workspace.searchQuery }));
+  }
+  const visible = sources.slice(0, 6);
+  const filenameOnly = visible.every((source) => source.matchType === "filename");
+  const lines = visible.map((source) => {
+    const location = source.line ? `${source.path}:${source.line}` : source.path;
+    const matchLabel = source.matchType === "filename" ? "（ファイル名）" : "";
+    const snippet = source.snippet && source.matchType !== "filename" ? ` - ${source.snippet}` : "";
+    return `- ${location}${matchLabel}${snippet}`;
+  });
+  const summary = filenameOnly
+    ? `フォルダー内検索で「${workspace.searchQuery}」がファイル名に含まれるファイルが見つかりました。本文の中ではなく、ファイル名で見つかった結果です。`
+    : t("workspace.chatSearchFound", { query: workspace.searchQuery });
+  const more = sources.length > visible.length
+    ? `\n${t("workspace.chatSearchMore", { count: sources.length - visible.length })}`
+    : "";
+  return applyCharacterToneToToolReply(`${summary}\n${lines.join("\n")}${more}`);
+}
+
+function codegraphSourcesForChat(limit = 5) {
+  const codegraph = activeFolder()?.plugins?.codegraph || {};
+  if (!codegraph.enabled || codegraph.status !== "ready") return [];
+  const files = Array.isArray(codegraph.summary?.files) ? codegraph.summary.files : [];
+  return files.slice(0, limit).map((item) => {
+    const symbols = Array.isArray(item.symbols) ? item.symbols.slice(0, 4).filter(Boolean) : [];
+    const imports = Array.isArray(item.imports) ? item.imports.slice(0, 3).filter(Boolean) : [];
+    const detail = [
+      symbols.length ? `${t("workspace.codeSymbols")}: ${symbols.join(", ")}` : "",
+      imports.length ? `${t("workspace.codeImports")}: ${imports.join(", ")}` : "",
+    ].filter(Boolean).join(" / ");
+    return {
+      type: "workspace",
+      sourceType: "codegraph",
+      title: item.path || "",
+      path: String(item.path || ""),
+      line: "",
+      snippet: detail || t("workspace.codeUnderstanding"),
+    };
+  }).filter((source) => source.path);
+}
+
+function workspaceLookupAnswer(workspace, searchSources, codegraphSources) {
+  if (searchSources.length) {
+    return workspaceSearchAnswer(workspace, searchSources);
+  }
+  if (workspace?.searchQuery) {
+    return workspaceSearchAnswer(workspace, []);
+  }
+  const folderName = activeFolder()?.name || "このフォルダー";
+  const fileNames = [...state.selectedFiles].slice(0, 8);
+  if (fileNames.length) {
+    return applyCharacterToneToToolReply(`${folderName}には以下のファイルがあります。\n${fileNames.map((name) => `- ${name}`).join("\n")}`);
+  }
+  if (codegraphSources.length) {
+    const lines = codegraphSources.slice(0, 6).map((source) => `- ${source.path}${source.snippet ? ` - ${source.snippet}` : ""}`);
+    return applyCharacterToneToToolReply(`${folderName}のコードを確認しました。\n${lines.join("\n")}`);
+  }
+  return applyCharacterToneToToolReply("このフォルダーで参照できるファイルはまだ読み込まれていません。フォルダー設定で再読み込みしてください。");
+}
+
+function renderWorkspacePreviewContent(content, activeLine = "") {
+  renderWorkspacePreviewContentView?.(els.workspacePreviewContent, content, activeLine);
+}
+
+function updateWorkspacePreviewSearch({ jump = false, direction = 0 } = {}) {
+  updateWorkspacePreviewSearchView?.({
+    contentTarget: els.workspacePreviewContent,
+    searchInput: els.workspacePreviewSearch,
+    countTarget: els.workspacePreviewSearchCount,
+    previousButton: els.workspacePreviewPrev,
+    nextButton: els.workspacePreviewNext,
+    state,
+    t,
+    jump,
+    direction,
+  });
+}
+
+async function openWorkspaceSource(source) {
+  const path = String(source?.path || "").trim();
+  if (!state.workspaceRoot || !path) return;
+  try {
+    const response = await fetch("/api/workspace/read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ root: state.workspaceRoot, path }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || "Could not read file.");
+    state.workspaceOpen = true;
+    if (els.workspacePreview) els.workspacePreview.hidden = false;
+    if (els.workspacePreviewPath) {
+      els.workspacePreviewPath.textContent = source?.line
+        ? `${data.path || path}:${source.line}`
+        : data.path || path;
+    }
+    renderWorkspacePreviewContent(data.content || "", source?.line);
+    if (els.workspacePreviewSearch) {
+      els.workspacePreviewSearch.value = "";
+      state.workspacePreviewSearchIndex = 0;
+      updateWorkspacePreviewSearch();
+    }
+    if (els.workspaceStatus) {
+      els.workspaceStatus.textContent = t("workspace.sourceOpened", { path: data.path || path });
+    }
+    render();
+    window.requestAnimationFrame(() => {
+      els.workspacePreview?.scrollIntoView({ block: "nearest" });
+      els.workspacePanel?.scrollIntoView({ block: "nearest" });
+    });
+  } catch (error) {
+    if (els.workspaceStatus) {
+      els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message || t("workspace.sourceOpenError")}`;
+    }
+    state.workspaceOpen = true;
+    render();
+  }
 }
 
 function ensureFolderData() {
@@ -551,8 +1249,16 @@ function ensureFolderData() {
   for (const folder of state.folders) {
     if (!Array.isArray(folder.selectedFiles)) folder.selectedFiles = [];
     if (typeof folder.workspaceRoot !== "string") folder.workspaceRoot = "";
+    if (typeof folder.trainingSetId !== "string") folder.trainingSetId = "";
+    if (!folder.plugins || typeof folder.plugins !== "object" || Array.isArray(folder.plugins)) folder.plugins = {};
+    if (!folder.plugins.codegraph || typeof folder.plugins.codegraph !== "object" || Array.isArray(folder.plugins.codegraph)) {
+      folder.plugins.codegraph = {};
+    }
+    folder.plugins.codegraph.enabled = Boolean(folder.plugins.codegraph.enabled);
+    if (typeof folder.plugins.codegraph.status !== "string") folder.plugins.codegraph.status = "not-ready";
     if (!folder.name) folder.name = t("folder.untitled");
   }
+  ensureTrainingSets();
   for (const session of state.sessions) {
     if (!session.folderId || !state.folders.some((folder) => folder.id === session.folderId)) {
       session.folderId = state.activeFolderId;
@@ -560,6 +1266,18 @@ function ensureFolderData() {
   }
   saveFolders();
   saveSessions();
+}
+
+function ensureTrainingSets() {
+  state.activeTrainingSetId = window.GEMMA_TRAINING?.normalizeTrainingSets?.({
+    sets: state.trainingSets,
+    folders: state.folders,
+    activeTrainingSetId: state.activeTrainingSetId,
+    defaultName: t("settings.trainingSetDefault"),
+    createId: () => crypto.randomUUID(),
+    now: () => Date.now(),
+  }) || "";
+  saveTrainingSets();
 }
 
 function syncWorkspaceFromActiveFolder() {
@@ -578,42 +1296,9 @@ function sessionsForFolder(folderId) {
   return state.sessions.filter((session) => session.folderId === folderId);
 }
 
-function normalizedSidebarQuery() {
-  return state.sidebarQuery.trim().toLowerCase();
-}
-
-function visibleFolders() {
-  const query = normalizedSidebarQuery();
-  if (!query) return state.folders;
-  return state.folders.filter((folder) => {
-    if (folder.name.toLowerCase().includes(query)) return true;
-    return sessionsForFolder(folder.id).some((session) => session.title.toLowerCase().includes(query));
-  });
-}
-
-function visibleSessionsForFolder(folder) {
-  const sessions = sessionsForFolder(folder.id);
-  const query = normalizedSidebarQuery();
-  if (!query) return sessions;
-  if (folder.name.toLowerCase().includes(query)) return sessions;
-  return sessions.filter((session) => session.title.toLowerCase().includes(query));
-}
-
 function selectFirstSessionInActiveFolder() {
   const sessions = sessionsForActiveFolder();
   state.activeId = sessions[0]?.id || null;
-}
-
-function setSidebarHidden(hidden) {
-  state.sidebarHidden = hidden;
-  localStorage.setItem("gemma4.sidebarHidden", String(hidden));
-  render();
-}
-
-function setSidebarWidth(width) {
-  state.sidebarWidth = Math.min(420, Math.max(220, Math.round(width)));
-  localStorage.setItem("gemma4.sidebarWidth", String(state.sidebarWidth));
-  document.documentElement.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
 }
 
 function setTheme(theme) {
@@ -653,18 +1338,23 @@ function setComposerModel(value) {
 }
 
 function modelForTask(task, useComposer = false) {
-  if (useComposer && state.composerModel) return state.composerModel;
-  if (state.modelOverrides[task]) return state.modelOverrides[task];
-  return state.serverModels[task] || state.serverModels.chat || "";
+  return window.GEMMA_MODELS.modelForTask(task, {
+    useComposer,
+    composerModel: state.composerModel,
+    modelOverrides: state.modelOverrides,
+    serverModels: state.serverModels,
+  });
 }
 
 function fallbackCodingModel() {
-  return state.serverModels.chat || "gemma4:12b";
+  return window.GEMMA_MODELS.fallbackCodingModel({ serverModels: state.serverModels });
 }
 
 function fastChatModel() {
-  if (modelIsInstalled("qwen2.5:3b") || state.serverModels.translation === "qwen2.5:3b") return "qwen2.5:3b";
-  return state.serverModels.chat || "gemma4:12b";
+  return window.GEMMA_MODELS.fastChatModel({
+    serverModels: state.serverModels,
+    modelIsInstalled,
+  });
 }
 
 function modelIsInstalled(model) {
@@ -672,53 +1362,28 @@ function modelIsInstalled(model) {
 }
 
 function displayModelName(model, task = "chat") {
-  if (!model) return t("model.serverDefault");
-  const installed = modelIsInstalled(model);
-  if (model.includes("gemma-4-12B-coder-fable5")) {
-    return `Gemma 4 Coder 12B Q4 (${t("model.coderRecommended")}${installed ? "" : ` / ${t("model.downloadRequired")}`})`;
-  }
-  if (model === "gemma4:12b") {
-    if (task === "coding") return `Gemma 4 12B (${t("model.gemmaCoding")})`;
-    if (task === "translation") return `Gemma 4 12B (${t("model.gemmaTranslation")})`;
-    return `Gemma 4 12B (${t("model.gemmaStandard")})`;
-  }
-  if (model === "qwen2.5:3b") {
-    if (task === "translation") return `Qwen 2.5 3B (${t("model.qwenTranslation")})`;
-    return `Qwen 2.5 3B (${t("model.qwenFast")})`;
-  }
-  if (model === "phi3:latest") return "Phi-3";
-  if (model === "llama3:latest") return "Llama 3";
-  if (model === "qwen3:4b") return "Qwen3 4B";
-  return `${model}${installed ? "" : ` (${t("model.missing")})`}`;
+  return window.GEMMA_MODELS.displayModelName(model, task, { t, modelIsInstalled });
 }
 
 function shortModelName(model, task = "chat") {
-  return displayModelName(model, task).replace(/（[^）]*）/g, "").replace(/\s*\([^)]*\)/g, "");
+  return window.GEMMA_MODELS.shortModelName(model, task, { t, modelIsInstalled });
 }
 
 function composerModelLabel(model) {
-  if (!model) return t("model.auto");
-  if (model.includes("gemma-4-12B-coder-fable5")) return "Coder";
-  if (model === "gemma4:12b") return "Gemma 4";
-  if (model === "qwen2.5:3b") return "Qwen";
-  if (model === "phi3:latest") return "Phi-3";
-  if (model === "llama3:latest") return "Llama";
-  if (model === "qwen3:4b") return "Qwen3";
-  return shortModelName(model);
+  return window.GEMMA_MODELS.composerModelLabel(model, { t, modelIsInstalled });
 }
 
 function taskLabel(task) {
-  if (task === "translation") return t("task.translation");
-  if (task === "coding") return t("task.coding");
-  return t("task.chat");
+  return window.GEMMA_MODELS.taskLabel(task, t);
 }
 
 function responseModeLabel(mode) {
-  return { auto: t("mode.auto"), fast: t("mode.fast"), balanced: t("mode.balanced"), quality: t("mode.quality") }[mode] || mode;
+  return window.GEMMA_MODELS.responseModeLabel(mode, t);
 }
 
-function messageRunMeta(requestOptions, model) {
+function messageRunMeta(requestOptions, model, overrides = {}) {
   const task = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
+  const codegraph = activeFolder()?.plugins?.codegraph || {};
   return {
     model: model || modelForTask(task),
     modelLabel: shortModelName(model || modelForTask(task), task),
@@ -727,150 +1392,213 @@ function messageRunMeta(requestOptions, model) {
     responseMode: requestOptions.responseMode,
     responseModeLabel: responseModeLabel(requestOptions.responseMode),
     thinkingMode: requestOptions.thinkingMode,
+    modelReason: requestOptions.modelReason || "",
+    codeUnderstanding: Boolean(codegraph.enabled && codegraph.status === "ready"),
+    ...overrides,
   };
 }
 
 function modelForRequestTask(task, requestOptions) {
-  if (state.composerModel) return state.composerModel;
-  if (task === "chat" && requestOptions.fastModel) return fastChatModel();
-  return modelForTask(task);
-}
-
-function renderModelSelect(select, task, models) {
-  if (!select) return;
-  const current = state.modelOverrides[task] || "";
-  select.innerHTML = "";
-  const defaultOption = document.createElement("option");
-  defaultOption.value = "";
-  defaultOption.textContent = task === "translation" ? t("model.serverAuto") : t("model.serverDefault");
-  select.append(defaultOption);
-  const uniqueModels = [...new Set(models.filter(Boolean))];
-  if (current && !uniqueModels.includes(current)) uniqueModels.unshift(current);
-  for (const model of uniqueModels) {
-    const option = document.createElement("option");
-    option.value = model;
-    option.textContent = displayModelName(model, task);
-    option.title = model;
-    select.append(option);
-  }
-  select.value = current;
-}
-
-function installedOrCurrent(models, task) {
-  const current = state.modelOverrides[task];
-  return models.filter((model) => model && (modelIsInstalled(model) || model === current || model === state.composerModel || state.serverModels.recommendedCoding.includes(model)));
-}
-
-function renderComposerModelSelect() {
-  if (!els.composerModel) return;
-  const models = installedOrCurrent([
-    state.serverModels.chat,
-    state.serverModels.coding,
-    state.serverModels.translation,
-    ...state.serverModels.recommendedCoding,
-    "gemma4:12b",
-    "qwen2.5:3b",
-  ], "chat");
-  const uniqueModels = [...new Set(models.filter(Boolean))];
-  if (state.composerModel && !uniqueModels.includes(state.composerModel)) uniqueModels.unshift(state.composerModel);
-  els.composerModel.innerHTML = "";
-  const autoOption = document.createElement("option");
-  autoOption.value = "";
-  autoOption.textContent = t("model.auto");
-  autoOption.title = state.language === "en"
-    ? "Automatically chooses the chat, coding, or translation model by task"
-    : "用途に応じて通常・コード・翻訳モデルを自動で使い分けます";
-  els.composerModel.append(autoOption);
-  for (const model of uniqueModels) {
-    const option = document.createElement("option");
-    option.value = model;
-    option.textContent = composerModelLabel(model);
-    option.title = displayModelName(model, "chat");
-    els.composerModel.append(option);
-  }
-  els.composerModel.value = state.composerModel;
+  return window.GEMMA_MODELS.modelForRequestTask(task, requestOptions, {
+    composerModel: state.composerModel,
+    modelOverrides: state.modelOverrides,
+    serverModels: state.serverModels,
+    modelIsInstalled,
+  });
 }
 
 function syncModelInputs() {
-  renderModelSelect(els.chatModel, "chat", installedOrCurrent([
-    state.serverModels.chat,
-    "gemma4:12b",
-    "qwen2.5:3b",
-  ], "chat"));
-  renderModelSelect(els.codingModel, "coding", installedOrCurrent([
-    state.serverModels.coding,
-    ...state.serverModels.recommendedCoding,
-    "gemma4:12b",
-  ], "coding"));
-  renderModelSelect(els.translationModel, "translation", installedOrCurrent([
-    state.serverModels.translation,
-    "qwen2.5:3b",
-    "gemma4:12b",
-  ], "translation"));
-  renderComposerModelSelect();
+  return window.GEMMA_SETTINGS.renderModelSettingsSelects({
+    composerModelLabel,
+    displayModelName,
+    els,
+    modelIsInstalled,
+    state,
+    t,
+  });
 }
 
 function renderModelInstaller() {
-  if (!els.modelInstaller) return;
-  const pullable = state.serverModels.pullable || [];
-  if (pullable.length === 0) {
-    els.modelInstaller.innerHTML = "";
-    return;
+  return window.GEMMA_SETTINGS.renderModelInstaller({
+    composerModelLabel,
+    els,
+    modelIsInstalled,
+    state,
+    t,
+  });
+}
+
+function renderAsrSettingsPanel() {
+  renderAsrSettings?.({
+    container: els.asrSettings,
+    status: state.asrStatus,
+    selectedModel: state.asrModel,
+    setupJob: state.asrSetupJob,
+    micGain: state.micGain,
+    micDevices: state.micDevices,
+    micDeviceId: state.micDeviceId,
+    partialIntervalSeconds: state.partialIntervalSeconds,
+    partialMode: state.partialMode,
+    t,
+  });
+}
+
+function setAsrModel(model) {
+  state.asrModel = model || "";
+  localStorage.setItem("gemma4.asrModel", state.asrModel);
+  renderAsrSettingsPanel();
+}
+
+function setMicGain(value, { render = true } = {}) {
+  const normalized = normalizeMicGain?.(value) ?? Math.min(3, Math.max(0.5, Number(value) || 1));
+  state.micGain = normalized;
+  localStorage.setItem("gemma4.micGain", String(normalized));
+  const output = els.asrSettings?.querySelector("[data-asr-mic-gain-value]");
+  if (output) output.textContent = formatMicGain?.(normalized) || `${normalized.toFixed(1)}x`;
+  if (render) renderAsrSettingsPanel();
+}
+
+function setMicDevice(deviceId, { render = true } = {}) {
+  state.micDeviceId = deviceId || "";
+  localStorage.setItem("gemma4.micDeviceId", state.micDeviceId);
+  if (render) renderAsrSettingsPanel();
+}
+
+function setPartialIntervalSeconds(value, { render = true } = {}) {
+  const normalized = normalizePartialIntervalSeconds?.(value) || 3;
+  state.partialIntervalSeconds = normalized;
+  localStorage.setItem("gemma4.asrPartialIntervalSeconds", String(normalized));
+  if (render) renderAsrSettingsPanel();
+}
+
+function setPartialMode(value, { render = true } = {}) {
+  const normalized = normalizePartialTranscriptionMode?.(value) || "browser";
+  state.partialMode = normalized;
+  localStorage.setItem("gemma4.asrPartialMode", normalized);
+  if (render) renderAsrSettingsPanel();
+}
+
+function setMicLevelMessage(message, { error = false } = {}) {
+  const status = els.asrSettings?.querySelector("[data-asr-level-status]");
+  if (!status) return;
+  status.textContent = message || "";
+  status.classList.toggle("error", Boolean(error));
+}
+
+function stopMicLevelPreview() {
+  if (!stopMicLevelMonitor) return;
+  stopMicLevelMonitor();
+  stopMicLevelMonitor = null;
+  setMicLevelMessage(t("settings.asrMicLevelIdle"));
+}
+
+async function startMicLevelPreview() {
+  if (!startMicLevelMonitor) return;
+  stopMicLevelPreview();
+  try {
+    stopMicLevelMonitor = await startMicLevelMonitor({
+      rootElement: els.asrSettings,
+      deviceId: state.micDeviceId,
+      micGain: state.micGain,
+      t,
+    });
+  } catch (error) {
+    setMicLevelMessage(t("settings.asrMicLevelError", { error: error.message || t("composer.voiceError") }), { error: true });
   }
-  els.modelInstaller.innerHTML = "";
-  const title = document.createElement("div");
-  title.className = "model-installer-title";
-  const titleStrong = document.createElement("strong");
-  titleStrong.textContent = t("settings.modelDownload");
-  const titleHelp = document.createElement("span");
-  titleHelp.textContent = state.language === "en"
-    ? "Download Ollama models without Terminal. First downloads can use several GB of data."
-    : "ターミナルを使わずにOllamaモデルを取得します。初回は数GBの通信が発生します。";
-  title.append(titleStrong, titleHelp);
-  els.modelInstaller.append(title);
-  for (const item of pullable) {
-    const model = item.model;
-    const installed = modelIsInstalled(model);
-    const job = state.modelPullJobs[model] || null;
-    const row = document.createElement("div");
-    row.className = "model-install-row";
-    const info = document.createElement("div");
-    info.className = "model-install-info";
-    const name = document.createElement("strong");
-    name.textContent = item.label || composerModelLabel(model);
-    const detail = document.createElement("span");
-    detail.textContent = installed
-      ? `${t("model.installed")} ・ ${item.purpose || model}`
-      : job?.status === "running" || job?.status === "queued"
-        ? `${t("model.downloading")} ・ ${job.message || ""}`
-        : job?.status === "error"
-          ? `${t("error.prefix")} ・ ${job.message || ""}`
-          : item.purpose || model;
-    info.append(name, detail);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "ghost-button model-install-button";
-    button.dataset.modelPull = model;
-    button.disabled = installed || job?.status === "running" || job?.status === "queued";
-    button.textContent = installed ? t("model.installed") : job?.status === "running" || job?.status === "queued" ? t("model.downloading") : t("model.download");
-    row.append(info, button);
-    els.modelInstaller.append(row);
+}
+
+async function refreshMicDevices({ startMonitor = false } = {}) {
+  if (!listAudioInputDevices) return;
+  try {
+    state.micDevices = await listAudioInputDevices();
+    if (!state.micDeviceId && window.GEMMA_ASR?.defaultAudioInputLooksVirtual?.(state.micDevices)) {
+      const realDevice = window.GEMMA_ASR?.preferredRealAudioInputDevice?.(state.micDevices);
+      if (realDevice?.deviceId) {
+        state.micDeviceId = realDevice.deviceId;
+        localStorage.setItem("gemma4.micDeviceId", state.micDeviceId);
+      }
+    }
+    renderAsrSettingsPanel();
+    if (state.micDeviceId && window.GEMMA_ASR?.defaultAudioInputLooksVirtual?.(state.micDevices)) {
+      const activeDevice = state.micDevices.find((device) => device.deviceId === state.micDeviceId);
+      setMicLevelMessage(t("settings.asrMicAutoSelectedRealDevice", {
+        device: activeDevice?.label || t("settings.asrMicSavedDevice"),
+      }));
+    }
+    if (startMonitor) await startMicLevelPreview();
+  } catch (error) {
+    setMicLevelMessage(t("settings.asrMicLevelError", { error: error.message || t("composer.voiceError") }), { error: true });
+  }
+}
+
+async function refreshAsrStatus() {
+  try {
+    state.asrStatus = await fetchAsrStatus?.() || { status: "not_configured", candidates: [] };
+    const runnableModels = new Set(Array.isArray(state.asrStatus.runnableModels) ? state.asrStatus.runnableModels : []);
+    if ((!state.asrModel || !runnableModels.has(state.asrModel)) && state.asrStatus.recommendedModel) {
+      setAsrModel(state.asrStatus.recommendedModel);
+      return;
+    }
+  } catch (error) {
+    state.asrStatus = {
+      ok: false,
+      available: false,
+      status: "error",
+      message: error.message || t("composer.voiceError"),
+      candidates: [],
+      nextStep: "",
+    };
+  }
+  renderAsrSettingsPanel();
+}
+
+async function refreshAsrSetupStatus() {
+  try {
+    const data = await fetchAsrSetupStatus?.();
+    state.asrSetupJob = data?.job || {};
+    renderAsrSettingsPanel();
+    const running = state.asrSetupJob.status === "running" || state.asrSetupJob.status === "queued";
+    if (!running && state.asrSetupTimer) {
+      window.clearInterval(state.asrSetupTimer);
+      state.asrSetupTimer = null;
+      refreshAsrStatus();
+    }
+  } catch {
+    // ASR status polling will surface connectivity issues.
+  }
+}
+
+function ensureAsrSetupPolling() {
+  if (state.asrSetupTimer) return;
+  state.asrSetupTimer = window.setInterval(refreshAsrSetupStatus, 1500);
+}
+
+async function startAsrSetup() {
+  const ok = window.confirm(t("settings.asrSetupConfirm"));
+  if (!ok) return;
+  try {
+    const data = await requestAsrSetup?.();
+    state.asrSetupJob = {
+      status: data?.status || "running",
+      message: data?.message || t("settings.asrSetupRunning"),
+    };
+    renderAsrSettingsPanel();
+    ensureAsrSetupPolling();
+  } catch (error) {
+    window.alert(error.message || t("composer.voiceError"));
   }
 }
 
 async function refreshModelPullStatus() {
   try {
-    const response = await fetch("/api/models/pull/status");
-    const data = await response.json();
-    if (response.ok && data.ok) {
-      state.modelPullJobs = data.jobs || {};
-      renderModelInstaller();
-      const running = Object.values(state.modelPullJobs).some((job) => job.status === "running" || job.status === "queued");
-      if (!running && state.modelPullTimer) {
-        window.clearInterval(state.modelPullTimer);
-        state.modelPullTimer = null;
-        checkHealth();
-      }
+    const data = await window.GEMMA_SETTINGS.fetchModelPullStatus();
+    state.modelPullJobs = data.jobs || {};
+    renderModelInstaller();
+    const running = Object.values(state.modelPullJobs).some((job) => job.status === "running" || job.status === "queued");
+    if (!running && state.modelPullTimer) {
+      window.clearInterval(state.modelPullTimer);
+      state.modelPullTimer = null;
+      checkHealth();
     }
   } catch {
     // Health polling will surface offline state.
@@ -888,13 +1616,9 @@ async function startModelPull(model) {
     : "モデルをダウンロードします。数GBの通信と時間がかかる場合があります。開始しますか？");
   if (!ok) return;
   try {
-    const response = await fetch("/api/models/pull", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model }),
+    const data = await window.GEMMA_SETTINGS.requestModelPull(model).catch((error) => {
+      throw new Error(error.message || (state.language === "en" ? "Could not start model download." : "モデルのダウンロードを開始できませんでした。"));
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || (state.language === "en" ? "Could not start model download." : "モデルのダウンロードを開始できませんでした。"));
     state.modelPullJobs[model] = {
       model,
       status: data.status || "running",
@@ -908,25 +1632,746 @@ async function startModelPull(model) {
 }
 
 function renderSettingsMeta() {
-  if (!els.settingsMeta) return;
-  const unknown = state.language === "en" ? "unknown" : "不明";
-  const version = state.appInfo.version || unknown;
-  const commit = state.appInfo.commit || unknown;
-  const codingStatus = state.serverModels.codingInstalled ? "" : ` (${t("model.missing")})`;
-  const lines = [
-    `<div>${state.language === "en" ? "App" : "アプリ版"}: ${escapeHtml(version)} / commit ${escapeHtml(commit)}</div>`,
-    `<div>${t("task.chat")}: ${escapeHtml(modelForTask("chat"))}</div>`,
-    `<div>${t("task.coding")}: ${escapeHtml(modelForTask("coding"))}${escapeHtml(codingStatus)}</div>`,
-    `<div>${t("task.translation")}: ${escapeHtml(modelForTask("translation"))}</div>`,
+  if (els.sidebarAppVersion) {
+    const version = state.appInfo.version || "0.8.185";
+    els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
+  }
+  const deps = {
+    displayModelName,
+    els,
+    escapeHtml,
+    modelForTask,
+    modelIsInstalled,
+    state,
+    t,
+  };
+  window.GEMMA_SETTINGS.renderSettingsMeta(deps);
+  window.GEMMA_SETTINGS.renderSearchCapabilitiesPanel?.(deps);
+  renderExternalLlmSettings();
+}
+
+function renderExternalLlmSettings(message = "") {
+  if (els.externalLlmUrl) els.externalLlmUrl.value = state.externalLlmUrl || "";
+  if (els.externalLlmStatus) {
+    els.externalLlmStatus.textContent = message || state.externalLlmStatus || t("settings.externalLlmIdle");
+  }
+}
+
+function setExternalLlmUrl(value) {
+  state.externalLlmUrl = String(value || "").trim();
+  localStorage.setItem("gemma4.externalLlmUrl", state.externalLlmUrl);
+  state.externalLlmStatus = state.externalLlmUrl ? t("settings.externalLlmSaved") : t("settings.externalLlmIdle");
+  renderExternalLlmSettings();
+}
+
+function clearExternalLlmSettings() {
+  state.externalLlmUrl = "";
+  localStorage.removeItem("gemma4.externalLlmUrl");
+  state.externalLlmStatus = t("settings.externalLlmCleared");
+  renderExternalLlmSettings();
+}
+
+function copyExternalLlmModelName() {
+  const modelName = "YTan2000/Qwen3.6-27B-MTP-TQ3_4S";
+  navigator.clipboard?.writeText(modelName)
+    .then(() => {
+      state.externalLlmStatus = t("settings.externalLlmModelCopied");
+      renderExternalLlmSettings();
+    })
+    .catch(() => {
+      state.externalLlmStatus = modelName;
+      renderExternalLlmSettings();
+    });
+}
+
+async function checkExternalLlmServer() {
+  if (!els.externalLlmCheck) return;
+  setExternalLlmUrl(els.externalLlmUrl?.value || "");
+  els.externalLlmCheck.disabled = true;
+  state.externalLlmStatus = t("settings.externalLlmChecking");
+  renderExternalLlmSettings();
+  try {
+    const response = await fetch("/api/llm/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: state.externalLlmUrl }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || t("settings.externalLlmError"));
+    const modelCount = Array.isArray(data.models) ? data.models.length : 0;
+    state.externalLlmStatus = t("settings.externalLlmReady", {
+      version: data.version || "-",
+      count: String(modelCount),
+    });
+  } catch (error) {
+    state.externalLlmStatus = `${t("error.prefix")}: ${error.message || t("settings.externalLlmError")}`;
+  } finally {
+    els.externalLlmCheck.disabled = false;
+    renderExternalLlmSettings();
+  }
+}
+
+function renderWeatherLocationStatus(message = "") {
+  if (!els.weatherLocationStatus) return;
+  if (message) {
+    els.weatherLocationStatus.textContent = message;
+    return;
+  }
+  if (!state.weatherLocation) {
+    els.weatherLocationStatus.textContent = t("settings.weatherLocationHelp");
+    return;
+  }
+  const updated = state.weatherLocation.updatedAt
+    ? new Date(state.weatherLocation.updatedAt).toLocaleString(state.language === "en" ? "en-US" : "ja-JP")
+    : "";
+  const accuracy = state.weatherLocation.accuracy ? ` / ±${Math.round(state.weatherLocation.accuracy)}m` : "";
+  els.weatherLocationStatus.textContent = `${t("settings.weatherLocationSaved")}${updated ? ` (${updated}${accuracy})` : ""}`;
+}
+
+async function useBrowserWeatherLocation() {
+  if (!navigator.geolocation) {
+    renderWeatherLocationStatus(t("settings.weatherLocationUnavailable"));
+    return;
+  }
+  if (els.weatherLocationUse) els.weatherLocationUse.disabled = true;
+  renderWeatherLocationStatus(state.language === "en" ? "Requesting location permission..." : "位置情報の許可を確認しています...");
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 12000,
+        maximumAge: 600000,
+      });
+    });
+    state.weatherLocation = saveWeatherLocation({
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      updatedAt: new Date().toISOString(),
+    });
+    renderWeatherLocationStatus();
+  } catch {
+    renderWeatherLocationStatus(t("settings.weatherLocationDenied"));
+  } finally {
+    if (els.weatherLocationUse) els.weatherLocationUse.disabled = false;
+  }
+}
+
+function sessionsForTrainingScope(scope) {
+  return window.GEMMA_TRAINING.sessionsForTrainingScope({
+    scope,
+    sessions: state.sessions,
+    activeFolderId: state.activeFolderId,
+    activeSessionId: state.activeId,
+  });
+}
+
+function folderNameForSession(session) {
+  const folder = state.folders.find((item) => item.id === session.folderId);
+  return folder?.name || "";
+}
+
+function cleanTrainingContent(message) {
+  return window.GEMMA_TRAINING.cleanTrainingContent(message);
+}
+
+function buildTrainingExamples(scope) {
+  if (scope === "set") return buildTrainingExamplesFromSet(activeTrainingSet());
+  return window.GEMMA_TRAINING.buildTrainingExamplesFromSessions({
+    sessions: sessionsForTrainingScope(scope),
+    scope,
+    systemPrompt: SYSTEM_PROMPTS[state.language] || SYSTEM_PROMPTS.ja,
+    language: state.language,
+    folderNameForSession,
+    nowIso: () => new Date().toISOString(),
+  });
+}
+
+function buildTrainingExamplesFromSet(set) {
+  return window.GEMMA_TRAINING.buildTrainingExamplesFromSet({
+    set,
+    systemPrompt: SYSTEM_PROMPTS[state.language] || SYSTEM_PROMPTS.ja,
+    nowIso: () => new Date().toISOString(),
+  });
+}
+
+function activeTrainingSet() {
+  return window.GEMMA_TRAINING?.activeTrainingSet?.(state.trainingSets, state.activeTrainingSetId) || null;
+}
+
+function createTrainingSet(name) {
+  const result = window.GEMMA_TRAINING.createAndSelectTrainingSet({
+    sets: state.trainingSets,
+    name,
+    defaultName: t("settings.trainingSetDefault"),
+    createId: () => crypto.randomUUID(),
+    now: () => Date.now(),
+  });
+  const set = window.GEMMA_TRAINING.applyCreatedTrainingSet(state, result);
+  saveTrainingSets();
+  renderTrainingSetControls();
+  return set;
+}
+
+function setActiveTrainingSet(id) {
+  window.GEMMA_TRAINING.applyTrainingSetSelection(state, id);
+  saveTrainingSets();
+  renderTrainingSetControls();
+}
+
+function renameActiveTrainingSet() {
+  const set = activeTrainingSet();
+  if (!set) return;
+  const nextName = window.prompt(t("settings.trainingSetRenamePrompt"), set.name);
+  const renamed = window.GEMMA_TRAINING.renameTrainingSet({
+    set,
+    name: nextName,
+    now: () => Date.now(),
+  });
+  if (!renamed) return;
+  saveTrainingSets();
+  renderTrainingSetControls();
+  render();
+  if (els.trainingStatus) {
+    els.trainingStatus.textContent = t("settings.trainingSetRenamed", { name: set.name });
+  }
+}
+
+function deleteActiveTrainingSet() {
+  const set = activeTrainingSet();
+  if (!set) return;
+  const ok = window.confirm(t("settings.trainingSetDeleteConfirm", { name: set.name }));
+  if (!ok) return;
+  const result = window.GEMMA_TRAINING.deleteTrainingSetAndSelectNext({
+    sets: state.trainingSets,
+    folders: state.folders,
+    id: set.id,
+  });
+  const deletedName = window.GEMMA_TRAINING.applyDeletedTrainingSet(state, result);
+  saveTrainingSets();
+  saveFolders();
+  renderTrainingSetControls();
+  render();
+  if (els.trainingStatus) {
+    els.trainingStatus.textContent = t("settings.trainingSetDeleted", { name: deletedName });
+  }
+}
+
+function applyTrainingSetToActiveFolder(id) {
+  const folder = activeFolder();
+  const applied = window.GEMMA_TRAINING.setFolderTrainingSet({ folder, trainingSetId: id });
+  if (!applied) return;
+  saveFolders();
+  renderTrainingSetControls();
+  const set = window.GEMMA_TRAINING?.trainingSetById?.(state.trainingSets, id);
+  if (els.trainingStatus) {
+    els.trainingStatus.textContent = set
+      ? t("training.applied", { name: set.name })
+      : t("settings.trainingSetNone");
+  }
+}
+
+function correctionTrainingSetForActiveFolder() {
+  const folder = activeFolder();
+  let set = activeFolderTrainingSet();
+  if (set) return set;
+  set = activeTrainingSet();
+  if (set && folder) {
+    folder.trainingSetId = set.id;
+    saveFolders();
+  }
+  return set;
+}
+
+function renderTrainingSetOptions(select, value, includeNone = false) {
+  renderTrainingSetOptionsView({
+    select,
+    sets: state.trainingSets,
+    value,
+    includeNone,
+    t,
+  });
+}
+
+function renderTrainingSetControls() {
+  ensureTrainingSets();
+  const activeSet = activeTrainingSet();
+  if (activeSet && !state.activeTrainingSetId) {
+    state.activeTrainingSetId = activeSet.id;
+    saveTrainingSets();
+  }
+  renderTrainingControlsView({
+    els,
+    sets: state.trainingSets,
+    activeSet,
+    activeTrainingSetId: state.activeTrainingSetId,
+    folderTrainingSetId: activeFolder()?.trainingSetId || "",
+    folders: state.folders,
+    t,
+  });
+}
+
+function flashSavedButton(button, label = t("common.saved")) {
+  if (!button) return;
+  const originalText = button.textContent;
+  button.classList.add("saved-flash");
+  button.textContent = label || "保存しました";
+  button.disabled = true;
+  window.setTimeout(() => {
+    button.textContent = originalText;
+    button.classList.remove("saved-flash");
+    button.disabled = false;
+  }, 1200);
+}
+
+function saveTrainingExampleEdit(exampleId, button = null) {
+  const set = activeTrainingSet();
+  if (!set) return;
+  const textarea = els.trainingExampleList?.querySelector(`textarea[data-example-id="${CSS.escape(exampleId)}"]`);
+  if (!textarea) return;
+  const updated = window.GEMMA_TRAINING.updateTrainingExample({
+    set,
+    exampleId,
+    assistant: textarea.value,
+    nowIso: () => new Date().toISOString(),
+    now: () => Date.now(),
+  });
+  if (!updated) return;
+  saveTrainingSets();
+  flashSavedButton(button);
+  window.setTimeout(renderTrainingSetControls, 450);
+  if (els.trainingStatus) els.trainingStatus.textContent = t("settings.trainingExampleSaved");
+}
+
+function addCorrectionToTrainingSet(messageIndex) {
+  const session = activeSession();
+  const correction = window.GEMMA_TRAINING.correctionDraftFromMessage({
+    session,
+    messageIndex,
+    cleanContent: cleanTrainingContent,
+  });
+  if (!correction) return;
+  let set = correctionTrainingSetForActiveFolder();
+  if (!set) {
+    const ok = window.confirm(`${t("training.noSet")}\n${t("settings.trainingSetCreate")} ?`);
+    if (!ok) return;
+    set = createTrainingSet(t("settings.trainingSetDefault"));
+    const folder = activeFolder();
+    if (folder) {
+      folder.trainingSetId = set.id;
+      saveFolders();
+    }
+  }
+  state.correctionDraft = {
+    ...correction.draft,
+    setId: set.id,
+  };
+  window.GEMMA_TRAINING.openCorrectionDialog({
+    els,
+    sets: state.trainingSets,
+    set,
+    draft: state.correctionDraft,
+    assistantContent: correction.assistantContent,
+    t,
+  });
+}
+
+function closeCorrectionDialog() {
+  state.correctionDraft = null;
+  window.GEMMA_TRAINING.closeCorrectionDialog({ els });
+}
+
+function saveCorrectionDraft() {
+  const draft = state.correctionDraft;
+  if (!draft) return;
+  const corrected = els.correctionText.value.trim();
+  if (!corrected) return;
+  const selectedSetId = els.correctionTrainingSet?.value || draft.setId;
+  const result = window.GEMMA_TRAINING.saveCorrectionToSet({
+    sets: state.trainingSets,
+    selectedSetId,
+    draft,
+    assistant: corrected,
+    defaultName: t("settings.trainingSetDefault"),
+    createId: () => crypto.randomUUID(),
+    nowIso: () => new Date().toISOString(),
+    now: () => Date.now(),
+  });
+  if (!result) return;
+  const set = window.GEMMA_TRAINING.applyCorrectionSaveResult(state, result);
+  saveTrainingSets();
+  renderTrainingSetControls();
+  if (els.trainingStatus) els.trainingStatus.textContent = t("training.saved", { name: set.name });
+  closeCorrectionDialog();
+}
+
+function activeFolderTrainingSet() {
+  const id = activeFolder()?.trainingSetId || "";
+  return window.GEMMA_TRAINING?.trainingSetById?.(state.trainingSets, id) || null;
+}
+
+function trainingContextSystemPrompt() {
+  return window.GEMMA_TRAINING.buildTrainingContextPrompt({
+    set: activeFolderTrainingSet(),
+    t,
+    textSnippet,
+  });
+}
+
+function activeCharacterMemorySet() {
+  return window.GEMMA_CHARACTER?.activeMemorySet?.(state.characterMemorySets, state.character) || null;
+}
+
+function characterContextSystemPrompt() {
+  const characterPrompt = window.GEMMA_CHARACTER?.buildCharacterSystemPrompt?.(state.character) || "";
+  const memoryPrompt = state.character?.memoryMode === "off"
+    ? ""
+    : (window.GEMMA_CHARACTER?.buildMemorySystemPrompt?.(activeCharacterMemorySet()) || "");
+  return `${characterPrompt}${memoryPrompt}`;
+}
+
+function renderCharacterPanel() {
+  if (els.characterName) els.characterName.value = state.character?.name || "Gemma";
+  if (els.characterUserName) els.characterUserName.value = state.character?.userName || "";
+  if (els.characterSelfName) els.characterSelfName.value = state.character?.selfName || "";
+  if (els.characterGender) els.characterGender.value = state.character?.gender || "unspecified";
+  if (els.characterAvatar) els.characterAvatar.value = state.character?.avatar || "";
+  renderCharacterPreview();
+  if (els.characterTone) els.characterTone.value = state.character?.tonePreset || "friendly";
+  if (els.characterMemoryMode) els.characterMemoryMode.value = state.character?.memoryMode || "suggest";
+  els.characterMemoryModeChoices?.forEach((input) => {
+    input.checked = input.value === (state.character?.memoryMode || "suggest");
+  });
+  if (els.characterPersonality) els.characterPersonality.value = state.character?.personality || "";
+  if (els.characterSystemAddon) els.characterSystemAddon.value = state.character?.systemPromptAddon || "";
+  if (els.characterMemorySearch) els.characterMemorySearch.value = state.characterMemoryQuery || "";
+  renderCharacterMemoryList();
+}
+
+function renderAvatarElement(target, { large = false } = {}) {
+  if (!target) return;
+  const src = state.character?.avatar || "";
+  target.innerHTML = "";
+  if (src) {
+    const image = document.createElement("img");
+    image.src = src;
+    image.alt = "";
+    target.append(image);
+  } else {
+    target.textContent = String(state.character?.name || "G").trim().slice(0, large ? 3 : 2).toUpperCase();
+  }
+}
+
+function renderCharacterPreview() {
+  renderAvatarElement(els.characterAvatarPreview);
+  renderAvatarElement(els.characterChatPreviewAvatar, { large: true });
+  const name = state.character?.name || "Gemma";
+  if (els.characterChatPreviewName) els.characterChatPreviewName.textContent = name;
+  if (els.characterChatPreviewText) {
+    els.characterChatPreviewText.textContent = characterPreviewText();
+  }
+}
+
+function characterPreviewText() {
+  const userName = String(state.character?.userName || "").trim();
+  const selfName = String(state.character?.selfName || "").trim();
+  if (userName && selfName) return `${userName}、${selfName}が手伝うね。`;
+  if (userName) return `${userName}、今日は何を手伝おうか？`;
+  if (selfName) return `${selfName}が手伝うね。`;
+  return "今日は何を手伝おうか？";
+}
+
+function characterAddressPrefix() {
+  const userName = String(state.character?.userName || "").trim();
+  return userName ? `${userName}、` : "";
+}
+
+function characterSelfLabel() {
+  return String(state.character?.selfName || state.character?.name || "").trim();
+}
+
+function characterizeToolAnswer(answer, { type = "" } = {}) {
+  const text = String(answer || "").trim();
+  if (!text) return "";
+  const address = characterAddressPrefix();
+  const selfLabel = characterSelfLabel();
+  if (type === "weather") {
+    const intro = `${address}${selfLabel ? `${selfLabel}が` : ""}いまの天気を調べたよ。`;
+    return `${intro}\n${text}`;
+  }
+  return address ? `${address}${text}` : text;
+}
+
+function characterMemoryCategories() {
+  return [
+    { id: "all", label: t("character.memoryCategoryAll") },
+    { id: "profile", label: t("character.memoryCategoryProfile") },
+    { id: "preference", label: t("character.memoryCategoryPreference") },
+    { id: "study", label: t("character.memoryCategoryStudy") },
+    { id: "settings", label: t("character.memoryCategorySettings") },
   ];
-  if (state.composerModel) {
-    lines.push(`<div>${state.language === "en" ? "Composer fixed" : "チャット欄固定"}: ${escapeHtml(displayModelName(state.composerModel, "chat"))}</div>`);
+}
+
+function classifyCharacterMemory(memory) {
+  return window.GEMMA_CHARACTER?.classifyMemory?.(memory) || "profile";
+}
+
+function renderCharacterMemoryFilters(memories) {
+  if (!els.characterMemoryFilters) return;
+  const counts = memories.reduce((acc, memory) => {
+    const category = classifyCharacterMemory(memory);
+    acc[category] = (acc[category] || 0) + 1;
+    acc.all += 1;
+    return acc;
+  }, { all: 0, profile: 0, preference: 0, study: 0, settings: 0 });
+  els.characterMemoryFilters.innerHTML = characterMemoryCategories().map((category) => `
+    <button
+      class="memory-filter${state.characterMemoryFilter === category.id ? " active" : ""}"
+      type="button"
+      data-memory-filter="${escapeHtml(category.id)}"
+      aria-pressed="${state.characterMemoryFilter === category.id ? "true" : "false"}"
+    >${escapeHtml(category.label)} <span>${counts[category.id] || 0}</span></button>
+  `).join("");
+}
+
+function saveCharacterSettings() {
+  const checkedMemoryMode = [...(els.characterMemoryModeChoices || [])].find((input) => input.checked)?.value || "";
+  state.character = window.GEMMA_CHARACTER?.normalizeCharacter?.({
+    ...state.character,
+    name: els.characterName?.value || "Gemma",
+    userName: els.characterUserName?.value || "",
+    selfName: els.characterSelfName?.value || "",
+    gender: els.characterGender?.value || "unspecified",
+    avatar: els.characterAvatar?.value || "",
+    tonePreset: els.characterTone?.value || "friendly",
+    memoryMode: checkedMemoryMode || els.characterMemoryMode?.value || "suggest",
+    personality: els.characterPersonality?.value || "",
+    systemPromptAddon: els.characterSystemAddon?.value || "",
+  }) || state.character;
+  saveCharacterState();
+  renderCharacterPanel();
+  renderMessages();
+  flashSavedButton(els.characterSave);
+  if (els.trainingStatus) els.trainingStatus.textContent = t("character.saved");
+}
+
+function pickCharacterAvatarFile() {
+  els.characterAvatarFile?.click();
+}
+
+function clearCharacterAvatar() {
+  state.character = window.GEMMA_CHARACTER?.normalizeCharacter?.({
+    ...state.character,
+    avatar: "",
+  }) || state.character;
+  if (els.characterAvatar) els.characterAvatar.value = "";
+  if (els.characterAvatarFile) els.characterAvatarFile.value = "";
+  saveCharacterState();
+  renderCharacterPanel();
+  renderMessages();
+}
+
+function handleCharacterAvatarFileChange() {
+  const file = els.characterAvatarFile?.files?.[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) {
+    window.alert(t("character.avatarTooLarge"));
+    els.characterAvatarFile.value = "";
+    return;
   }
-  const selectedCoding = modelForTask("coding");
-  if (selectedCoding.includes("gemma-4-12B-coder-fable5") && !modelIsInstalled(selectedCoding)) {
-    lines.push(`<div>${state.language === "en" ? "Download first" : "使うには先に実行"}: <code>ollama pull ${escapeHtml(selectedCoding)}</code></div>`);
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    const result = String(reader.result || "");
+    if (!result.startsWith("data:image/")) return;
+    state.character = window.GEMMA_CHARACTER?.normalizeCharacter?.({
+      ...state.character,
+      avatar: result,
+    }) || state.character;
+    if (els.characterAvatar) els.characterAvatar.value = result;
+    saveCharacterState();
+    renderCharacterPanel();
+    renderMessages();
+  });
+  reader.readAsDataURL(file);
+}
+
+function renderCharacterMemoryList() {
+  if (!els.characterMemoryList) return;
+  const set = activeCharacterMemorySet();
+  const memories = set?.memories || [];
+  renderCharacterMemoryFilters(memories);
+  if (!memories.length) {
+    els.characterMemoryList.innerHTML = `<div class="management-note">${escapeHtml(t("character.memoryEmpty"))}</div>`;
+    return;
   }
-  els.settingsMeta.innerHTML = lines.join("");
+  const query = (state.characterMemoryQuery || "").trim().toLowerCase();
+  const visibleMemories = memories.filter((memory) => {
+    const categoryMatches = state.characterMemoryFilter === "all" || classifyCharacterMemory(memory) === state.characterMemoryFilter;
+    const queryMatches = !query || `${memory?.text || ""} ${(memory?.tags || []).join(" ")}`.toLowerCase().includes(query);
+    return categoryMatches && queryMatches;
+  });
+  if (!visibleMemories.length) {
+    els.characterMemoryList.innerHTML = `<div class="management-note">${escapeHtml(t("character.memoryEmptyFiltered"))}</div>`;
+    return;
+  }
+  els.characterMemoryList.innerHTML = visibleMemories.map((memory, index) => {
+    const category = characterMemoryCategories().find((item) => item.id === classifyCharacterMemory(memory));
+    return `
+    <div class="character-memory-item" data-memory-id="${escapeHtml(memory.id)}">
+      <div class="character-memory-summary">
+        <div>
+          <strong>${index + 1}. ${escapeHtml(state.character?.name || "Gemma")}${escapeHtml(t("character.memorySuffix"))}</strong>
+          <p>${escapeHtml(memory.text)}</p>
+        </div>
+        <div class="character-memory-actions">
+          <button class="ghost-button" type="button" data-memory-edit="${escapeHtml(memory.id)}">${escapeHtml(t("common.edit"))}</button>
+          <button class="ghost-button" type="button" data-memory-delete="${escapeHtml(memory.id)}">${escapeHtml(t("character.forgetMemory"))}</button>
+        </div>
+      </div>
+      <div class="character-memory-meta">
+        <span class="memory-tag">${escapeHtml(category?.label || t("character.memoryTagGeneral"))}</span>
+        <span>${escapeHtml(t("character.memorySource"))}: ${escapeHtml(memory.sourceSessionId ? t("character.memorySourceChat") : t("character.memorySourceManual"))}</span>
+      </div>
+      <div class="character-memory-edit" hidden>
+        <textarea rows="2">${escapeHtml(memory.text)}</textarea>
+        <div class="character-memory-actions">
+          <button class="ghost-button" type="button" data-memory-cancel="${escapeHtml(memory.id)}">${escapeHtml(t("common.cancel"))}</button>
+          <button class="ghost-button" type="button" data-memory-save="${escapeHtml(memory.id)}">${escapeHtml(t("common.save"))}</button>
+        </div>
+      </div>
+    </div>
+  `;
+  }).join("");
+}
+
+function addManualCharacterMemory() {
+  const text = els.characterMemoryNew?.value || "";
+  if (!text.trim()) return;
+  state.characterMemorySets = window.GEMMA_CHARACTER?.addMemory?.({
+    memorySets: state.characterMemorySets,
+    character: state.character,
+    text,
+    sourceSessionId: activeSession()?.id || "",
+    sourceFolderId: activeFolder()?.id || "",
+    createId: () => crypto.randomUUID(),
+    nowIso: () => new Date().toISOString(),
+  }) || state.characterMemorySets;
+  if (els.characterMemoryNew) els.characterMemoryNew.value = "";
+  flashSavedButton(els.characterMemoryAdd);
+  renderCharacterMemoryList();
+  if (els.trainingStatus) els.trainingStatus.textContent = t("character.memorySaved");
+}
+
+function saveCharacterMemoryEdit(memoryId, button = null) {
+  const set = activeCharacterMemorySet();
+  const item = [...(els.characterMemoryList?.querySelectorAll("[data-memory-id]") || [])]
+    .find((element) => element.dataset.memoryId === memoryId);
+  const text = item?.querySelector("textarea")?.value || "";
+  if (!set || !text.trim()) return;
+  state.characterMemorySets = window.GEMMA_CHARACTER?.updateMemory?.({
+    memorySets: state.characterMemorySets,
+    memorySetId: set.id,
+    memoryId,
+    text,
+    nowIso: () => new Date().toISOString(),
+  }) || state.characterMemorySets;
+  flashSavedButton(button);
+  window.setTimeout(renderCharacterMemoryList, 450);
+  if (els.trainingStatus) els.trainingStatus.textContent = t("character.memoryUpdated");
+}
+
+function deleteCharacterMemory(memoryId) {
+  const set = activeCharacterMemorySet();
+  if (!set) return;
+  state.characterMemorySets = window.GEMMA_CHARACTER?.deleteMemory?.({
+    memorySets: state.characterMemorySets,
+    memorySetId: set.id,
+    memoryId,
+  }) || state.characterMemorySets;
+  renderCharacterMemoryList();
+  if (els.trainingStatus) els.trainingStatus.textContent = t("character.memoryDeleted");
+}
+
+function openMemoryCandidate(candidate) {
+  if (!candidate || state.character?.memoryMode === "off") return;
+  const memoryMode = state.character?.memoryMode || "suggest";
+  const text = String(candidate.text || "").trim();
+  const unsafe = window.GEMMA_CHARACTER?.isSensitiveMemoryText?.(text);
+  if (memoryMode === "auto" && text && !unsafe) {
+    state.characterMemorySets = window.GEMMA_CHARACTER?.addMemory?.({
+      memorySets: state.characterMemorySets,
+      character: state.character,
+      text,
+      sourceSessionId: activeSession()?.id || "",
+      sourceFolderId: activeFolder()?.id || "",
+      createId: () => crypto.randomUUID(),
+      nowIso: () => new Date().toISOString(),
+    }) || state.characterMemorySets;
+    renderCharacterMemoryList();
+    if (els.trainingStatus) els.trainingStatus.textContent = t("character.memoryAutoSaved");
+    return;
+  }
+  state.memoryCandidate = {
+    ...candidate,
+    sourceSessionId: activeSession()?.id || "",
+    sourceFolderId: activeFolder()?.id || "",
+  };
+  if (els.memoryCandidateText) els.memoryCandidateText.value = candidate.text || "";
+  renderMessages();
+}
+
+function editMemoryCandidate() {
+  if (!state.memoryCandidate) return;
+  if (els.memoryCandidateText) els.memoryCandidateText.value = state.memoryCandidate.text || "";
+  if (els.memoryCandidateModal) els.memoryCandidateModal.hidden = false;
+}
+
+function closeMemoryCandidate() {
+  state.memoryCandidate = null;
+  if (els.memoryCandidateText) els.memoryCandidateText.value = "";
+  if (els.memoryCandidateModal) els.memoryCandidateModal.hidden = true;
+}
+
+function saveMemoryCandidate(textOverride = "") {
+  const text = textOverride || els.memoryCandidateText?.value || "";
+  if (!state.memoryCandidate || !text.trim()) return;
+  state.characterMemorySets = window.GEMMA_CHARACTER?.addMemory?.({
+    memorySets: state.characterMemorySets,
+    character: state.character,
+    text,
+    sourceSessionId: state.memoryCandidate.sourceSessionId || "",
+    sourceFolderId: state.memoryCandidate.sourceFolderId || "",
+    createId: () => crypto.randomUUID(),
+    nowIso: () => new Date().toISOString(),
+  }) || state.characterMemorySets;
+  closeMemoryCandidate();
+  renderCharacterMemoryList();
+  renderMessages();
+}
+
+function exportTrainingData() {
+  const scope = els.trainingExportScope?.value || "active";
+  const examples = buildTrainingExamples(scope);
+  const trainingExport = window.GEMMA_TRAINING.createTrainingExport({
+    scope,
+    examples,
+    activeSet: activeTrainingSet(),
+    activeFolder: activeFolder(),
+    activeSession: activeSession(),
+    slugForFilename,
+    timestampForFilename,
+  });
+  if (!trainingExport) {
+    if (els.trainingStatus) els.trainingStatus.textContent = t("settings.trainingStatusEmpty");
+    return;
+  }
+  downloadTextFile(trainingExport.filename, trainingExport.jsonl);
+  if (els.trainingStatus) {
+    els.trainingStatus.textContent = t("settings.trainingStatusDoneNext", {
+      count: trainingExport.count,
+      name: trainingExport.filename,
+    });
+  }
 }
 
 function setEnterToSend(enabled) {
@@ -936,12 +2381,12 @@ function setEnterToSend(enabled) {
 }
 
 function openFolderEditor(folder) {
-  state.editingFolderId = null;
-  state.editingSessionId = null;
-  state.activeFolderId = folder.id;
-  state.workspaceOpen = true;
+  Object.assign(state, window.GEMMA_SIDEBAR.selectFolderInState({
+    state,
+    folderId: folder.id,
+    openWorkspace: true,
+  }));
   syncWorkspaceFromActiveFolder();
-  selectFirstSessionInActiveFolder();
   saveFolders();
   render();
   if (state.workspaceRoot) loadWorkspace();
@@ -951,12 +2396,68 @@ function openFolderEditor(folder) {
 function saveActiveFolderTitle() {
   const folder = activeFolder();
   if (!folder) return;
-  const name = els.workspaceFolderTitle.value.trim();
-  if (!name) {
+  const rename = window.GEMMA_SIDEBAR.renameFolderInState({
+    state,
+    folderId: folder.id,
+    value: els.workspaceFolderTitle.value,
+  });
+  if (!rename.changed) {
     els.workspaceFolderTitle.value = folder.name;
     return;
   }
-  folder.name = name;
+  state.editingFolderId = rename.editingFolderId;
+  state.folders = rename.folders;
+  saveFolders();
+  render();
+}
+
+function applyCodegraphToActiveFolder(enabled) {
+  const folder = activeFolder();
+  if (!folder) return;
+  folder.plugins = folder.plugins && typeof folder.plugins === "object" && !Array.isArray(folder.plugins)
+    ? folder.plugins
+    : {};
+  folder.plugins.codegraph = folder.plugins.codegraph && typeof folder.plugins.codegraph === "object" && !Array.isArray(folder.plugins.codegraph)
+    ? folder.plugins.codegraph
+    : {};
+  folder.plugins.codegraph.enabled = Boolean(enabled);
+  folder.plugins.codegraph.status = enabled
+    ? folder.plugins.codegraph.status && folder.plugins.codegraph.status !== "off"
+      ? folder.plugins.codegraph.status
+      : "not-ready"
+    : "off";
+  saveFolders();
+  render();
+}
+
+async function prepareCodegraphForActiveFolder() {
+  const folder = activeFolder();
+  if (!folder || !state.workspaceRoot) return;
+  folder.plugins = folder.plugins && typeof folder.plugins === "object" && !Array.isArray(folder.plugins)
+    ? folder.plugins
+    : {};
+  folder.plugins.codegraph = folder.plugins.codegraph && typeof folder.plugins.codegraph === "object" && !Array.isArray(folder.plugins.codegraph)
+    ? folder.plugins.codegraph
+    : {};
+  folder.plugins.codegraph.enabled = true;
+  folder.plugins.codegraph.status = "running";
+  folder.plugins.codegraph.error = "";
+  saveFolders();
+  render();
+  try {
+    const data = await window.GEMMA_WORKSPACE.prepareCodegraph({ root: state.workspaceRoot });
+    const stats = data.summary?.stats || {};
+    folder.plugins.codegraph.status = "ready";
+    folder.plugins.codegraph.files = Number(stats.files) || 0;
+    folder.plugins.codegraph.skipped = Number(stats.skipped) || 0;
+    folder.plugins.codegraph.path = data.path || ".codegraph/summary.json";
+    folder.plugins.codegraph.storage = data.storage || "workspace";
+    folder.plugins.codegraph.summary = data.summary || null;
+    folder.plugins.codegraph.indexedAt = data.summary?.generatedAt || new Date().toISOString();
+  } catch (error) {
+    folder.plugins.codegraph.status = "error";
+    folder.plugins.codegraph.error = error.message || "原因不明のエラーです。アプリを再起動してもう一度お試しください。";
+  }
   saveFolders();
   render();
 }
@@ -972,44 +2473,47 @@ function hideUndo() {
 }
 
 function restoreLastDeleted() {
-  const deleted = state.lastDeleted;
-  if (!deleted) return;
-  if (deleted.type === "folder") {
-    state.folders.splice(Math.min(deleted.folderIndex, state.folders.length), 0, deleted.folder);
-    state.sessions.push(...deleted.sessions);
-    state.activeFolderId = deleted.folder.id;
-    state.activeId = deleted.activeId || deleted.sessions[0]?.id || null;
+  const restored = window.GEMMA_SIDEBAR.restoreDeletedToState({ state });
+  if (!restored) return;
+  const {
+    shouldLoadWorkspace,
+    shouldSaveFolders,
+    shouldSaveSessions,
+    shouldSyncWorkspace,
+    ...nextState
+  } = restored;
+  Object.assign(state, nextState);
+  if (shouldSyncWorkspace) {
     syncWorkspaceFromActiveFolder();
+  }
+  if (shouldSaveFolders) {
     saveFolders();
-    saveSessions();
-    if (state.workspaceRoot) loadWorkspace();
   }
-  if (deleted.type === "session") {
-    state.sessions.splice(Math.min(deleted.sessionIndex, state.sessions.length), 0, deleted.session);
-    state.activeFolderId = deleted.session.folderId;
-    state.activeId = deleted.session.id;
+  if (shouldSaveSessions) {
     saveSessions();
   }
-  state.lastDeleted = null;
+  if (shouldLoadWorkspace && state.workspaceRoot) {
+    loadWorkspace();
+  }
   hideUndo();
   render();
 }
 
 function commitFolderRename(folder, value) {
-  state.editingFolderId = null;
-  const name = value.trim();
-  if (name) {
-    folder.name = name;
+  const rename = window.GEMMA_SIDEBAR.renameFolderInState({ state, folderId: folder.id, value });
+  state.editingFolderId = rename.editingFolderId;
+  state.folders = rename.folders;
+  if (rename.changed) {
     saveFolders();
   }
   render();
 }
 
 function commitSessionRename(session, value) {
-  state.editingSessionId = null;
-  const title = value.trim();
-  if (title) {
-    session.title = title;
+  const rename = window.GEMMA_SIDEBAR.renameSessionInState({ state, sessionId: session.id, value });
+  state.editingSessionId = rename.editingSessionId;
+  state.sessions = rename.sessions;
+  if (rename.changed) {
     saveSessions();
   }
   render();
@@ -1020,8 +2524,7 @@ function startFolderRename(folder) {
 }
 
 function startSessionRename(session) {
-  state.editingFolderId = null;
-  state.editingSessionId = session.id;
+  Object.assign(state, window.GEMMA_SIDEBAR.startSessionRenameInState({ sessionId: session.id }));
   render();
   requestAnimationFrame(() => {
     const input = document.querySelector(`[data-session-edit="${session.id}"]`);
@@ -1034,23 +2537,7 @@ function deleteFolder(folder) {
   const count = state.sessions.filter((session) => session.folderId === folder.id).length;
   const ok = window.confirm(t("folder.deleteConfirm", { name: folder.name, count }));
   if (!ok) return;
-  state.lastDeleted = {
-    type: "folder",
-    folder: { ...folder, selectedFiles: [...(folder.selectedFiles || [])] },
-    folderIndex: state.folders.findIndex((item) => item.id === folder.id),
-    sessions: state.sessions.filter((session) => session.folderId === folder.id).map((session) => ({ ...session, messages: [...session.messages] })),
-    activeId: state.activeId,
-  };
-  state.folders = state.folders.filter((item) => item.id !== folder.id);
-  state.sessions = state.sessions.filter((session) => session.folderId !== folder.id);
-  if (state.activeFolderId === folder.id) {
-    state.activeFolderId = state.folders[0]?.id || null;
-  }
-  if (state.folders.length === 0) {
-    state.activeFolderId = null;
-    state.activeId = null;
-    state.workspaceOpen = false;
-  }
+  Object.assign(state, window.GEMMA_SIDEBAR.deleteFolderFromState({ state, folder }));
   syncWorkspaceFromActiveFolder();
   selectFirstSessionInActiveFolder();
   saveFolders();
@@ -1063,13 +2550,10 @@ function deleteFolder(folder) {
 function deleteSession(session) {
   const ok = window.confirm(t("chat.deleteConfirm", { name: session.title }));
   if (!ok) return;
-  state.lastDeleted = {
-    type: "session",
-    session: { ...session, messages: [...session.messages] },
-    sessionIndex: state.sessions.findIndex((item) => item.id === session.id),
-  };
-  state.sessions = state.sessions.filter((item) => item.id !== session.id);
-  if (state.activeId === session.id) {
+  const deletion = window.GEMMA_SIDEBAR.deleteSessionFromState({ state, session });
+  state.lastDeleted = deletion.lastDeleted;
+  state.sessions = deletion.sessions;
+  if (deletion.shouldSelectFirstSession) {
     selectFirstSessionInActiveFolder();
   }
   saveSessions();
@@ -1078,20 +2562,18 @@ function deleteSession(session) {
 }
 
 function newSession(folderId = state.activeFolderId) {
-  if (!folderId) {
-    const folder = createFolder(t("folder.new"));
-    folderId = folder.id;
-  }
-  const session = {
-    id: crypto.randomUUID(),
-    title: t("chat.new"),
+  const sessionState = window.GEMMA_SIDEBAR.createSessionInState({
+    state,
     folderId,
-    messages: [],
-    createdAt: Date.now(),
-  };
-  state.sessions.unshift(session);
-  state.activeFolderId = folderId;
-  state.activeId = session.id;
+    folderName: t("folder.new"),
+    sessionTitle: t("chat.new"),
+    createId: () => crypto.randomUUID(),
+    now: () => Date.now(),
+  });
+  state.folders = sessionState.folders;
+  state.sessions = sessionState.sessions;
+  state.activeFolderId = sessionState.activeFolderId;
+  state.activeId = sessionState.activeId;
   syncWorkspaceFromActiveFolder();
   saveSessions();
   saveFolders();
@@ -1103,345 +2585,105 @@ function activeSession() {
 }
 
 function renderFolders() {
-  els.folderList.innerHTML = "";
-  if (visibleFolders().length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "folder-empty sidebar-empty";
-    empty.textContent = t("folder.none");
-    els.folderList.append(empty);
-    return;
-  }
-  for (const folder of visibleFolders()) {
-    const group = document.createElement("div");
-    group.className = `folder-group${folder.id === state.activeFolderId ? " active" : ""}`;
-
-    const row = document.createElement("div");
-    row.className = `folder-item${folder.id === state.activeFolderId ? " active" : ""}`;
-
-    if (state.editingFolderId === folder.id) {
-      const input = document.createElement("input");
-      input.className = "rename-input";
-      input.dataset.folderEdit = folder.id;
-      input.value = folder.name;
-      input.addEventListener("blur", () => commitFolderRename(folder, input.value));
-      input.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") commitFolderRename(folder, input.value);
-        if (event.key === "Escape") {
-          state.editingFolderId = null;
-          render();
-        }
-      });
-      row.append(input);
-    } else {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "item-main";
-      const name = document.createElement("span");
-      name.className = "folder-name";
-      name.textContent = folder.name;
-      const meta = document.createElement("small");
-      meta.textContent = folder.workspaceRoot ? t("folder.localReady") : t("folder.localMissing");
-      button.append(name, meta);
-      button.addEventListener("click", async () => {
-        state.editingFolderId = null;
-        state.editingSessionId = null;
-        state.workspaceOpen = false;
-        state.activeFolderId = folder.id;
-        syncWorkspaceFromActiveFolder();
-        selectFirstSessionInActiveFolder();
-        saveFolders();
-        render();
-        if (state.workspaceRoot) await loadWorkspace();
-      });
-      row.append(button);
-    }
-
-    const actions = document.createElement("div");
-    actions.className = "item-actions";
-    const addChat = document.createElement("button");
-    addChat.type = "button";
-    addChat.className = "item-action-primary";
-    addChat.textContent = t("folder.add");
-    addChat.title = t("folder.addTitle");
-    addChat.addEventListener("click", () => {
-      state.editingFolderId = null;
-      state.editingSessionId = null;
-      state.activeFolderId = folder.id;
-      syncWorkspaceFromActiveFolder();
-      newSession(folder.id);
-    });
-    const edit = document.createElement("button");
-    edit.type = "button";
-    edit.textContent = t("folder.edit");
-    edit.title = t("folder.editTitle");
-    edit.addEventListener("click", () => startFolderRename(folder));
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = t("folder.delete");
-    remove.title = t("folder.deleteTitle");
-    remove.addEventListener("click", () => deleteFolder(folder));
-    actions.append(addChat, edit, remove);
-    row.append(actions);
-
-    group.append(row);
-
-    const sessionList = document.createElement("div");
-    sessionList.className = "folder-session-list";
-    const sessions = visibleSessionsForFolder(folder);
-    for (const session of sessions) {
-      const sessionRow = document.createElement("div");
-      sessionRow.className = `session-item${session.id === state.activeId ? " active" : ""}`;
-
-      if (state.editingSessionId === session.id) {
-        const input = document.createElement("input");
-        input.className = "rename-input";
-        input.dataset.sessionEdit = session.id;
-        input.value = session.title;
-        input.addEventListener("blur", () => commitSessionRename(session, input.value));
-        input.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") commitSessionRename(session, input.value);
-          if (event.key === "Escape") {
-            state.editingSessionId = null;
-            render();
-          }
-        });
-        sessionRow.append(input);
-      } else {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "item-main";
-        button.textContent = session.title;
-        button.addEventListener("click", async () => {
-          state.editingFolderId = null;
-          state.editingSessionId = null;
-          state.activeFolderId = folder.id;
-          state.activeId = session.id;
-          syncWorkspaceFromActiveFolder();
-          saveFolders();
-          render();
-          if (state.workspaceRoot) await loadWorkspace();
-        });
-        sessionRow.append(button);
-      }
-
-      const sessionActions = document.createElement("div");
-      sessionActions.className = "item-actions";
-      const sessionEdit = document.createElement("button");
-      sessionEdit.type = "button";
-      sessionEdit.textContent = t("folder.edit");
-      sessionEdit.title = t("chat.editTitle");
-      sessionEdit.addEventListener("click", () => startSessionRename(session));
-      const sessionRemove = document.createElement("button");
-      sessionRemove.type = "button";
-      sessionRemove.textContent = t("folder.delete");
-      sessionRemove.title = t("chat.deleteTitle");
-      sessionRemove.addEventListener("click", () => deleteSession(session));
-      sessionActions.append(sessionEdit, sessionRemove);
-      sessionRow.append(sessionActions);
-      sessionList.append(sessionRow);
-    }
-
-    if (sessions.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "folder-empty";
-      empty.textContent = t("chat.none");
-      sessionList.append(empty);
-    }
-
-    group.append(sessionList);
-    els.folderList.append(group);
-  }
+  return window.GEMMA_SIDEBAR.renderFolders({
+    commitFolderRename,
+    commitSessionRename,
+    deleteFolder,
+    deleteSession,
+    els,
+    loadWorkspace,
+    newSession,
+    render,
+    saveCollapsedFolders,
+    saveFolders,
+    selectFirstSessionInActiveFolder,
+    startFolderRename,
+    startSessionRename,
+    state,
+    syncWorkspaceFromActiveFolder,
+    t,
+    sessionsForFolder,
+  });
 }
 
 function renderMessages() {
-  const session = activeSession();
-  els.messages.innerHTML = "";
-  els.chatTitle.textContent = session?.title || t("chat.new");
-  els.chatMeta.textContent = `${t("task.chat")}: ${modelForTask("chat")} / ${t("task.coding")}: ${modelForTask("coding")}`;
-
-  if (!session || session.messages.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-state";
-    empty.innerHTML = `
-      <h2>Gemma 4 12B</h2>
-      <div>${escapeHtml(t("chat.emptySubtitle"))}</div>
-    `;
-    els.messages.append(empty);
-    return;
-  }
-
-  for (const message of session.messages) {
-    const wrapper = document.createElement("article");
-    wrapper.className = `message ${message.role}${message.streaming ? " streaming" : ""}`;
-    const role = document.createElement("div");
-    role.className = "message-role";
-    role.textContent = message.role === "user" ? t("chat.you") : message.streaming ? t("chat.generatingRole") : "Gemma";
-    const bubble = document.createElement("div");
-    bubble.className = "bubble";
-    bubble.textContent = message.content || (message.streaming ? `${t("chat.generating")}...` : "");
-    wrapper.append(role, bubble);
-    if (message.streaming) {
-      const status = document.createElement("div");
-      status.className = "streaming-status";
-      const elapsed = state.progressElapsedSeconds || 0;
-      status.textContent = t("chat.streamingStatus", { label: state.progressLabel, seconds: elapsed });
-      wrapper.append(status);
-    }
-    if (message.imagePreviews && message.imagePreviews.length > 0) {
-      const images = document.createElement("div");
-      images.className = "message-images";
-      for (const preview of message.imagePreviews) {
-        const image = document.createElement("img");
-        image.src = preview;
-        image.alt = t("composer.attachedImage");
-        images.append(image);
-      }
-      wrapper.append(images);
-    }
-    if (message.generatedImages && message.generatedImages.length > 0) {
-      const images = document.createElement("div");
-      images.className = "generated-images";
-      for (const generated of message.generatedImages) {
-        const link = document.createElement("a");
-        link.href = generated.url;
-        link.target = "_blank";
-        link.rel = "noreferrer";
-        const image = document.createElement("img");
-        image.src = generated.url;
-        image.alt = generated.filename || (state.language === "en" ? "Generated image" : "生成画像");
-        link.append(image);
-        images.append(link);
-      }
-      wrapper.append(images);
-    }
-    if (message.imageMeta) {
-      const meta = document.createElement("div");
-      meta.className = "image-meta";
-      const details = [
-        `${message.imageMeta.width}×${message.imageMeta.height}`,
-        `Steps ${message.imageMeta.steps}`,
-        `CFG ${message.imageMeta.cfg}`,
-        `Seed ${message.imageMeta.seed}`,
-      ];
-      if (message.imageMeta.prompt) {
-        details.push(`Prompt: ${message.imageMeta.prompt}`);
-      }
-      meta.textContent = details.join(" / ");
-      wrapper.append(meta);
-    }
-    if (message.sources && message.sources.length > 0) {
-      const sources = document.createElement("div");
-      sources.className = "sources";
-      for (const [index, source] of message.sources.entries()) {
-        const link = document.createElement("a");
-        link.href = source.url;
-        link.target = "_blank";
-        link.rel = "noreferrer";
-        if (source.type === "preview") {
-          link.className = "preview-source";
-          link.textContent = source.title || t("chat.preview");
-        } else {
-          link.textContent = `[${index + 1}] ${source.title || source.url}`;
-        }
-        sources.append(link);
-      }
-      wrapper.append(sources);
-    }
-    if (message.role === "assistant" && typeof message.durationSeconds === "number") {
-      const duration = document.createElement("div");
-      duration.className = "message-duration";
-      const details = [`${t("chat.duration")}: ${formatDuration(message.durationSeconds)}`];
-      if (message.runMeta?.modelLabel) details.push(`${t("chat.model")}: ${message.runMeta.modelLabel}`);
-      if (message.runMeta?.taskLabel) details.push(`${t("chat.task")}: ${message.runMeta.taskLabel}`);
-      if (message.runMeta?.responseModeLabel) details.push(`${t("chat.mode")}: ${message.runMeta.responseModeLabel}`);
-      duration.textContent = details.join(" / ");
-      wrapper.append(duration);
-    }
-    els.messages.append(wrapper);
-  }
-  els.messages.scrollTop = els.messages.scrollHeight;
+  return window.GEMMA_MESSAGES.renderMessages({
+    activeSession,
+    addCorrectionToTrainingSet,
+    closeMemoryCandidate,
+    editMemoryCandidate,
+    els,
+    escapeHtml,
+    formatDuration,
+    modelForTask,
+    openWorkspaceSource,
+    saveMemoryCandidate,
+    saveWorkspaceTranscript,
+    state,
+    t,
+  });
 }
 
 function render() {
-  document.documentElement.style.setProperty("--sidebar-width", `${state.sidebarWidth}px`);
   document.body.dataset.theme = state.theme;
-  document.body.classList.toggle("sidebar-hidden", state.sidebarHidden);
-  els.sidebarToggle.hidden = !state.sidebarHidden;
-  els.sidebarCollapse.textContent = state.sidebarHidden ? t("sidebar.show") : t("sidebar.hide");
+  window.GEMMA_SIDEBAR?.applySidebarLayout?.({ els, state, t });
   renderFolders();
   renderMessages();
   renderWorkspace();
+  renderTrainingSetControls();
+  if (els.characterPanel && !els.characterPanel.hidden) renderCharacterPanel();
   els.send.disabled = false;
   els.send.hidden = state.busy;
   els.stop.hidden = !state.busy;
   els.stop.disabled = !state.abortController;
   renderPendingImages();
-  els.webSearchToggle.classList.toggle("active", state.webSearch);
-  els.webSearchToggle.setAttribute("aria-pressed", String(state.webSearch));
+  renderWebSearchToggle({ button: els.webSearchToggle, enabled: state.webSearch });
   els.progressLine.hidden = true;
 }
 
 function renderPendingImages() {
-  els.imageStrip.hidden = state.pendingImages.length === 0;
-  els.imageStrip.innerHTML = "";
-  for (const [index, image] of state.pendingImages.entries()) {
-    const item = document.createElement("div");
-    item.className = "pending-image";
-    const preview = document.createElement("img");
-    preview.src = image.preview;
-    preview.alt = image.name || t("composer.attachedImage");
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.textContent = "×";
-    remove.title = t("composer.removeAttachment");
-    remove.addEventListener("click", () => {
+  renderPendingImagesView({
+    state,
+    els,
+    t,
+    onRemoveImage: (index) => {
       state.pendingImages.splice(index, 1);
       render();
-    });
-    item.append(preview, remove);
-    els.imageStrip.append(item);
-  }
+    },
+    onRemoveFile: (index) => {
+      state.pendingFiles.splice(index, 1);
+      render();
+    },
+  });
 }
 
 function renderWorkspace() {
-  els.workspacePanel.hidden = !state.workspaceOpen;
-  const folder = activeFolder();
-  els.workspaceFolderName.textContent = folder?.name || t("workspace.noFolder");
-  els.workspaceFolderTitle.value = folder?.name || "";
-  els.workspaceRoot.value = state.workspaceRoot;
-  const selectedCount = state.selectedFiles.size;
-  const fileCount = state.workspaceFiles.length;
-  if (!state.workspaceRoot) {
-    els.workspaceStatus.textContent = t("workspace.notConfigured", { name: activeFolder()?.name || t("sidebar.folderButton") });
-  } else if (state.workspaceNote) {
-    els.workspaceStatus.textContent = state.workspaceNote;
-  } else {
-    els.workspaceStatus.textContent = t("workspace.loaded", { name: activeFolder()?.name || t("sidebar.folderButton"), files: fileCount, selected: selectedCount });
-  }
-  els.workspaceFiles.innerHTML = "";
-  for (const file of state.workspaceFiles) {
-    const row = document.createElement("label");
-    row.className = `workspace-file${file.text ? "" : " disabled"}`;
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.disabled = !file.text;
-    checkbox.checked = state.selectedFiles.has(file.path);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) {
-        state.selectedFiles.add(file.path);
-      } else {
-        state.selectedFiles.delete(file.path);
-      }
+  renderWorkspacePanel({
+    activeFolder: activeFolder(),
+    els,
+    onFileSelectionChange: () => {
       saveWorkspacePrefs();
       renderWorkspace();
-    });
-    const name = document.createElement("span");
-    name.textContent = file.path;
-    const meta = document.createElement("small");
-    meta.textContent = `${Math.ceil(file.size / 1024)} KB${file.text ? "" : t("workspace.binary")}`;
-    row.append(checkbox, name, meta);
-    els.workspaceFiles.append(row);
+    },
+    state,
+    t,
+  });
+}
+
+function openWorkspaceForPlugin(pluginId = "") {
+  if (!activeFolder()) {
+    createFolder(t("folder.new"));
   }
+  state.workspaceOpen = true;
+  render();
+  window.requestAnimationFrame(() => {
+    const target = pluginId === "fast-search"
+      ? els.workspaceSearchRow
+      : pluginId === "codegraph"
+        ? els.workspaceCodegraphRow
+        : els.workspacePanel;
+    (target && !target.hidden ? target : els.workspacePanel)?.scrollIntoView({ block: "center" });
+  });
 }
 
 function updateSessionTitle(session, prompt) {
@@ -1450,23 +2692,145 @@ function updateSessionTitle(session, prompt) {
   session.title = oneLine.slice(0, 42) || t("chat.new");
 }
 
-function numberValue(input, fallback) {
-  const value = Number(input.value);
-  return Number.isFinite(value) ? value : fallback;
-}
+const {
+  downloadTextFile,
+  escapeHtml,
+  formatDuration: formatDurationValue,
+  numberValue,
+  slugForFilename,
+  textSnippet,
+  timestampForFilename,
+} = window.GEMMA_UTILS || {};
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+const {
+  translationBudget,
+  isTranslationRequest,
+  isTranslationInstructionLine,
+  translationSourceText,
+  translationTargetIsJapanese,
+  translationNeedsQuality,
+} = window.GEMMA_TRANSLATION || {};
+
+const {
+  isCasualQuickReplyRequest,
+  isLocalDateTimeRequest,
+  localDateTimeAnswer,
+} = window.GEMMA_LOCAL_TOOLS || {};
+
+const {
+  isWeatherRequest,
+  saveWeatherLocation,
+  weatherCoordinatesForRequest,
+  weatherLocationFromText,
+} = window.GEMMA_WEATHER || {};
+
+const {
+  isImageGenerationRequest,
+  extractImagePrompt,
+  parseImageOptions,
+} = window.GEMMA_IMAGE_TOOLS || {};
+
+const {
+  bindComposerEvents,
+  renderPendingImages: renderPendingImagesView,
+  resizePrompt: resizePromptView,
+} = window.GEMMA_COMPOSER || {};
+
+const {
+  bindAsrUi,
+  fetchAsrSetupStatus,
+  fetchAsrStatus,
+  formatMicGain,
+  listAudioInputDevices,
+  normalizeMicGain,
+  normalizePartialIntervalSeconds,
+  normalizePartialTranscriptionMode,
+  renderAsrSettings,
+  requestAsrSetup,
+  startMicLevelMonitor,
+} = window.GEMMA_ASR || {};
+
+const {
+  cleanCandidatePath,
+  compactWorkspaceContent,
+  extractCodeBlocks,
+  extractJsonObject,
+  inferSavePath: inferWorkspaceSavePath,
+  inferSimpleTextSave: inferWorkspaceSimpleTextSave,
+  isSaveCommand,
+  lastAssistantMessage,
+  normalizeWorkspacePlan,
+  parseWorkspaceGeneration,
+  previewSources: workspacePreviewSources,
+  renderWorkspacePreviewContent: renderWorkspacePreviewContentView,
+  renderWorkspacePanel,
+  updateWorkspacePreviewSearch: updateWorkspacePreviewSearchView,
+  uniquePath,
+  validateFiles: validateWorkspaceFilesApi,
+  workspaceContentSummary,
+  workspaceContentTranscript,
+  workspaceFileKindLabel,
+  workspaceFileKindFromText: workspaceFileKindFromTextApi,
+  workspaceFileMatchesKind,
+  workspaceFormatBytes,
+  workspaceTranscriptAction: buildWorkspaceTranscriptAction,
+  writeFile: writeWorkspaceFileApi,
+} = window.GEMMA_WORKSPACE || {};
+
+const {
+  renderTrainingControls: renderTrainingControlsView,
+  renderTrainingSetOptions: renderTrainingSetOptionsView,
+} = window.GEMMA_TRAINING || {};
+
+const {
+  applySearchBudget,
+  normalizeSearchResults,
+  renderWebSearchToggle,
+  searchPayloadOptions,
+  searchResultsFromEvent,
+  searchResultsFromResponse,
+  toggleWebSearch,
+} = window.GEMMA_SEARCH || {};
 
 function isWorkspaceBuildRequest(text) {
   if (!state.workspaceRoot) return false;
+  if (isTranslationRequest(text)) return false;
+  if (isWorkspaceLookupRequest(text)) return false;
   return /テトリス|ゲーム|サイト|アプリ|ページ|ツール|作って|つくって|作成|生成|構築|実装|修正|変更|保存|ファイル|html|css|javascript|コード|program|app|game|build|create|implement/i.test(text);
+}
+
+function hasExplicitWorkspaceLookupIntent(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  if (/\b[A-Za-z0-9_.-]+\.(txt|md|pdf|docx?|html|css|js|jsx|ts|tsx|py|json|csv)\b/i.test(normalized)) return true;
+  return /(フォルダ|フォルダー|ディレクトリ|作業ディレクトリ|ローカル|ファイル|保存先|中身|一覧|検索|探|見つけ|どこにある|どこに保存|場所|入って|含ま|書か|記載|契約書|請求書|仕様書|見積書|領収書|議事録|資料|文書|テキスト|PDF|Word|folder|directory|file|where is|search|find|contain|contract|invoice|spec|receipt|minutes)/i.test(normalized);
+}
+
+function isCharacterPreferenceRequest(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  const asksPreference = /(好き|好み|趣味|嫌い|どこが好き|何が好き|どう思|覚えて|記憶)/.test(normalized);
+  if (!asksPreference) return false;
+  const characterName = state.character?.name ? String(state.character.name) : "";
+  const userName = state.character?.userName ? String(state.character.userName) : "";
+  const mentionsCharacter = Boolean(characterName && normalized.includes(characterName));
+  const mentionsUserName = Boolean(userName && normalized.includes(userName));
+  return mentionsCharacter || mentionsUserName || !hasExplicitWorkspaceLookupIntent(normalized);
+}
+
+function isWorkspaceLookupRequest(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  if (isCharacterPreferenceRequest(normalized)) return false;
+  return hasExplicitWorkspaceLookupIntent(normalized)
+    && /(フォルダ|フォルダー|PDF|pdf|どこにある|どこに保存|場所|ある|あります|入って|情報|内容|中身|本文|一覧|検索|探|教えて|おしえて|説明|要約|読んで|見つけ|含ま|書か|記載|where|search|find|contain|which)/i.test(normalized)
+    && !/(保存|作って|つくって|作成|生成|構築|実装|修正|変更|write|save|create|build|implement)/i.test(normalized);
+}
+
+function shouldUseWorkspaceContextForChat(text, requestOptions = {}) {
+  if (requestOptions.translationMode) return false;
+  if (requestOptions.codingMode) return true;
+  return isWorkspaceLookupRequest(text);
 }
 
 function isSimpleWorkspaceBuildRequest(text) {
@@ -1496,6 +2860,7 @@ function isLightweightChatRequest(text, hasImages = false) {
   const normalized = text.replace(/\s+/g, "").trim();
   if (!normalized || normalized.length > 44) return false;
   if (isTranslationRequest(text) || isWorkspaceBuildRequest(text) || isWeatherRequest(text) || isImageGenerationRequest(text)) return false;
+  if (/とは|って何|ってなに|誰|だれ|代表|社長|CEO|いつ|どこ|会社|製品|サービス|what is|who is|when|where/i.test(text)) return false;
   if (/教えて|調べ|検索|説明|理由|なぜ|比較|要約|分析|設計|実装|修正|コード|ファイル|保存|画像|添削|翻訳|translate|explain|why|how|code|file|image|search/i.test(text)) {
     return false;
   }
@@ -1506,15 +2871,11 @@ function isLightweightChatRequest(text, hasImages = false) {
   );
 }
 
-function isTranslationRequest(text) {
-  return /英訳|和訳|翻訳|訳して|translate/i.test(text);
-}
-
 function effectiveResponseMode(text, codingMode) {
   if (codingMode) return "quality";
   const selected = state.responseMode;
   if (selected !== "auto") return selected;
-  if (isTranslationRequest(text)) return "fast";
+  if (isTranslationRequest(text)) return translationNeedsQuality(text) ? "quality" : "fast";
   return isSimpleReplyRequest(text) ? "fast" : "balanced";
 }
 
@@ -1548,7 +2909,21 @@ function thinkingSystemSuffix(mode) {
 
 function translationSystemSuffix(enabled) {
   if (!enabled) return "";
-  return "\n\n翻訳モード: ユーザーが翻訳を求めた場合は、翻訳文だけを返してください。解説、前置き、箇条書き、候補の列挙は不要です。原文が箇条書きなら箇条書きを保ち、それ以外は自然な文章として訳してください。";
+  return "\n\n翻訳モード: ユーザーが翻訳を求めた場合は、翻訳文だけを返してください。解説、前置き、箇条書き、候補の列挙は不要です。原文が箇条書きなら箇条書きを保ち、それ以外は自然な文章として訳してください。原文の全文を省略せず、要約しないでください。";
+}
+
+function factualSafetySystemSuffix(codingMode, translationMode) {
+  if (codingMode || translationMode) return "";
+  return [
+    "",
+    "",
+    "事実確認ルール:",
+    "- 固有名詞、会社、人物、製品、日付、数値、代表者、所在地などは推測で断定しないでください。",
+    `- 学習セット、ユーザー提供文、Web検索結果、添付資料のどれにも根拠がない情報は「${t("training.uncertainAnswer")}」と答えてください。`,
+    "- 似た言葉や一般知識から別の意味を作らないでください。",
+    "- 学習セットにある事実は優先して使ってください。ただし、学習セットにない追加情報を補完しないでください。",
+    "- 現在情報や外部確認が必要な質問では、Web検索を使うよう短く案内してください。",
+  ].join("\n");
 }
 
 function translationSystemPrompt() {
@@ -1557,8 +2932,11 @@ function translationSystemPrompt() {
     "Return only the translated text.",
     "Do not add explanations, bullets, labels, alternatives, or notes.",
     "Preserve the source structure when it is a list or multiline text.",
+    "Translate the entire source text. Do not summarize, shorten, skip, or save it to a file.",
+    "Do not leave source-language sentences untranslated.",
     "If the request says 英訳, translate into natural English.",
     "If the request says 和訳, translate into natural Japanese.",
+    "If the request says 日本語に, translate into natural Japanese.",
     "If no target language is explicit, infer it from the request.",
   ].join("\n");
 }
@@ -1567,6 +2945,7 @@ function lightweightChatSystemPrompt() {
   if (state.language === "en") {
     return [
       "You are a natural, lightweight casual assistant.",
+      "Keep the active character name, speaking style, and memory unless they conflict with accuracy or safety.",
       "Reply directly in 1-2 short sentences.",
       "For everyday questions like meals, breaks, or mood, give a concrete suggestion.",
       "Do not preface that you are a language model, not an expert, or unable to do something.",
@@ -1575,6 +2954,7 @@ function lightweightChatSystemPrompt() {
   }
   return [
     "あなたは日本語で自然に返す軽い雑談アシスタントです。",
+    "有効なマイキャラの名前、話し方、記憶を保ってください。ただし正確性や安全性とぶつかる場合はそちらを優先してください。",
     "ユーザーの短い相談や雑談に、1〜2文で直接答えてください。",
     "食事、休憩、気分転換などの日常的な相談には、具体的に提案してください。",
     "自分が言語モデルであること、専門外であること、実行できないことを前置きしないでください。",
@@ -1583,7 +2963,7 @@ function lightweightChatSystemPrompt() {
 }
 
 function buildSystemPrompt(basePrompt, codingMode, responseMode = "balanced", thinkingMode = "medium", translationMode = false) {
-  const prompt = `${basePrompt}${modeSystemSuffix(responseMode)}${thinkingSystemSuffix(thinkingMode)}${translationSystemSuffix(translationMode)}`;
+  const prompt = `${basePrompt}${modeSystemSuffix(responseMode)}${thinkingSystemSuffix(thinkingMode)}${translationSystemSuffix(translationMode)}${factualSafetySystemSuffix(codingMode, translationMode)}`;
   if (!codingMode) return prompt;
   return `${prompt}
 
@@ -1600,6 +2980,15 @@ function buildSystemPrompt(basePrompt, codingMode, responseMode = "balanced", th
   \`\`\`
 - ファイル名をコードブロックの中に入れないでください。
 - コードブロックは必ず閉じてください。途中で終わる長さにしないでください。`;
+}
+
+function friendlyUncertainAnswer(content) {
+  const normalized = String(content || "").replace(/\s+/g, "").replace(/[。.!！]+$/g, "");
+  if (/^(確認できません|わかりません|分かりません|不明です|確認できない)$/.test(normalized)) {
+    return characterUncertainAnswer();
+  }
+  if (String(content || "").trim() === t("training.uncertainAnswer")) return characterUncertainAnswer();
+  return content;
 }
 
 function applyThinkingBudget(options) {
@@ -1629,9 +3018,18 @@ function applyThinkingBudget(options) {
   };
 }
 
+function externalLlmBaseUrlForRequest() {
+  return state.externalLlmUrl || "";
+}
+
+function modelReasonText(reasonKey) {
+  if (state.composerModel) return t("model.reasonManualModel");
+  return t(reasonKey);
+}
+
 function chatRequestOptions(text, hasImages = false) {
-  const codingMode = isWorkspaceBuildRequest(text);
-  const translationMode = isTranslationRequest(text) && !codingMode;
+  const translationMode = isTranslationRequest(text);
+  const codingMode = !translationMode && isWorkspaceBuildRequest(text);
   const lightweightMode = !codingMode && !translationMode && isLightweightChatRequest(text, hasImages);
   const mode = effectiveResponseMode(text, codingMode);
   const thinkingMode = effectiveThinkingMode(text, codingMode, mode);
@@ -1645,6 +3043,7 @@ function chatRequestOptions(text, hasImages = false) {
       responseMode: "fast",
       thinkingMode: "low",
       progressLabel: t("progress.lightweight"),
+      modelReason: modelReasonText("model.reasonLightweight"),
       temperature: Math.min(numberValue(els.temperature, 0.7), 0.55),
       topP: 0.75,
       topK: 20,
@@ -1658,17 +3057,20 @@ function chatRequestOptions(text, hasImages = false) {
     };
   }
   if (translationMode) {
+    const budget = translationBudget(text, maxTokens);
+    const translationModeLabel = translationNeedsQuality(text) ? "quality" : "fast";
     return {
       codingMode,
       translationMode,
-      responseMode: "fast",
-      thinkingMode: "low",
+      responseMode: translationModeLabel,
+      thinkingMode: translationModeLabel === "quality" ? "medium" : "low",
       progressLabel: t("progress.translation"),
+      modelReason: modelReasonText(translationModeLabel === "quality" ? "model.reasonTranslationQuality" : "model.reasonTranslation"),
       temperature: 0.1,
       topP: 0.7,
       topK: 10,
-      numPredict: Math.min(Math.max(maxTokens, 128), 192),
-      numCtx: 2048,
+      numPredict: budget.numPredict,
+      numCtx: budget.numCtx,
       historyTurns: 1,
       keepAlive: "30m",
       think: false,
@@ -1682,6 +3084,7 @@ function chatRequestOptions(text, hasImages = false) {
       responseMode: mode,
       thinkingMode,
       progressLabel: t("progress.fast"),
+      modelReason: modelReasonText("model.reasonFastMode"),
       temperature: Math.min(numberValue(els.temperature, 0.7), 0.5),
       topP: Math.min(numberValue(els.topP, 0.9), 0.8),
       topK: Math.min(numberValue(els.topK, 40), 20),
@@ -1700,6 +3103,7 @@ function chatRequestOptions(text, hasImages = false) {
       responseMode: mode,
       thinkingMode,
       progressLabel: codingMode ? t("progress.coding") : t("progress.quality"),
+      modelReason: modelReasonText(codingMode ? "model.reasonCoding" : "model.reasonQualityMode"),
       temperature: numberValue(els.temperature, 0.7),
       topP: numberValue(els.topP, 0.9),
       topK: numberValue(els.topK, 40),
@@ -1711,18 +3115,30 @@ function chatRequestOptions(text, hasImages = false) {
       webSearch: state.webSearch,
     });
   }
+  const searchBudget = applySearchBudget?.({
+    codingMode,
+    webSearch: state.webSearch,
+    maxTokens,
+    contextSize,
+    historyTurns,
+  }) || {
+    numPredict: codingMode ? Math.max(maxTokens, 4096) : state.webSearch ? Math.max(maxTokens, 512) : Math.max(maxTokens, 256),
+    numCtx: codingMode ? Math.max(contextSize, 8192) : state.webSearch ? Math.max(contextSize, 4096) : contextSize,
+    historyTurns: codingMode ? Math.max(historyTurns, 6) : state.webSearch ? Math.min(Math.max(historyTurns, 3), 4) : historyTurns,
+  };
   return applyThinkingBudget({
     codingMode,
     translationMode,
     responseMode: mode,
     thinkingMode,
     progressLabel: codingMode ? t("progress.coding") : state.webSearch ? t("progress.search") : t("progress.generating"),
+    modelReason: modelReasonText(codingMode ? "model.reasonCoding" : state.webSearch ? "model.reasonWebSearch" : "model.reasonDefaultChat"),
     temperature: numberValue(els.temperature, 0.7),
     topP: numberValue(els.topP, 0.9),
     topK: numberValue(els.topK, 40),
-    numPredict: codingMode ? Math.max(maxTokens, 4096) : state.webSearch ? Math.max(maxTokens, 512) : maxTokens,
-    numCtx: codingMode ? Math.max(contextSize, 8192) : state.webSearch ? Math.max(contextSize, 4096) : contextSize,
-    historyTurns: codingMode ? Math.max(historyTurns, 6) : state.webSearch ? Math.min(Math.max(historyTurns, 3), 4) : historyTurns,
+    numPredict: searchBudget.numPredict,
+    numCtx: searchBudget.numCtx,
+    historyTurns: searchBudget.historyTurns,
     keepAlive: codingMode ? "20m" : "15m",
     think: false,
     webSearch: state.webSearch,
@@ -1826,88 +3242,6 @@ function simpleWorkspacePlan() {
   };
 }
 
-function extractJsonObject(text) {
-  const trimmed = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
-  const first = trimmed.indexOf("{");
-  const last = trimmed.lastIndexOf("}");
-  if (first < 0 || last <= first) {
-    throw new Error("GemmaがJSONを返しませんでした。");
-  }
-  return JSON.parse(trimmed.slice(first, last + 1));
-}
-
-function extractFilesFromCodeBlocks(text) {
-  const files = [];
-  const pattern = /(?:^|\n)\s*([A-Za-z0-9_.\/-]+\.[A-Za-z0-9]+)\s*\n```[A-Za-z0-9_-]*\n([\s\S]*?)```/g;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    const path = cleanCandidatePath(match[1]);
-    const content = match[2].replace(/\s+$/g, "\n");
-    if (path && content.trim()) files.push({ path, content });
-  }
-  if (files.length === 0) {
-    throw new Error("保存できるコードブロックが見つかりませんでした。");
-  }
-  return {
-    summary: "コードブロックからファイルを生成しました。",
-    notes: ["JSONが不完全な場合は、コードブロック形式から保存します。"],
-    files,
-  };
-}
-
-function parseWorkspaceGeneration(text) {
-  try {
-    const payload = extractJsonObject(text);
-    return {
-      summary: String(payload.summary || "生成しました。"),
-      notes: Array.isArray(payload.notes) ? payload.notes.map(String) : [],
-      files: normalizeGeneratedFiles(payload),
-    };
-  } catch (jsonError) {
-    try {
-      return extractFilesFromCodeBlocks(text);
-    } catch {
-      throw new Error(`生成結果を読み取れませんでした: ${jsonError.message}`);
-    }
-  }
-}
-
-function normalizeGeneratedFiles(payload) {
-  if (!payload || !Array.isArray(payload.files)) {
-    throw new Error("GemmaのJSONにfiles配列がありません。");
-  }
-  const files = payload.files
-    .map((file) => ({
-      path: cleanCandidatePath(String(file.path || "")),
-      content: String(file.content || ""),
-    }))
-    .filter((file) => file.path && file.content.trim());
-  if (files.length === 0) {
-    throw new Error("保存できるファイルが生成されませんでした。");
-  }
-  return files;
-}
-
-function normalizeWorkspacePlan(payload) {
-  const fallback = {
-    summary: "index.html に自己完結のWebアプリを作成します。",
-    files: [{ path: "index.html", purpose: "CSSとJavaScriptを含む完成版のHTML" }],
-  };
-  if (!payload || !Array.isArray(payload.files)) return fallback;
-  const files = payload.files
-    .slice(0, 3)
-    .map((file) => ({
-      path: cleanCandidatePath(String(file.path || "")),
-      purpose: String(file.purpose || "このファイルを実装します。").trim(),
-    }))
-    .filter((file) => file.path);
-  if (files.length === 0) return fallback;
-  return {
-    summary: String(payload.summary || "段階的にファイルを生成します。").trim(),
-    files,
-  };
-}
-
 async function requestWorkspacePlan(userText, signal = null, model = modelForTask("coding")) {
   const response = await fetch("/api/chat", {
     method: "POST",
@@ -1915,6 +3249,7 @@ async function requestWorkspacePlan(userText, signal = null, model = modelForTas
     body: JSON.stringify({
       task: "coding",
       model,
+      llm_base_url: externalLlmBaseUrlForRequest(),
       system: workspacePlanSystemPrompt(),
       messages: [{ role: "user", content: userText }],
       temperature: 0.1,
@@ -1926,10 +3261,7 @@ async function requestWorkspacePlan(userText, signal = null, model = modelForTas
       think: false,
       keep_alive: "20m",
       web_search: false,
-      workspace: {
-        root: state.workspaceRoot,
-        files: [...state.selectedFiles],
-      },
+      workspace: workspacePayload(),
     }),
     signal: combinedAbortSignal(signal, WORKSPACE_PLAN_TIMEOUT_MS),
   });
@@ -2176,6 +3508,7 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
     body: JSON.stringify({
       task: "coding",
       model,
+      llm_base_url: externalLlmBaseUrlForRequest(),
       system: workspaceBuilderSystemPrompt(),
       messages: [
         {
@@ -2192,10 +3525,7 @@ async function requestWorkspaceFiles(userText, previousFiles = [], validation = 
       think: false,
       keep_alive: "20m",
       web_search: false,
-      workspace: {
-        root: state.workspaceRoot,
-        files: [...state.selectedFiles],
-      },
+      workspace: workspacePayload(),
     }),
     signal: combinedAbortSignal(signal, WORKSPACE_FILE_TIMEOUT_MS),
   });
@@ -2235,6 +3565,7 @@ async function requestWorkspaceFile(userText, plan, fileSpec, previousFile = nul
     body: JSON.stringify({
       task: "coding",
       model,
+      llm_base_url: externalLlmBaseUrlForRequest(),
       system: options.system || workspaceFileSystemPrompt(),
       messages: [{ role: "user", content }],
       temperature: options.temperature ?? 0.15,
@@ -2246,10 +3577,7 @@ async function requestWorkspaceFile(userText, plan, fileSpec, previousFile = nul
       think: false,
       keep_alive: options.keepAlive || "20m",
       web_search: false,
-      workspace: {
-        root: state.workspaceRoot,
-        files: [...state.selectedFiles],
-      },
+      workspace: workspacePayload(),
     }),
     signal: combinedAbortSignal(signal, options.timeoutMs || WORKSPACE_FILE_TIMEOUT_MS),
   });
@@ -2268,31 +3596,22 @@ async function requestWorkspaceFile(userText, plan, fileSpec, previousFile = nul
 async function saveGeneratedFiles(files) {
   const saved = [];
   for (const file of files) {
-    const response = await fetch("/api/workspace/write", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ root: state.workspaceRoot, path: file.path, content: file.content }),
+    const data = await writeWorkspaceFileApi({
+      root: state.workspaceRoot,
+      path: file.path,
+      content: file.content,
+    }).catch((error) => {
+      throw new Error(error.message || `${file.path} を保存できませんでした。`);
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || `${file.path} を保存できませんでした。`);
-    }
     saved.push({ path: data.path, size: data.size });
   }
   return saved;
 }
 
 async function validateGeneratedFiles(files) {
-  const response = await fetch("/api/workspace/validate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ root: state.workspaceRoot, files }),
+  return validateWorkspaceFilesApi({ root: state.workspaceRoot, files }).catch((error) => {
+    throw new Error(error.message || "検証に失敗しました。");
   });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || "検証に失敗しました。");
-  }
-  return data;
 }
 
 function buildWorkspaceResultMessage(savedFiles, validation, attempts, notes = []) {
@@ -2311,18 +3630,12 @@ function buildWorkspaceResultMessage(savedFiles, validation, attempts, notes = [
   return lines.join("\n");
 }
 
-function workspacePreviewSources(files) {
-  if (!state.workspaceRoot) return [];
-  return files
-    .filter((file) => /\.html?$/i.test(file.path))
-    .map((file) => ({
-      type: "preview",
-      title: `${t("chat.preview")}: ${file.path}`,
-      url: `/api/workspace/preview?root=${encodeURIComponent(state.workspaceRoot)}&path=${encodeURIComponent(file.path)}`,
-    }));
-}
-
 async function handleWorkspaceBuild(text) {
+  if (isTranslationRequest(text)) {
+    await sendMessage(text);
+    return;
+  }
+
   let session = activeSession();
   if (!session) {
     newSession();
@@ -2492,7 +3805,11 @@ async function handleWorkspaceBuild(text) {
     saveWorkspacePrefs();
     const durationSeconds = (Date.now() - state.startedAt) / 1000;
     progressMessage.content = buildWorkspaceResultMessage(savedFiles, validation, attempts, generated?.notes || []);
-    progressMessage.sources = workspacePreviewSources(savedFiles);
+    progressMessage.sources = workspacePreviewSources({
+      root: state.workspaceRoot,
+      files: savedFiles,
+      label: t("chat.preview"),
+    });
     progressMessage.durationSeconds = durationSeconds;
     progressMessage.runMeta = {
       model: activeCodingModel,
@@ -2550,6 +3867,7 @@ async function checkHealth() {
     const data = await response.json();
     state.appInfo.version = data.appVersion || state.appInfo.version;
     state.appInfo.commit = data.appCommit || state.appInfo.commit;
+    state.appInfo.searchCapabilities = data.searchCapabilities || state.appInfo.searchCapabilities;
     if (data.models) {
       state.serverModels.chat = data.models.chat || data.model || state.serverModels.chat;
       state.serverModels.coding = data.models.coding || data.codingModel || state.serverModels.coding;
@@ -2589,6 +3907,14 @@ async function readChatStream(response, onEvent) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const parseEvent = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const preview = text.replace(/\s+/g, " ").slice(0, 120);
+      throw new Error(preview ? `生成結果を読み取れませんでした。アプリまたはモデルサーバーを確認してください: ${preview}` : "生成結果を読み取れませんでした。");
+    }
+  };
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -2598,12 +3924,12 @@ async function readChatStream(response, onEvent) {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      onEvent(JSON.parse(trimmed));
+      onEvent(parseEvent(trimmed));
     }
   }
   buffer += decoder.decode();
   const trimmed = buffer.trim();
-  if (trimmed) onEvent(JSON.parse(trimmed));
+  if (trimmed) onEvent(parseEvent(trimmed));
 }
 
 async function sendMessage(text) {
@@ -2615,18 +3941,32 @@ async function sendMessage(text) {
 
   const images = state.pendingImages.map((image) => image.base64);
   const imagePreviews = state.pendingImages.map((image) => image.preview);
+  const pendingFiles = [...state.pendingFiles];
+  const attachments = pendingFiles.map((file) => ({
+    name: file.name,
+    kind: file.kind,
+    size: file.size,
+    sizeLabel: file.sizeLabel,
+  }));
   const requestOptions = chatRequestOptions(text, images.length > 0);
-  const userMessage = { role: "user", content: text, images, imagePreviews };
+  const userMessage = { role: "user", content: text, images, imagePreviews, attachments };
   session.messages.push(userMessage);
+  const memoryCandidate = window.GEMMA_CHARACTER?.memoryCandidateFromText?.(text, {
+    mode: state.character?.memoryMode || "suggest",
+  });
+  if (memoryCandidate) openMemoryCandidate(memoryCandidate);
   state.pendingImages = [];
+  state.pendingFiles = [];
   updateSessionTitle(session, text);
   state.busy = true;
-  startProgressTimer(requestOptions.progressLabel);
+  startProgressTimer(requestOptions.progressLabel, requestOptions.modelReason);
   saveSessions();
   render();
 
   let assistantMessage = null;
   let renderScheduled = false;
+  let requestModel = "";
+  let runMetaOverrides = {};
   const scheduleStreamRender = () => {
     if (renderScheduled) return;
     renderScheduled = true;
@@ -2638,7 +3978,93 @@ async function sendMessage(text) {
   };
 
   try {
-    const requestSystem = requestOptions.translationMode
+    const attachmentResults = pendingFiles.length > 0 ? await extractAttachmentContents(pendingFiles) : [];
+    const attachmentContext = attachmentContextFromResults(attachmentResults);
+    const hasAttachmentFiles = pendingFiles.length > 0;
+    const hasReadableAttachments = attachmentResults.some((item) => String(item.content || "").trim());
+    const attachmentSources = attachmentSummarySources(attachmentResults);
+    runMetaOverrides = hasAttachmentFiles
+      ? { modelReason: "添付ファイルを優先", codeUnderstanding: false }
+      : {};
+    if (attachmentResults.length > 0) {
+      userMessage.attachments = attachmentResults.map((item) => ({
+        name: item.name,
+        kind: item.kind,
+        size: item.size,
+        sizeLabel: workspaceFormatBytes(item.size || 0),
+        readable: Boolean(item.content && item.content.trim()),
+        error: item.error || "",
+        content: item.content || "",
+      }));
+    }
+    if (hasAttachmentFiles && !hasReadableAttachments) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      const details = attachmentResults
+        .map((item) => `- ${item.name}: ${item.error || "本文を抽出できませんでした"}`)
+        .join("\n");
+      pushAssistantReply(session, {
+        content: applyCharacterToneToToolReply(
+          `添付ファイルを読み取れなかったよ。\n${details}\n\n画像だけのPDFやスキャンPDFの場合は、「設定」→「プラグイン」→「画像文字読み取り（OCR）」を確認してね。`,
+        ),
+        durationSeconds,
+        runMeta: attachmentRunMeta(requestOptions, "添付ファイルの読み取りに失敗"),
+      });
+      return;
+    }
+    if (hasAttachmentFiles && hasReadableAttachments && isAttachmentTranscriptRequest(text)) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      pushAssistantReply(session, {
+        content: directAttachmentTranscriptAnswer(attachmentResults, attachmentReplyOptions()),
+        sources: attachmentSummarySources(attachmentResults),
+        durationSeconds,
+        runMeta: attachmentRunMeta(requestOptions, "添付ファイルの文字起こしとして判定"),
+      });
+      return;
+    }
+    if (hasAttachmentFiles && hasReadableAttachments && isVagueAttachmentQuestion(text)) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      pushAssistantReply(session, {
+        content: directAttachmentAnswer(attachmentResults, attachmentReplyOptions()),
+        sources: attachmentSummarySources(attachmentResults),
+        durationSeconds,
+        runMeta: attachmentRunMeta(requestOptions, "短い添付質問として判定"),
+      });
+      return;
+    }
+    const previousAttachment = !hasAttachmentFiles
+      ? lastReadableAttachment({ messages: session.messages.slice(0, -1) })
+      : null;
+    if (previousAttachment && isAttachmentFollowupRequest(text, attachmentReplyOptions())) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      const previousAttachmentResults = [{
+        name: previousAttachment.name,
+        kind: previousAttachment.kind,
+        content: previousAttachment.content,
+        size: previousAttachment.size,
+      }];
+      pushAssistantReply(session, {
+        content: isAttachmentTranscriptRequest(text)
+          ? directAttachmentTranscriptAnswer(previousAttachmentResults, attachmentReplyOptions())
+          : directAttachmentAnswer(previousAttachmentResults, attachmentReplyOptions()),
+        sources: attachmentSummarySources(previousAttachmentResults),
+        durationSeconds,
+        runMeta: attachmentRunMeta(requestOptions, "前回の添付ファイルへの追質問として判定"),
+      });
+      return;
+    }
+    const previousAttachmentReference = !hasAttachmentFiles
+      ? lastAttachmentReference({ messages: session.messages.slice(0, -1) })
+      : null;
+    if (previousAttachmentReference && isAttachmentFollowupRequest(text, attachmentReplyOptions())) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      pushAssistantReply(session, {
+        content: unreadablePreviousAttachmentAnswer(previousAttachmentReference, attachmentReplyOptions()),
+        durationSeconds,
+        runMeta: attachmentRunMeta(requestOptions, "前回の添付ファイルに本文が残っていないため再添付を案内"),
+      });
+      return;
+    }
+    const baseRequestSystem = requestOptions.translationMode
       ? translationSystemPrompt()
       : requestOptions.fastModel
         ? lightweightChatSystemPrompt()
@@ -2649,15 +4075,86 @@ async function sendMessage(text) {
             requestOptions.thinkingMode,
             requestOptions.translationMode,
           );
-    const requestMessages = requestOptions.translationMode || requestOptions.fastModel ? [userMessage] : [...session.messages];
-    const stream = !requestOptions.translationMode;
+    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${baseRequestSystem}${trainingContextSystemPrompt()}`;
+    const modelUserMessage = messageWithAttachmentContext(userMessage, attachmentContext);
+    const requestMessages = requestOptions.translationMode || requestOptions.fastModel
+      ? [modelUserMessage]
+      : [...session.messages.slice(0, -1), modelUserMessage];
+    const stream = true;
     const requestTask = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
-    const requestModel = modelForRequestTask(requestTask, requestOptions);
+    requestModel = modelForRequestTask(requestTask, requestOptions);
+    const shouldUseWorkspaceShortcuts = !hasAttachmentFiles;
+    const shouldUseWorkspaceContext = shouldUseWorkspaceShortcuts && shouldUseWorkspaceContextForChat(text, requestOptions);
+    const requestedFileKind = shouldUseWorkspaceContext ? workspaceFileKindFromText(text) : "";
+    if (
+      !requestOptions.codingMode &&
+      !requestOptions.translationMode &&
+      shouldUseWorkspaceContext &&
+      requestedFileKind &&
+      isWorkspaceLookupRequest(text) &&
+      state.workspaceRoot &&
+      !state.workspaceFiles.length
+    ) {
+      await loadWorkspace();
+    }
+    if (shouldUseWorkspaceContext && await handleWorkspaceFileKindContentRequest(text, requestOptions)) {
+      return;
+    }
+    const workspaceRequest = shouldUseWorkspaceContext ? workspacePayload(text) : null;
+    const localSearchSources = shouldUseWorkspaceContext ? await workspaceSearchSourcesForChat(workspaceRequest) : [];
+    const codegraphSources = shouldUseWorkspaceContext ? codegraphSourcesForChat() : [];
+    if (shouldUseWorkspaceContext && await handleWorkspaceSearchContentRequest(text, localSearchSources, requestOptions)) {
+      return;
+    }
+    const fileKindAnswer = shouldUseWorkspaceContext ? workspaceFileKindAnswer(text) : null;
+    if (!requestOptions.codingMode && !requestOptions.translationMode && shouldUseWorkspaceContext && isWorkspaceLookupRequest(text) && fileKindAnswer) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      session.messages.push({
+        role: "assistant",
+        content: fileKindAnswer.content,
+        sources: fileKindAnswer.sources,
+        durationSeconds,
+        runMeta: {
+          model: "local-fast-search",
+          modelLabel: t("workspace.chatSearchModel"),
+          task: "search",
+          taskLabel: t("workspace.fastSearch"),
+          responseMode: requestOptions.responseMode,
+          responseModeLabel: responseModeLabel(requestOptions.responseMode),
+          thinkingMode: requestOptions.thinkingMode,
+          modelReason: t("model.reasonWorkspaceLookup"),
+          codeUnderstanding: false,
+        },
+      });
+      return;
+    }
+    if (!requestOptions.codingMode && !requestOptions.translationMode && shouldUseWorkspaceContext && isWorkspaceLookupRequest(text) && workspaceRequest?.searchQuery) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      session.messages.push({
+        role: "assistant",
+        content: workspaceSearchAnswer(workspaceRequest, localSearchSources),
+        sources: localSearchSources,
+        durationSeconds,
+        runMeta: {
+          model: "local-fast-search",
+          modelLabel: t("workspace.chatSearchModel"),
+          task: "search",
+          taskLabel: t("workspace.fastSearch"),
+          responseMode: requestOptions.responseMode,
+          responseModeLabel: responseModeLabel(requestOptions.responseMode),
+          thinkingMode: requestOptions.thinkingMode,
+          modelReason: t("model.reasonWorkspaceLookup"),
+          codeUnderstanding: false,
+        },
+      });
+      return;
+    }
     const payload = {
       task: requestTask,
       model: requestModel,
+      llm_base_url: externalLlmBaseUrlForRequest(),
       stream,
-      system: requestSystem,
+      system: requestSystemWithTraining,
       messages: requestMessages,
       temperature: requestOptions.temperature,
       top_p: requestOptions.topP,
@@ -2667,21 +4164,18 @@ async function sendMessage(text) {
       history_turns: requestOptions.historyTurns,
       think: requestOptions.think,
       keep_alive: requestOptions.keepAlive,
-      web_search: requestOptions.codingMode ? false : requestOptions.webSearch,
-      search_results: 4,
-      workspace: requestOptions.translationMode
-        ? null
-        : {
-            root: state.workspaceRoot,
-            files: [...state.selectedFiles],
-          },
+      ...(searchPayloadOptions?.(requestOptions, 4) || {
+        web_search: !requestOptions.codingMode && requestOptions.webSearch,
+        search_results: 4,
+      }),
+      workspace: workspaceRequest,
     };
     state.abortController = new AbortController();
     if (stream) {
       assistantMessage = {
         role: "assistant",
         content: "",
-        sources: [],
+        sources: [...attachmentSources, ...localSearchSources, ...codegraphSources],
         streaming: true,
       };
       session.messages.push(assistantMessage);
@@ -2704,20 +4198,23 @@ async function sendMessage(text) {
         if (!event.ok) {
           throw new Error(event.error || "Request failed");
         }
-        if (event.search?.results) {
-          streamSearchResults = event.search.results;
-        }
+        streamSearchResults = searchResultsFromEvent?.(event, streamSearchResults) || streamSearchResults;
         if (event.type === "chunk" && event.content) {
           assistantMessage.content += event.content;
           scheduleStreamRender();
         }
         if (event.type === "done") {
           assistantMessage.content = event.message?.content || assistantMessage.content;
-          streamSearchResults = event.search?.results || streamSearchResults;
+          streamSearchResults = searchResultsFromEvent?.(event, streamSearchResults) || streamSearchResults;
         }
       });
       const durationSeconds = (Date.now() - state.startedAt) / 1000;
-      const content = assistantMessage.content || "";
+      let content = friendlyUncertainAnswer(assistantMessage.content || "");
+      if (hasAttachmentFiles && hasReadableAttachments && attachmentAnswerLooksBroken(content)) {
+        content = isAttachmentTranscriptRequest(text)
+          ? directAttachmentTranscriptAnswer(attachmentResults, attachmentReplyOptions())
+          : directAttachmentAnswer(attachmentResults, attachmentReplyOptions());
+      }
       let savedFiles = [];
       let saveError = "";
       if (requestOptions.codingMode) {
@@ -2733,9 +4230,11 @@ async function sendMessage(text) {
           ? `\n\n${t("workspace.saveError")}: ${saveError}`
           : "";
       assistantMessage.content = requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`;
-      assistantMessage.sources = requestOptions.codingMode ? workspacePreviewSources(savedFiles) : streamSearchResults;
+      assistantMessage.sources = requestOptions.codingMode
+        ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
+        : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(normalizeSearchResults?.(streamSearchResults) || streamSearchResults)];
       assistantMessage.durationSeconds = durationSeconds;
-      assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel);
+      assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel, runMetaOverrides);
       delete assistantMessage.streaming;
       return;
     }
@@ -2745,7 +4244,12 @@ async function sendMessage(text) {
       throw new Error(data.error || "Request failed");
     }
     const durationSeconds = (Date.now() - state.startedAt) / 1000;
-    const content = data.message.content || "";
+    let content = friendlyUncertainAnswer(data.message.content || "");
+    if (hasAttachmentFiles && hasReadableAttachments && attachmentAnswerLooksBroken(content)) {
+      content = isAttachmentTranscriptRequest(text)
+        ? directAttachmentTranscriptAnswer(attachmentResults, attachmentReplyOptions())
+        : directAttachmentAnswer(attachmentResults, attachmentReplyOptions());
+    }
     let savedFiles = [];
     let saveError = "";
     if (requestOptions.codingMode) {
@@ -2763,9 +4267,11 @@ async function sendMessage(text) {
     session.messages.push({
       role: "assistant",
       content: requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`,
-      sources: requestOptions.codingMode ? workspacePreviewSources(savedFiles) : data.search?.results || [],
+      sources: requestOptions.codingMode
+        ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
+        : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(searchResultsFromResponse?.(data) || [])],
       durationSeconds,
-      runMeta: messageRunMeta(requestOptions, data.model || requestModel),
+      runMeta: messageRunMeta(requestOptions, data.model || requestModel, runMetaOverrides),
     });
   } catch (error) {
     const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
@@ -2775,14 +4281,14 @@ async function sendMessage(text) {
           ? `${assistantMessage.content}\n\n${state.language === "en" ? "(Stopped)" : "（停止しました）"}`
           : (state.language === "en" ? "Stopped." : "停止しました。");
         assistantMessage.durationSeconds = durationSeconds;
-        assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel);
+        assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel, runMetaOverrides);
         delete assistantMessage.streaming;
       } else {
         session.messages.push({
           role: "assistant",
           content: state.language === "en" ? "Stopped." : "停止しました。",
           durationSeconds,
-          runMeta: messageRunMeta(requestOptions, requestModel),
+          runMeta: messageRunMeta(requestOptions, requestModel, runMetaOverrides),
         });
       }
     } else if (assistantMessage) {
@@ -2790,14 +4296,14 @@ async function sendMessage(text) {
         ? `${assistantMessage.content}\n\n${t("error.prefix")}: ${error.message}`
         : `${t("error.prefix")}: ${error.message}`;
       assistantMessage.durationSeconds = durationSeconds;
-      assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel);
+      assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel, runMetaOverrides);
       delete assistantMessage.streaming;
     } else {
       session.messages.push({
         role: "assistant",
         content: `${t("error.prefix")}: ${error.message}`,
         durationSeconds,
-        runMeta: messageRunMeta(requestOptions, requestModel),
+        runMeta: messageRunMeta(requestOptions, requestModel, runMetaOverrides),
       });
     }
   } finally {
@@ -2807,39 +4313,6 @@ async function sendMessage(text) {
     saveSessions();
     render();
   }
-}
-
-function isImageGenerationRequest(text) {
-  const normalized = text.trim();
-  return (
-    /^画像生成\s*[:：]/.test(normalized) ||
-    /画像を?(生成|作成|つくって|作って|描いて)/.test(normalized) ||
-    /(生成|作成|つくって|作って|描いて).{0,12}画像/.test(normalized) ||
-    /^(draw|generate|create)\s+.*\b(image|picture|photo)\b/i.test(normalized)
-  );
-}
-
-function extractImagePrompt(text) {
-  let prompt = text.trim();
-  prompt = prompt.replace(/^画像生成\s*[:：]\s*/i, "");
-  prompt = prompt.replace(/^画像を?(生成|作成|つくって|作って|描いて)\s*[:：]?\s*/i, "");
-  prompt = prompt.replace(/(?:の)?画像を?(生成|作成|つくって|作って|描いて)(して)?[。.!！]*$/i, "");
-  prompt = prompt.replace(/^(draw|generate|create)\s+/i, "");
-  prompt = prompt.replace(/\b(image|picture|photo)\b/gi, "");
-  return prompt.replace(/\s+/g, " ").trim() || text.trim();
-}
-
-function parseImageOptions(text) {
-  const size = text.match(/(\d{2,4})\s*[x×]\s*(\d{2,4})/i);
-  const steps = text.match(/steps?\s*[:=]\s*(\d+)/i) || text.match(/ステップ\s*[:=]?\s*(\d+)/);
-  const seed = text.match(/seed\s*[:=]\s*(-?\d+)/i) || text.match(/シード\s*[:=]?\s*(-?\d+)/);
-  return {
-    width: size ? size[1] : 512,
-    height: size ? size[2] : 512,
-    steps: steps ? steps[1] : 8,
-    cfg: 7,
-    seed: seed ? seed[1] : -1,
-  };
 }
 
 async function generateImageFromChat(text) {
@@ -2907,13 +4380,27 @@ async function generateImageFromChat(text) {
 }
 
 async function addImages(files) {
-  const accepted = [...files].filter((file) => file.type.startsWith("image/")).slice(0, 4 - state.pendingImages.length);
-  for (const file of accepted) {
+  const incoming = [...files];
+  const acceptedImages = incoming.filter((file) => file.type.startsWith("image/")).slice(0, 4 - state.pendingImages.length);
+  const acceptedFiles = incoming.filter((file) => !file.type.startsWith("image/") && supportedAttachmentFile(file)).slice(0, 4 - state.pendingFiles.length);
+  for (const file of acceptedImages) {
     const dataUrl = await readFileAsDataUrl(file);
     const base64 = dataUrl.split(",", 2)[1] || "";
     state.pendingImages.push({
       name: file.name,
       preview: dataUrl,
+      base64,
+    });
+  }
+  for (const file of acceptedFiles) {
+    const dataUrl = await readFileAsDataUrl(file);
+    const base64 = dataUrl.split(",", 2)[1] || "";
+    state.pendingFiles.push({
+      name: file.name,
+      mime: file.type || "",
+      kind: attachmentKind(file),
+      size: file.size || 0,
+      sizeLabel: workspaceFormatBytes(file.size || 0),
       base64,
     });
   }
@@ -2946,9 +4433,10 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function startProgressTimer(label = t("progress.generating")) {
+function startProgressTimer(label = t("progress.generating"), reason = "") {
   stopProgressTimer();
   state.progressLabel = label;
+  state.progressReason = reason;
   state.progressElapsedSeconds = 0;
   state.startedAt = Date.now();
   updateProgressTimer();
@@ -2961,91 +4449,25 @@ function stopProgressTimer() {
     state.timerId = null;
   }
   state.startedAt = 0;
+  state.progressReason = "";
   state.progressElapsedSeconds = 0;
+  els.progressLine.hidden = true;
 }
 
 function updateProgressTimer() {
   if (!state.startedAt) return;
   const elapsedSeconds = Math.floor((Date.now() - state.startedAt) / 1000);
   state.progressElapsedSeconds = elapsedSeconds;
+  els.progressLine.hidden = false;
+  const reason = state.progressReason ? ` / ${state.progressReason}` : "";
   els.progressText.textContent = state.language === "en"
-    ? `${state.progressLabel}... ${elapsedSeconds}s`
-    : `${state.progressLabel}... ${elapsedSeconds}秒`;
+    ? `${state.progressLabel}... ${elapsedSeconds}s${reason}`
+    : `${state.progressLabel}... ${elapsedSeconds}秒${reason}`;
   if (state.busy) renderMessages();
 }
 
 function formatDuration(seconds) {
-  const suffix = state.language === "en" ? "s" : "秒";
-  if (seconds < 10) return `${seconds.toFixed(1)}${suffix}`;
-  return `${Math.round(seconds)}${suffix}`;
-}
-
-function isLocalDateTimeRequest(text) {
-  const normalized = text.replace(/\s+/g, "").toLowerCase();
-  if (!normalized) return false;
-  return (
-    /(いま|今|現在|今の).{0,6}(時間|時刻)|何時/.test(normalized) ||
-    /(今日|本日|現在).{0,6}(日付|何日|曜日)|何曜日/.test(normalized) ||
-    /^(time|date|today|whattime|whatday)\??$/i.test(normalized)
-  );
-}
-
-function normalizeShortReply(text) {
-  return text.replace(/[!！?？。、〜~ー－—\s]/g, "").toLowerCase();
-}
-
-function isCasualQuickReplyRequest(text) {
-  const normalized = normalizeShortReply(text);
-  if (normalized.length > 24) return false;
-  return (
-    /^(つかれた|疲れた|なんかつかれた|なんか疲れた|しんどい|ねむい|眠い|ねむ)$/.test(normalized) ||
-    /^(わかった|了解|りょうかい|ok|おけ|なるほど|たしかに|そうだね|そうですね)$/.test(normalized) ||
-    /^(ok|おけ)?(がんばる|頑張る)(ね|よ)?$/.test(normalized) ||
-    /^(おそい|遅い|おそかった|遅かった|まだ|ながい|長い)$/.test(normalized)
-  );
-}
-
-function localDateTimeAnswer(text) {
-  const now = new Date();
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
-  const date = new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  }).format(now);
-  const weekday = new Intl.DateTimeFormat("ja-JP", { weekday: "long" }).format(now);
-  const time = new Intl.DateTimeFormat("ja-JP", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(now);
-  const normalized = text.replace(/\s+/g, "");
-  if (/曜日/.test(normalized) && !/(時間|時刻|何時)/.test(normalized)) {
-    return `今日は${date}（${weekday}）です。`;
-  }
-  if (/(日付|何日|today|date)/i.test(normalized) && !/(時間|時刻|何時|time)/i.test(normalized)) {
-    return `今日は${date}（${weekday}）です。`;
-  }
-  return `現在時刻は ${date}（${weekday}） ${time}（${timeZone}）です。`;
-}
-
-function isWeatherRequest(text) {
-  return /(天気|気温|降水|雨|晴れ|曇り|weather|temperature|forecast)/i.test(text);
-}
-
-function weatherLocationFromText(text) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  const explicit = normalized.match(/(.+?)(?:の|で|における)(?:今日|現在|今|明日|週間)?(?:の)?(?:天気|気温|降水|weather|forecast)/i);
-  if (explicit) {
-    const location = explicit[1]
-      .replace(/^(今日|現在|今|明日|本日|いま)\s*/i, "")
-      .replace(/^(今日の|現在の|今の|明日の)/, "")
-      .trim();
-    if (location && !/^(今日|現在|今|明日|本日|いま)$/.test(location)) return location;
-  }
-  const trailing = normalized.match(/(?:天気|気温|降水|weather|forecast).{0,8}(?: in | at | for )([A-Za-z\s.-]+)$/i);
-  if (trailing?.[1]) return trailing[1].trim();
-  return "";
+  return formatDurationValue(seconds, state.language);
 }
 
 async function handleWeatherRequest(text) {
@@ -3063,10 +4485,14 @@ async function handleWeatherRequest(text) {
   saveSessions();
   render();
   try {
+    const coordinates = weatherCoordinatesForRequest?.({
+      text,
+      savedLocation: state.weatherLocation,
+    });
     const response = await fetch("/api/weather", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: text, location }),
+      body: JSON.stringify({ query: text, location, coordinates }),
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
@@ -3075,7 +4501,7 @@ async function handleWeatherRequest(text) {
     const durationSeconds = (Date.now() - state.startedAt) / 1000;
     session.messages.push({
       role: "assistant",
-      content: data.answer,
+      content: characterizeToolAnswer(data.answer, { type: "weather" }),
       sources: [{ title: "Open-Meteo", url: "https://open-meteo.com/" }],
       durationSeconds,
     });
@@ -3106,7 +4532,7 @@ function handleLocalUtilityRequest(text) {
   updateSessionTitle(session, text);
   session.messages.push({
     role: "assistant",
-    content: localDateTimeAnswer(text),
+    content: characterizeToolAnswer(localDateTimeAnswer(text), { type: "local" }),
     durationSeconds: 0,
   });
   saveSessions();
@@ -3115,240 +4541,156 @@ function handleLocalUtilityRequest(text) {
 }
 
 async function pickWorkspaceFolder() {
-  els.workspaceStatus.textContent = t("workspace.waitingPick");
-  try {
-    const response = await fetch("/api/workspace/pick", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || (state.language === "en" ? "Could not choose folder." : "フォルダー選択に失敗しました"));
-    }
-    state.workspaceRoot = data.root;
-    els.workspaceRoot.value = data.root;
-    state.selectedFiles = new Set();
-    saveWorkspacePrefs();
-    await loadWorkspace();
-  } catch (error) {
-    els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message}`;
-  }
+  return window.GEMMA_WORKSPACE?.pickFolderAction?.({
+    els,
+    state,
+    t,
+    onSaveWorkspacePrefs: saveWorkspacePrefs,
+    onLoadWorkspace: loadWorkspace,
+  });
 }
 
 async function loadWorkspace() {
-  const root = els.workspaceRoot.value.trim();
-  if (!root) return;
-  els.workspaceStatus.textContent = t("workspace.loading");
-  try {
-    const response = await fetch("/api/workspace/tree", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ root }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || (state.language === "en" ? "Could not load folder." : "フォルダーを読み込めませんでした"));
-    }
-    state.workspaceRoot = data.root;
-    state.workspaceFiles = data.files || [];
-    if (state.workspaceFiles.length === 0) {
-      state.workspaceNote = t("workspace.empty");
-    } else if (data.truncated) {
-      state.workspaceNote = state.language === "en"
-        ? `Showing ${state.workspaceFiles.length} files. Some were omitted because there are many files.`
-        : `${state.workspaceFiles.length}件を表示中です。件数が多いため一部を省略しました。`;
-    } else {
-      state.workspaceNote = "";
-    }
-    state.selectedFiles = new Set([...state.selectedFiles].filter((path) => state.workspaceFiles.some((file) => file.path === path)));
-    saveWorkspacePrefs();
-    render();
-  } catch (error) {
-    els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message}`;
-  }
+  return window.GEMMA_WORKSPACE?.loadWorkspaceAction?.({
+    els,
+    state,
+    t,
+    onSaveWorkspacePrefs: saveWorkspacePrefs,
+    onRender: render,
+  });
 }
 
 async function saveWorkspaceFile() {
-  const root = state.workspaceRoot;
-  const path = els.writePath.value.trim();
-  const content = els.writeContent.value;
-  if (!root || !path) {
-    els.workspaceStatus.textContent = state.language === "en"
-      ? "Choose a folder and enter a relative path first."
-      : "先にフォルダーを選択し、相対パスを入力してください。";
-    return;
+  return window.GEMMA_WORKSPACE?.saveWorkspaceFileAction?.({
+    els,
+    state,
+    t,
+    onLoadWorkspace: loadWorkspace,
+  });
+}
+
+async function revealWorkspacePath() {
+  return window.GEMMA_WORKSPACE?.revealWorkspacePathAction?.({ els, state, t });
+}
+
+async function saveWorkspaceTranscript(action, button = null) {
+  const root = action?.root || state.workspaceRoot;
+  if (!action?.savePath || !action?.content || !root) return;
+  const originalLabel = button?.textContent || "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = t("workspace.transcriptSaving");
   }
   try {
-    const response = await fetch("/api/workspace/write", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ root, path, content }),
+    const data = await writeWorkspaceFileApi({
+      root,
+      path: action.savePath,
+      content: action.content,
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || (state.language === "en" ? "Could not save file." : "ファイルを保存できませんでした"));
+    if (root === state.workspaceRoot) {
+      await loadWorkspace();
+      state.selectedFiles.add(data.path);
+      saveWorkspacePrefs();
     }
-    els.workspaceStatus.textContent = t("workspace.saved", { path: data.path, size: data.size });
-    await loadWorkspace();
-  } catch (error) {
-    els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message}`;
-  }
-}
-
-function isSaveCommand(text) {
-  const normalized = text.trim().toLowerCase();
-  return /保存|書き込|ファイルにして|作成して|反映して|save|write/.test(normalized);
-}
-
-function lastAssistantMessage(session) {
-  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
-    if (session.messages[index].role === "assistant") {
-      return session.messages[index];
-    }
-  }
-  return null;
-}
-
-const LANGUAGE_EXTENSIONS = {
-  html: "html",
-  css: "css",
-  javascript: "js",
-  js: "js",
-  mjs: "mjs",
-  typescript: "ts",
-  ts: "ts",
-  tsx: "tsx",
-  jsx: "jsx",
-  json: "json",
-  python: "py",
-  py: "py",
-  markdown: "md",
-  md: "md",
-  svg: "svg",
-  text: "txt",
-  txt: "txt",
-};
-
-function cleanCandidatePath(path) {
-  return path
-    .replace(/^\.?\//, "")
-    .replace(/[)、。,:：;；\]\[)"'」』]+$/g, "")
-    .trim();
-}
-
-function pathFromText(text) {
-  const pattern = /(?:^|[\s`"'「『(（])([A-Za-z0-9_.\/-]+\.(?:html|css|js|mjs|ts|tsx|jsx|json|md|py|txt|svg))/gi;
-  let match = pattern.exec(text);
-  let candidate = "";
-  while (match) {
-    candidate = cleanCandidatePath(match[1]);
-    match = pattern.exec(text);
-  }
-  return candidate;
-}
-
-function parseCodeFenceInfo(info) {
-  const parts = info.trim().split(/\s+/).filter(Boolean);
-  let language = "";
-  let path = "";
-  for (const part of parts) {
-    const cleaned = cleanCandidatePath(part);
-    if (!path && /\.[a-z0-9]+$/i.test(cleaned)) {
-      path = cleaned;
-      continue;
-    }
-    if (!language && LANGUAGE_EXTENSIONS[cleaned.toLowerCase()]) {
-      language = cleaned.toLowerCase();
-    }
-  }
-  return { language, path };
-}
-
-function splitLeadingPathFromContent(content) {
-  const normalized = content.replace(/^\s+/, "");
-  const lineBreak = normalized.indexOf("\n");
-  if (lineBreak < 0) return { path: "", content };
-  const firstLine = cleanCandidatePath(normalized.slice(0, lineBreak));
-  if (!/\.[a-z0-9]+$/i.test(firstLine)) return { path: "", content };
-  return {
-    path: firstLine,
-    content: normalized.slice(lineBreak + 1).replace(/^\s+/, ""),
-  };
-}
-
-function extractCodeBlocks(text) {
-  const blocks = [];
-  const pattern = /```([^\n`]*)\n([\s\S]*?)```/g;
-  let match = pattern.exec(text);
-  let completedEnd = 0;
-  while (match) {
-    const info = parseCodeFenceInfo(match[1]);
-    const before = text.slice(Math.max(0, match.index - 240), match.index);
-    const split = splitLeadingPathFromContent(match[2]);
-    blocks.push({
-      language: info.language,
-      path: info.path || pathFromText(before) || split.path,
-      content: split.content.trim(),
-      complete: true,
-    });
-    completedEnd = pattern.lastIndex;
-    match = pattern.exec(text);
-  }
-  const lastFence = text.indexOf("```", completedEnd);
-  if (lastFence >= 0) {
-    const afterFence = text.slice(lastFence + 3);
-    const firstBreak = afterFence.indexOf("\n");
-    if (firstBreak >= 0) {
-      const info = parseCodeFenceInfo(afterFence.slice(0, firstBreak));
-      const before = text.slice(Math.max(0, lastFence - 240), lastFence);
-      const split = splitLeadingPathFromContent(afterFence.slice(firstBreak + 1));
-      blocks.push({
-        language: info.language,
-        path: info.path || pathFromText(before) || split.path,
-        content: split.content.trim(),
-        complete: false,
+    const session = activeSession();
+    if (session) {
+      session.messages.push({
+        role: "assistant",
+        content: t("workspace.transcriptSavedMessage", {
+          path: data.path,
+          size: data.size,
+        }),
+        runMeta: {
+          model: "local",
+          modelLabel: state.language === "en" ? "Local save" : "ローカル保存",
+          task: "workspace",
+          taskLabel: state.language === "en" ? "Workspace" : "フォルダー操作",
+          responseMode: "fast",
+          responseModeLabel: t("mode.fast"),
+        },
       });
+      saveSessions();
+      render();
     }
+    if (button) {
+      button.classList.add("saved-flash");
+      button.textContent = t("workspace.transcriptSaved");
+      window.setTimeout(() => {
+        button.classList.remove("saved-flash");
+        button.disabled = false;
+        button.textContent = originalLabel || t("workspace.saveTranscript");
+      }, 1400);
+    }
+  } catch (error) {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalLabel || t("workspace.saveTranscript");
+    }
+    window.alert(`${t("workspace.saveError")}: ${error.message || error}`);
   }
-  return blocks;
 }
 
-function inferSavePath(commandText, assistantText, codeBlock, useCurrentPath = true) {
-  const currentPath = els.writePath.value.trim();
-  if (useCurrentPath && currentPath) return currentPath;
-  if (codeBlock.path) return codeBlock.path;
-
-  const combined = `${commandText}\n${assistantText}`;
-  const explicit = pathFromText(combined);
-  if (explicit) return explicit;
-
-  const language = codeBlock.language;
-  const content = codeBlock.content.trimStart();
-  if (language === "html" || content.startsWith("<!doctype html") || content.startsWith("<html")) return "index.html";
-  if (language === "css") return "styles.css";
-  if (language === "javascript" || language === "js") return "app.js";
-  if (language === "python" || language === "py") return "main.py";
-  if (language === "json") return "data.json";
-  return "";
-}
-
-function uniquePath(path, usedPaths) {
-  if (!usedPaths.has(path)) return path;
-  const dot = path.lastIndexOf(".");
-  const base = dot >= 0 ? path.slice(0, dot) : path;
-  const ext = dot >= 0 ? path.slice(dot) : "";
-  let index = 2;
-  let candidate = `${base}-${index}${ext}`;
-  while (usedPaths.has(candidate)) {
-    index += 1;
-    candidate = `${base}-${index}${ext}`;
+async function handleSimpleTextSave(text) {
+  const spec = inferWorkspaceSimpleTextSave({
+    text,
+    hasWorkspace: Boolean(state.workspaceRoot),
+  });
+  if (!spec) return false;
+  let session = activeSession();
+  if (!session) {
+    newSession();
+    session = activeSession();
   }
-  return candidate;
+  session.messages.push({ role: "user", content: text });
+  updateSessionTitle(session, text);
+  state.busy = true;
+  startProgressTimer(t("progress.saving"));
+  saveSessions();
+  render();
+  try {
+    const data = await writeWorkspaceFileApi({
+      root: state.workspaceRoot,
+      path: spec.path,
+      content: spec.content,
+    }).catch((error) => {
+      throw new Error(error.message || "ファイルを保存できませんでした");
+    });
+    await loadWorkspace();
+    state.selectedFiles.add(data.path);
+    saveWorkspacePrefs();
+    const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
+    session.messages.push({
+      role: "assistant",
+      content: `${data.path} を保存しました（${data.size}バイト）。`,
+      durationSeconds,
+      runMeta: {
+        model: "local",
+        modelLabel: state.language === "en" ? "Local save" : "ローカル保存",
+        task: "coding",
+        taskLabel: t("task.coding"),
+        responseMode: "fast",
+        responseModeLabel: t("mode.fast"),
+      },
+    });
+  } catch (error) {
+    const durationSeconds = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
+    session.messages.push({
+      role: "assistant",
+      content: `${t("error.prefix")}: ${error.message}`,
+      durationSeconds,
+    });
+  } finally {
+    state.busy = false;
+    stopProgressTimer();
+    saveSessions();
+    render();
+  }
+  return true;
 }
 
 async function autoSaveGeneratedFiles(commandText, assistantText) {
   if (!state.workspaceRoot) return [];
+  if (isTranslationRequest(commandText)) return [];
   const blocks = extractCodeBlocks(assistantText).filter((block) => block.content.trim());
   if (blocks.length === 0) return [];
   if (blocks.some((block) => !block.complete)) {
@@ -3358,19 +4700,22 @@ async function autoSaveGeneratedFiles(commandText, assistantText) {
   const savedFiles = [];
   const usedPaths = new Set();
   for (const block of blocks) {
-    const inferredPath = inferSavePath(commandText, assistantText, block, false);
+    const inferredPath = inferWorkspaceSavePath({
+      commandText,
+      assistantText,
+      codeBlock: block,
+      currentPath: "",
+    });
     if (!inferredPath) continue;
     const path = uniquePath(inferredPath, usedPaths);
     usedPaths.add(path);
-    const response = await fetch("/api/workspace/write", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ root: state.workspaceRoot, path, content: block.content }),
+    const data = await writeWorkspaceFileApi({
+      root: state.workspaceRoot,
+      path,
+      content: block.content,
+    }).catch((error) => {
+      throw new Error(error.message || `${path} を保存できませんでした`);
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || `${path} を保存できませんでした`);
-    }
     savedFiles.push({ path: data.path, size: data.size });
   }
 
@@ -3386,6 +4731,7 @@ async function autoSaveGeneratedFiles(commandText, assistantText) {
 
 async function handleSaveCommand(text) {
   const session = activeSession();
+  if (isTranslationRequest(text)) return false;
   if (!session || !state.workspaceRoot || !isSaveCommand(text)) return false;
 
   const assistant = lastAssistantMessage(session);
@@ -3393,7 +4739,12 @@ async function handleSaveCommand(text) {
   if (blocks.length === 0) return false;
 
   const block = blocks[blocks.length - 1];
-  const path = inferSavePath(text, assistant.content, block);
+  const path = inferWorkspaceSavePath({
+    commandText: text,
+    assistantText: assistant.content,
+    codeBlock: block,
+    currentPath: els.writePath.value.trim(),
+  });
   session.messages.push({ role: "user", content: text });
   updateSessionTitle(session, text);
 
@@ -3416,22 +4767,24 @@ async function handleSaveCommand(text) {
   render();
 
   try {
-    const response = await fetch("/api/workspace/write", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ root: state.workspaceRoot, path, content: block.content }),
+    const data = await writeWorkspaceFileApi({
+      root: state.workspaceRoot,
+      path,
+      content: block.content,
+    }).catch((error) => {
+      throw new Error(error.message || "ファイルを保存できませんでした");
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "ファイルを保存できませんでした");
-    }
     const durationSeconds = (Date.now() - state.startedAt) / 1000;
     els.writePath.value = data.path;
     els.writeContent.value = block.content;
     session.messages.push({
       role: "assistant",
       content: t("workspace.savedTo", { path: data.path, size: data.size }),
-      sources: workspacePreviewSources([{ path: data.path, size: data.size }]),
+      sources: workspacePreviewSources({
+        root: state.workspaceRoot,
+        files: [{ path: data.path, size: data.size }],
+        label: t("chat.preview"),
+      }),
       durationSeconds,
     });
     await loadWorkspace();
@@ -3456,21 +4809,49 @@ async function handleSaveCommand(text) {
 els.composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = els.prompt.value.trim();
-  if ((!text && state.pendingImages.length === 0) || state.busy) return;
+  if ((!text && state.pendingImages.length === 0 && state.pendingFiles.length === 0) || state.busy) return;
   els.prompt.value = "";
   resizePrompt();
-  if (text && state.pendingImages.length === 0 && handleLocalUtilityRequest(text)) return;
-  if (text && state.pendingImages.length === 0 && (await handleWeatherRequest(text))) return;
-  if (text && state.pendingImages.length === 0 && isImageGenerationRequest(text)) {
+  const hasPendingMedia = state.pendingImages.length > 0 || state.pendingFiles.length > 0;
+  if (hasPendingMedia) {
+    sendMessage(text || (state.pendingFiles.length > 0 ? (state.language === "en" ? "Read the attached file." : "添付ファイルを読んでください。") : (state.language === "en" ? "Describe this image." : "この画像を説明してください。")));
+    return;
+  }
+  const previousAttachment = lastReadableAttachment(activeSession());
+  const previousAttachmentReference = previousAttachment || lastAttachmentReference(activeSession());
+  const shouldPreferAttachmentFollowup = previousAttachmentReference && isAttachmentFollowupRequest(text, attachmentReplyOptions());
+  if (!shouldPreferAttachmentFollowup && await handleWorkspaceSourceFollowup(text)) return;
+  const intent = window.GEMMA_ROUTER.classifySubmitIntent({
+    text,
+    hasImages: state.pendingImages.length > 0,
+    isLocalUtilityRequest: (value) => isLocalDateTimeRequest(value),
+    isWeatherRequest,
+    isTranslationRequest,
+    isImageGenerationRequest,
+    isSimpleTextSaveRequest: (value) => Boolean(inferWorkspaceSimpleTextSave({
+      text: value,
+      hasWorkspace: Boolean(state.workspaceRoot),
+    })),
+    isSaveCommandRequest: (value) => Boolean(activeSession() && state.workspaceRoot && isSaveCommand(value)),
+    isWorkspaceBuildRequest,
+  });
+  if (intent === "local" && handleLocalUtilityRequest(text)) return;
+  if (intent === "weather" && (await handleWeatherRequest(text))) return;
+  if (intent === "translation") {
+    sendMessage(text);
+    return;
+  }
+  if (intent === "image") {
     await generateImageFromChat(text);
     return;
   }
-  if (text && state.pendingImages.length === 0 && (await handleSaveCommand(text))) return;
-  if (text && state.pendingImages.length === 0 && isWorkspaceBuildRequest(text)) {
+  if (intent === "simple-save" && (await handleSimpleTextSave(text))) return;
+  if (intent === "save-command" && (await handleSaveCommand(text))) return;
+  if (intent === "workspace-build") {
     await handleWorkspaceBuild(text);
     return;
   }
-  sendMessage(text || (state.language === "en" ? "Describe this image." : "この画像を説明してください。"));
+  sendMessage(text || (state.pendingFiles.length > 0 ? (state.language === "en" ? "Read the attached file." : "添付ファイルを読んでください。") : (state.language === "en" ? "Describe this image." : "この画像を説明してください。")));
 });
 
 els.stop.addEventListener("click", () => {
@@ -3480,61 +4861,213 @@ els.stop.addEventListener("click", () => {
   state.abortController.abort();
 });
 
-const PROMPT_MIN_HEIGHT = 34;
-const PROMPT_MAX_HEIGHT = 160;
-
-function resizePrompt() {
-  els.prompt.style.height = "0px";
-  const nextHeight = els.prompt.value
-    ? Math.min(PROMPT_MAX_HEIGHT, Math.max(PROMPT_MIN_HEIGHT, els.prompt.scrollHeight))
-    : PROMPT_MIN_HEIGHT;
-  els.prompt.style.height = `${nextHeight}px`;
-  els.prompt.style.overflowY = nextHeight >= PROMPT_MAX_HEIGHT ? "auto" : "hidden";
+function setupManagementPanels() {
+  window.GEMMA_MANAGEMENT?.setupManagementPanels?.({
+    els,
+    renderStudyPacksPanel,
+    renderPluginsPanel,
+  });
 }
 
-els.prompt.addEventListener("input", resizePrompt);
-els.prompt.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || event.isComposing) return;
-  const shortcutSend = event.metaKey || event.ctrlKey;
-  const plainEnterSend = state.enterToSend && !event.shiftKey && !event.altKey;
-  if (!shortcutSend && !plainEnterSend) return;
-  event.preventDefault();
-  els.composer.requestSubmit();
-});
+function renderStudyPacksPanel() {
+  window.GEMMA_MANAGEMENT?.renderStudyPacksPanel?.({ state, t });
+}
 
-els.attachImage.addEventListener("click", () => {
-  els.imageInput.click();
-});
+function renderPluginsPanel() {
+  window.GEMMA_MANAGEMENT?.renderPluginsPanel?.({ state, els, t });
+}
 
-els.imageInput.addEventListener("change", async () => {
-  await addImages(els.imageInput.files || []);
-  els.imageInput.value = "";
-});
-
-els.prompt.addEventListener("paste", addImagesFromClipboard);
-document.addEventListener("paste", addImagesFromDocumentPaste);
-
-els.sidebarSearch.addEventListener("input", () => {
-  state.sidebarQuery = els.sidebarSearch.value;
+els.trainingExport?.addEventListener("click", exportTrainingData);
+els.trainingSetCreate?.addEventListener("click", () => {
+  const set = createTrainingSet(els.trainingSetName?.value || "");
+  const folder = activeFolder();
+  if (folder && !folder.trainingSetId) {
+    folder.trainingSetId = set.id;
+    saveFolders();
+  }
+  if (els.trainingSetName) els.trainingSetName.value = "";
+  if (els.trainingStatus) els.trainingStatus.textContent = t("settings.trainingSetCreated", { name: set.name });
   render();
 });
-
-els.sidebarResizer.addEventListener("pointerdown", (event) => {
+els.trainingSetSelect?.addEventListener("change", () => setActiveTrainingSet(els.trainingSetSelect.value));
+els.trainingSetRename?.addEventListener("click", renameActiveTrainingSet);
+els.trainingSetDelete?.addEventListener("click", deleteActiveTrainingSet);
+els.systemPromptTemplate?.addEventListener("change", () => applySystemPromptTemplate(els.systemPromptTemplate.value));
+els.systemPrompt?.addEventListener("input", () => {
+  syncSystemPromptTemplate();
+  saveSystemPromptSetting();
+});
+[
+  [els.temperature, AUTO_SAVE_SETTING_KEYS.temperature],
+  [els.topP, AUTO_SAVE_SETTING_KEYS.topP],
+  [els.topK, AUTO_SAVE_SETTING_KEYS.topK],
+  [els.numPredict, AUTO_SAVE_SETTING_KEYS.numPredict],
+  [els.numCtx, AUTO_SAVE_SETTING_KEYS.numCtx],
+  [els.historyTurns, AUTO_SAVE_SETTING_KEYS.historyTurns],
+].forEach(([select, storageKey]) => {
+  select?.addEventListener("change", () => saveSelectSetting(select, storageKey));
+});
+els.trainingExampleList?.addEventListener("click", (event) => {
+  const button = event.target.closest(".training-example-save");
+  if (!button?.dataset.exampleId) return;
+  saveTrainingExampleEdit(button.dataset.exampleId, button);
+});
+els.workspaceTrainingSet?.addEventListener("change", () => applyTrainingSetToActiveFolder(els.workspaceTrainingSet.value));
+els.workspaceCodegraphEnabled?.addEventListener("change", () => applyCodegraphToActiveFolder(els.workspaceCodegraphEnabled.checked));
+els.workspaceCodegraphPrepare?.addEventListener("click", prepareCodegraphForActiveFolder);
+els.workspaceSearchRun?.addEventListener("click", () => window.GEMMA_WORKSPACE?.searchWorkspaceAction?.({ els, state, t }));
+els.workspaceSearchQuery?.addEventListener("input", () => {
+  if (els.workspaceSearchStatus) delete els.workspaceSearchStatus.dataset.searchState;
+  if (els.workspaceSearchResults) {
+    els.workspaceSearchResults.hidden = true;
+    els.workspaceSearchResults.innerHTML = "";
+  }
+  renderWorkspace();
+});
+els.workspaceSearchQuery?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
   event.preventDefault();
-  els.sidebarResizer.setPointerCapture(event.pointerId);
-  document.body.classList.add("resizing-sidebar");
-  const onMove = (moveEvent) => setSidebarWidth(moveEvent.clientX);
-  const onUp = () => {
-    document.body.classList.remove("resizing-sidebar");
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  };
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("pointerup", onUp);
+  window.GEMMA_WORKSPACE?.searchWorkspaceAction?.({ els, state, t });
+});
+els.workspaceSearchResults?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-workspace-search-path]");
+  if (!button) return;
+  openWorkspaceSource({
+    type: "workspace",
+    path: button.dataset.workspaceSearchPath || "",
+    line: button.dataset.workspaceSearchLine || "",
+    snippet: button.querySelector("small")?.textContent || "",
+  });
+});
+els.workspacePreviewSearch?.addEventListener("input", () => {
+  state.workspacePreviewSearchIndex = 0;
+  updateWorkspacePreviewSearch();
+});
+els.workspacePreviewSearch?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  updateWorkspacePreviewSearch({ jump: true, direction: event.shiftKey ? -1 : 1 });
+});
+els.workspacePreviewPrev?.addEventListener("click", () => updateWorkspacePreviewSearch({ jump: true, direction: -1 }));
+els.workspacePreviewNext?.addEventListener("click", () => updateWorkspacePreviewSearch({ jump: true, direction: 1 }));
+els.correctionClose?.addEventListener("click", closeCorrectionDialog);
+els.correctionCancel?.addEventListener("click", closeCorrectionDialog);
+els.correctionSave?.addEventListener("click", saveCorrectionDraft);
+els.correctionModal?.addEventListener("click", (event) => {
+  if (event.target === els.correctionModal) closeCorrectionDialog();
+});
+els.correctionText?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeCorrectionDialog();
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    saveCorrectionDraft();
+  }
+});
+els.characterSave?.addEventListener("click", saveCharacterSettings);
+els.characterName?.addEventListener("input", () => {
+  state.character.name = els.characterName.value || "Gemma";
+  renderCharacterPreview();
+});
+els.characterUserName?.addEventListener("input", () => {
+  state.character.userName = els.characterUserName.value || "";
+  renderCharacterPreview();
+});
+els.characterSelfName?.addEventListener("input", () => {
+  state.character.selfName = els.characterSelfName.value || "";
+  renderCharacterPreview();
+});
+els.characterGender?.addEventListener("change", () => {
+  state.character.gender = els.characterGender.value || "unspecified";
+});
+els.characterMemoryModeChoices?.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (!input.checked) return;
+    state.character.memoryMode = input.value;
+    if (els.characterMemoryMode) els.characterMemoryMode.value = input.value;
+  });
+});
+els.characterAvatarPick?.addEventListener("click", pickCharacterAvatarFile);
+els.characterAvatarClear?.addEventListener("click", clearCharacterAvatar);
+els.characterAvatarFile?.addEventListener("change", handleCharacterAvatarFileChange);
+els.characterMemoryAdd?.addEventListener("click", addManualCharacterMemory);
+els.characterMemoryFilters?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-memory-filter]");
+  if (!button?.dataset.memoryFilter) return;
+  state.characterMemoryFilter = button.dataset.memoryFilter;
+  renderCharacterMemoryList();
+});
+els.characterMemorySearch?.addEventListener("input", () => {
+  state.characterMemoryQuery = els.characterMemorySearch?.value || "";
+  renderCharacterMemoryList();
+});
+els.characterMemoryList?.addEventListener("click", (event) => {
+  const editButton = event.target.closest("[data-memory-edit]");
+  if (editButton?.dataset.memoryEdit) {
+    const item = editButton.closest("[data-memory-id]");
+    const editArea = item?.querySelector(".character-memory-edit");
+    if (editArea) editArea.hidden = false;
+    return;
+  }
+  const cancelButton = event.target.closest("[data-memory-cancel]");
+  if (cancelButton?.dataset.memoryCancel) {
+    const item = cancelButton.closest("[data-memory-id]");
+    const editArea = item?.querySelector(".character-memory-edit");
+    if (editArea) editArea.hidden = true;
+    return;
+  }
+  const saveButton = event.target.closest("[data-memory-save]");
+  if (saveButton?.dataset.memorySave) {
+    saveCharacterMemoryEdit(saveButton.dataset.memorySave, saveButton);
+    return;
+  }
+  const deleteButton = event.target.closest("[data-memory-delete]");
+  if (deleteButton?.dataset.memoryDelete) {
+    deleteCharacterMemory(deleteButton.dataset.memoryDelete);
+  }
+});
+els.memoryCandidateClose?.addEventListener("click", closeMemoryCandidate);
+els.memoryCandidateDiscard?.addEventListener("click", closeMemoryCandidate);
+els.memoryCandidateSave?.addEventListener("click", saveMemoryCandidate);
+els.memoryCandidateModal?.addEventListener("click", (event) => {
+  if (event.target === els.memoryCandidateModal) closeMemoryCandidate();
+});
+els.memoryCandidateText?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeMemoryCandidate();
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    saveMemoryCandidate();
+  }
 });
 
-els.sidebarToggle.addEventListener("click", () => setSidebarHidden(false));
-els.sidebarCollapse.addEventListener("click", () => setSidebarHidden(!state.sidebarHidden));
+function resizePrompt() {
+  resizePromptView({ els });
+}
+
+bindComposerEvents({
+  els,
+  getEnterToSend: () => state.enterToSend,
+  onResize: resizePrompt,
+  onAddImages: addImages,
+  onPromptPaste: addImagesFromClipboard,
+  onDocumentPaste: addImagesFromDocumentPaste,
+});
+
+bindAsrUi?.({
+  els,
+  t,
+  onResize: resizePrompt,
+  getSelectedModel: () => state.asrModel || state.asrStatus?.recommendedModel || "",
+  getMicGain: () => state.micGain,
+  getMicDeviceId: () => state.micDeviceId,
+  getPartialIntervalSeconds: () => state.partialIntervalSeconds,
+  getPartialMode: () => state.partialMode,
+});
+
+window.GEMMA_SIDEBAR?.bindSidebarEvents?.({
+  els,
+  state,
+  onRender: render,
+});
 els.undoDelete.addEventListener("click", restoreLastDeleted);
 els.undoClose.addEventListener("click", hideUndo);
 
@@ -3555,7 +5088,7 @@ els.clearChat.addEventListener("click", () => {
 });
 
 els.webSearchToggle.addEventListener("click", () => {
-  state.webSearch = !state.webSearch;
+  toggleWebSearch(state);
   render();
 });
 
@@ -3573,26 +5106,38 @@ els.workspaceFolderTitle.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !els.settingsPanel.hidden) {
-    els.settingsPanel.hidden = true;
-    return;
-  }
-  if (event.key === "Escape" && state.workspaceOpen) {
-    state.workspaceOpen = false;
-    render();
-  }
+  if (event.key !== "Escape") return;
+  window.GEMMA_MANAGEMENT?.handleEscapeKey?.({ els, state, onRender: render });
 });
 
 els.workspacePick.addEventListener("click", pickWorkspaceFolder);
 els.workspaceLoad.addEventListener("click", loadWorkspace);
 els.writeFile.addEventListener("click", saveWorkspaceFile);
+els.revealPath?.addEventListener("click", revealWorkspacePath);
+els.weatherLocationUse?.addEventListener("click", useBrowserWeatherLocation);
 
-els.settingsToggle.addEventListener("click", () => {
-  els.settingsPanel.hidden = !els.settingsPanel.hidden;
-  renderSettingsMeta();
-});
-els.settingsClose.addEventListener("click", () => {
-  els.settingsPanel.hidden = true;
+window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
+  els,
+  state,
+  t,
+  onOpenCharacter: renderCharacterPanel,
+  onOpenSettings: (target = "") => {
+    renderSettingsMeta();
+    renderAsrSettingsPanel();
+    const asrVisible = !els.settingsPanel.hidden || !els.asrPanel?.hidden;
+    if (asrVisible) refreshAsrStatus();
+    if (asrVisible) refreshAsrSetupStatus();
+    if (asrVisible) refreshMicDevices();
+    renderWeatherLocationStatus();
+    if (target === "external-llm") {
+      window.requestAnimationFrame(() => els.externalLlmSettings?.scrollIntoView({ block: "center" }));
+    }
+    if (target === "asr") {
+      window.requestAnimationFrame(() => els.asrSettings?.scrollIntoView({ block: "center" }));
+    }
+  },
+  onOpenWorkspace: openWorkspaceForPlugin,
+  onPluginsChanged: render,
 });
 
 els.modelInstaller.addEventListener("click", (event) => {
@@ -3600,43 +5145,117 @@ els.modelInstaller.addEventListener("click", (event) => {
   if (!button) return;
   startModelPull(button.dataset.modelPull);
 });
+els.externalLlmUrl?.addEventListener("change", () => setExternalLlmUrl(els.externalLlmUrl.value));
+els.externalLlmCheck?.addEventListener("click", checkExternalLlmServer);
+els.externalLlmClear?.addEventListener("click", clearExternalLlmSettings);
+els.externalLlmCopyModel?.addEventListener("click", copyExternalLlmModelName);
+els.asrSettings?.addEventListener("click", (event) => {
+  const refreshButton = event.target.closest("[data-asr-refresh]");
+  if (refreshButton) {
+    refreshAsrStatus();
+    refreshAsrSetupStatus();
+    return;
+  }
+  const setupButton = event.target.closest("[data-asr-setup]");
+  if (setupButton) {
+    startAsrSetup();
+    return;
+  }
+  const micCheckButton = event.target.closest("[data-asr-mic-check]");
+  if (micCheckButton) refreshMicDevices({ startMonitor: true });
+  const micStopButton = event.target.closest("[data-asr-stop-mic]");
+  if (micStopButton) {
+    stopMicLevelPreview();
+    return;
+  }
+  const openMicSettingsButton = event.target.closest("[data-asr-open-mic-settings]");
+  if (openMicSettingsButton) {
+    window.open(window.GEMMA_ASR?.CHROME_MIC_SETTINGS_URL || "chrome://settings/content/microphone", "_blank");
+    setMicLevelMessage(t("settings.asrMicSettingsOpened"));
+    return;
+  }
+  const copyMicSettingsButton = event.target.closest("[data-asr-copy-mic-settings]");
+  if (copyMicSettingsButton) {
+    const url = window.GEMMA_ASR?.CHROME_MIC_SETTINGS_URL || "chrome://settings/content/microphone";
+    navigator.clipboard?.writeText(url)
+      .then(() => setMicLevelMessage(t("settings.asrMicSettingsCopied")))
+      .catch(() => setMicLevelMessage(t("settings.asrMicSettingsCopyFallback", { url })));
+  }
+});
+els.asrSettings?.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-asr-model]");
+  if (select) {
+    setAsrModel(select.value);
+    return;
+  }
+  const gain = event.target.closest("[data-asr-mic-gain]");
+  if (gain) {
+    setMicGain(gain.value, { render: false });
+    if (stopMicLevelMonitor) startMicLevelPreview();
+    return;
+  }
+  const device = event.target.closest("[data-asr-mic-device]");
+  if (device) {
+    setMicDevice(device.value);
+    startMicLevelPreview();
+    return;
+  }
+  const partialInterval = event.target.closest("[data-asr-partial-interval]");
+  if (partialInterval) {
+    setPartialIntervalSeconds(partialInterval.value);
+    return;
+  }
+  const partialMode = event.target.closest("[data-asr-partial-mode]");
+  if (partialMode) {
+    setPartialMode(partialMode.value);
+  }
+});
+els.asrSettings?.addEventListener("input", (event) => {
+  const gain = event.target.closest("[data-asr-mic-gain]");
+  if (!gain) return;
+  setMicGain(gain.value, { render: false });
+});
 
-els.themeSelect.addEventListener("change", () => setTheme(els.themeSelect.value));
-els.languageSelect.addEventListener("change", () => setLanguageFromControl(els.languageSelect.value));
-els.responseMode.addEventListener("change", () => setResponseMode(els.responseMode.value));
-els.composerResponseMode.addEventListener("change", () => setResponseMode(els.composerResponseMode.value));
-els.composerModel.addEventListener("change", () => setComposerModel(els.composerModel.value));
-els.thinkingMode.addEventListener("change", () => setThinkingMode(els.thinkingMode.value));
-els.chatModel.addEventListener("change", () => {
-  setModelOverride("chat", els.chatModel.value);
-  renderSettingsMeta();
-  renderMessages();
+window.GEMMA_SETTINGS?.bindSettingsEvents?.({
+  els,
+  onThemeChange: setTheme,
+  onLanguageChange: setLanguageFromControl,
+  onResponseModeChange: setResponseMode,
+  onComposerModelChange: setComposerModel,
+  onThinkingModeChange: setThinkingMode,
+  onModelOverrideChange: (task, value) => {
+    setModelOverride(task, value);
+    renderSettingsMeta();
+    if (task !== "translation") renderMessages();
+  },
+  onEnterToSendChange: setEnterToSend,
 });
-els.codingModel.addEventListener("change", () => {
-  setModelOverride("coding", els.codingModel.value);
-  renderSettingsMeta();
-  renderMessages();
-});
-els.translationModel.addEventListener("change", () => {
-  setModelOverride("translation", els.translationModel.value);
-  renderSettingsMeta();
-});
-els.enterToSend.addEventListener("change", () => setEnterToSend(els.enterToSend.checked));
 
 ensureFolderData();
 syncWorkspaceFromActiveFolder();
+setupManagementPanels();
+moveSettingsSections();
 state.language = I18N[state.language] ? state.language : "ja";
+restoreAutoSavedSettings();
 applyI18n();
-if (els.systemPrompt && Object.values(SYSTEM_PROMPTS).includes(els.systemPrompt.value)) {
-  els.systemPrompt.value = SYSTEM_PROMPTS[state.language] || SYSTEM_PROMPTS.ja;
+renderStudyPacksPanel();
+renderPluginsPanel();
+if (els.systemPrompt && allSystemPromptTemplateTexts().includes(els.systemPrompt.value)) {
+  const templateId = detectSystemPromptTemplate(els.systemPrompt.value);
+  els.systemPrompt.value = systemPromptTemplateText(templateId, state.language);
 }
+syncSystemPromptTemplate();
 setTheme(state.theme);
 setResponseMode(state.responseMode);
 setThinkingMode(state.thinkingMode);
 syncModelInputs();
 renderSettingsMeta();
+renderAsrSettingsPanel();
+renderWeatherLocationStatus();
 setEnterToSend(state.enterToSend);
 resizePrompt();
+refreshAsrStatus();
+refreshAsrSetupStatus();
 
 if (state.folders.length > 0 && sessionsForActiveFolder().length === 0) {
   newSession();

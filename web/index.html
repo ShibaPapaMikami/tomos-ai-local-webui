@@ -4,17 +4,29 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Gemma 4 12B</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <script>
+      if (window.location.protocol === "file:") {
+        window.location.replace("http://127.0.0.1:54876/");
+      }
+    </script>
+    <link rel="stylesheet" href="/styles.css?v=0.8.185" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar" id="sidebar">
         <div class="brand">
           <div class="mark">G4</div>
-          <div>
+          <div class="brand-copy">
             <div class="brand-title">Gemma 4</div>
             <div class="brand-subtitle" data-i18n="brand.subtitle">12B ローカル</div>
+            <div class="brand-version" id="sidebar-app-version">アプリ版 0.8.185</div>
           </div>
+          <button class="sidebar-collapse-button" id="sidebar-collapse" type="button" title="サイドバーを隠す" aria-label="サイドバーを隠す" data-i18n-title="sidebar.hide" data-i18n-aria-label="sidebar.hide">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="5" width="16" height="14" rx="3"></rect>
+              <path d="M9 5v14"></path>
+            </svg>
+          </button>
         </div>
 
         <div class="sidebar-actions">
@@ -22,6 +34,21 @@
             <span>+</span>
             <span data-i18n="sidebar.folderButton">フォルダー</span>
           </button>
+        </div>
+
+        <div class="sidebar-settings-menu" id="sidebar-settings-menu" hidden>
+          <button class="ghost-button sidebar-back-button" id="settings-menu-back" type="button" data-i18n="management.back">←戻る</button>
+          <button class="ghost-button" id="settings-toggle" type="button" data-i18n="management.basicSettings">基本設定</button>
+          <button class="ghost-button" id="response-settings-toggle" type="button" data-i18n="management.responseSettings">応答設定</button>
+          <button class="ghost-button" id="character-toggle" type="button" data-i18n="character.settings">マイキャラ</button>
+          <button class="ghost-button" id="language-models-toggle" type="button" data-i18n="management.languageModels">言語モデル</button>
+          <button class="ghost-button" id="asr-toggle" type="button" data-i18n="settings.asrTitle">音声認識</button>
+          <div class="sidebar-settings-group">
+            <span data-i18n="management.extensions">拡張</span>
+            <button class="ghost-button" id="study-packs-toggle" type="button" data-i18n="management.studyPacks">教材パック</button>
+            <button class="ghost-button" id="training-panel-toggle" type="button" data-i18n="management.trainingSets">学習セット</button>
+            <button class="ghost-button" id="plugins-toggle" type="button" data-i18n="management.plugins">プラグイン</button>
+          </div>
         </div>
 
         <label class="sidebar-search">
@@ -41,15 +68,19 @@
             <span class="status-dot" id="status-dot"></span>
             <span id="status-text">確認中</span>
           </div>
-          <button class="ghost-button" id="sidebar-collapse" type="button">サイドバーを隠す</button>
-          <button class="ghost-button" id="settings-toggle" type="button" data-i18n="common.settings">設定</button>
+          <button class="ghost-button" id="settings-menu-toggle" type="button" data-i18n="common.settings">設定</button>
         </div>
         <div class="sidebar-resizer" id="sidebar-resizer" aria-hidden="true"></div>
       </aside>
 
       <main class="workspace">
         <header class="topbar">
-          <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button" data-i18n="sidebar.showShort">サイドバー</button>
+          <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button" title="サイドバーを表示" aria-label="サイドバーを表示" data-i18n-title="sidebar.show" data-i18n-aria-label="sidebar.show">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="4" y="5" width="16" height="14" rx="3"></rect>
+              <path d="M9 5v14"></path>
+            </svg>
+          </button>
           <div>
             <h1 id="chat-title">新規チャット</h1>
             <p id="chat-meta">gemma4:12b</p>
@@ -64,18 +95,75 @@
           <div class="settings-header">
             <div>
               <strong data-i18n="common.settings">設定</strong>
-              <span data-i18n="settings.description">応答の速さ、精度、文脈量を調整します。</span>
+              <span data-i18n="settings.description">表示言語、テーマ、現在地など基本の使い方を調整します。変更は自動保存されます。</span>
             </div>
             <button class="ghost-button" id="settings-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
           <div class="settings-meta" id="settings-meta">バージョン確認中</div>
+          <section class="search-capabilities-panel" id="search-capabilities" aria-label="フォルダー検索" data-i18n-aria-label="settings.workspaceSearch"></section>
           <section class="model-installer" id="model-installer" aria-label="モデルをダウンロード" data-i18n-aria-label="settings.modelDownload"></section>
+          <section class="external-llm-panel" id="external-llm-settings" aria-label="外部LLMサーバー接続" data-i18n-aria-label="settings.externalLlmTitle">
+            <div class="model-installer-title">
+              <strong data-i18n="settings.externalLlmTitle">外部LLMサーバー接続</strong>
+              <span data-i18n="settings.externalLlmHelp">llama.cpp server など、このPC上で動く別のOllama互換サーバーへ接続します。</span>
+            </div>
+            <label class="setting-field setting-wide">
+              <span data-i18n="settings.externalLlmUrl">接続先URL</span>
+              <input id="external-llm-url" type="url" placeholder="http://127.0.0.1:8080" />
+              <small data-i18n="settings.externalLlmUrlHelp">安全のため localhost / 127.0.0.1 のみ使えます。空欄なら通常のOllamaを使います。</small>
+            </label>
+            <div class="external-llm-actions">
+              <button class="ghost-button" id="external-llm-check" type="button" data-i18n="settings.externalLlmCheck">接続を確認</button>
+              <button class="ghost-button" id="external-llm-clear" type="button" data-i18n="settings.externalLlmClear">接続設定を削除</button>
+              <small id="external-llm-status" data-i18n="settings.externalLlmIdle">未確認</small>
+            </div>
+            <div class="external-llm-guide">
+              <div>
+                <strong data-i18n="settings.externalLlmOllamaTitle">Ollama</strong>
+                <span data-i18n="settings.externalLlmOllamaHelp">通常は自動で使います。別ポートのOllamaを使う時だけURLを入れます。</span>
+                <code>http://127.0.0.1:11434</code>
+              </div>
+              <div>
+                <strong data-i18n="settings.externalLlmLlamaTitle">llama.cpp server</strong>
+                <span data-i18n="settings.externalLlmLlamaHelp">GGUFモデルを別サーバーで起動して、このUIから接続します。</span>
+                <code>http://127.0.0.1:8080</code>
+              </div>
+              <div>
+                <strong data-i18n="settings.externalLlmOpenAiTitle">OpenAI互換URL</strong>
+                <span data-i18n="settings.externalLlmOpenAiHelp">今後対応予定です。現時点ではOllama互換の /api/chat を使うサーバーが対象です。</span>
+                <code data-i18n="settings.externalLlmOpenAiPending">未対応</code>
+              </div>
+            </div>
+            <div class="external-llm-model-card">
+              <div>
+                <strong data-i18n="settings.externalLlmQwenTitle">Qwen3.6 27B MTP TurboQuant</strong>
+                <span class="plugin-kind-badge" data-i18n="settings.externalLlmExperimental">上級・実験</span>
+              </div>
+              <p data-i18n="settings.externalLlmQwenHelp">高性能チャット・コード・推論向け候補です。標準の学生PCでは重い可能性があります。</p>
+              <ul>
+                <li data-i18n="settings.externalLlmQwenSize">容量: 約13.4GB（画像対応は追加約0.9GB）</li>
+                <li data-i18n="settings.externalLlmQwenRuntime">注意: TQ3_4S / MTP対応runtimeが必要です。通常のllama.cppでは動かない場合があります。</li>
+              </ul>
+              <div class="external-llm-actions">
+                <a class="plugin-source-link" href="https://huggingface.co/YTan2000/Qwen3.6-27B-MTP-TQ3_4S" target="_blank" rel="noopener" data-i18n="settings.externalLlmOpenModel">モデルページを開く ↗</a>
+                <button class="ghost-button" id="external-llm-copy-model" type="button" data-i18n="settings.externalLlmCopyModel">モデル名をコピー</button>
+              </div>
+            </div>
+            <p class="management-note" data-i18n="settings.externalLlmDeleteHelp">この削除はアプリに保存した接続先だけを消します。ダウンロード済みモデル本体は、Ollama・llama.cpp・Hugging Face cacheなど導入元で削除してください。</p>
+          </section>
           <label class="setting-field setting-wide">
-            <span data-i18n="settings.systemPrompt">システム指示</span>
-            <textarea id="system-prompt" rows="3">あなたは簡潔で有用なアシスタントです。前置きなしで自然に短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。</textarea>
-            <small data-i18n="settings.systemPromptHelp">全ての返信に共通して効く基本ルールです。長くすると応答が少し重くなります。</small>
+            <span data-i18n="settings.systemPrompt">全体ルール</span>
+            <select id="system-prompt-template" aria-label="全体ルールのテンプレート" data-i18n-aria-label="settings.systemPromptTemplate">
+              <option value="default" data-i18n="settings.systemPromptTemplateDefault">おすすめ</option>
+              <option value="teacher" data-i18n="settings.systemPromptTemplateTeacher">先生のように説明</option>
+              <option value="concise" data-i18n="settings.systemPromptTemplateConcise">短く答える</option>
+              <option value="detailed" data-i18n="settings.systemPromptTemplateDetailed">しっかり説明</option>
+              <option value="custom" data-i18n="settings.systemPromptTemplateCustom">自分で調整</option>
+            </select>
+            <textarea id="system-prompt" rows="8">あなたは簡潔で有用なAIです。前置きなしで自然に短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。</textarea>
+            <small data-i18n="settings.systemPromptHelp">全ての返信に共通する基本方針です。ここで選んだ方針と、マイキャラの名前・話し方・記憶がセットで使われます。変更は自動保存され、次の返信から反映されます。</small>
           </label>
-          <div class="settings-grid">
+          <div class="settings-grid basic-settings-grid">
             <label class="setting-field">
               <span data-i18n="settings.language">表示言語</span>
               <select id="language-select">
@@ -93,6 +181,11 @@
               </select>
               <small data-i18n="settings.themeHelp">画面の配色を切り替えます。</small>
             </label>
+            <div class="setting-field weather-location-field">
+              <span data-i18n="settings.weatherLocation">天気の現在地</span>
+              <button class="ghost-button" id="weather-location-use" type="button" data-i18n="settings.weatherLocationUse">現在地を使う</button>
+              <small id="weather-location-status" data-i18n="settings.weatherLocationHelp">地名なしで天気を聞いた時だけ使います。ブラウザの許可が必要です。</small>
+            </div>
             <label class="setting-field">
               <span data-i18n="settings.responseMode">応答モード</span>
               <select id="response-mode">
@@ -116,7 +209,7 @@
             <label class="setting-field">
               <span data-i18n="settings.chatModel">通常チャットモデル</span>
               <select id="chat-model"></select>
-              <small data-i18n="settings.chatModelHelp">迷ったらサーバー既定かGemma 4。速さ優先ならQwenを選びます。</small>
+              <small data-i18n="settings.chatModelHelp">迷ったら自動（おすすめ）かGemma 4。自動はこのPC上で動くOllamaなどのローカルAI設定を使います。速さ優先ならQwenを選びます。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.codingModel">コード生成モデル</span>
@@ -126,36 +219,63 @@
             <label class="setting-field">
               <span data-i18n="settings.translationModel">翻訳モデル</span>
               <select id="translation-model"></select>
-              <small data-i18n="settings.translationModelHelp">通常はサーバー自動で十分です。速さはQwen、高品質はGemma 4です。</small>
+              <small data-i18n="settings.translationModelHelp">通常は自動（おすすめ）で十分です。速さはQwen、高品質はGemma 4です。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.temperature">温度</span>
-              <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.7" />
+              <select id="temperature">
+                <option value="0.7" data-i18n="settings.temperatureBalanced">標準（おすすめ）</option>
+                <option value="0.2" data-i18n="settings.temperatureStable">安定（正確さ重視）</option>
+                <option value="0.5" data-i18n="settings.temperatureNatural">自然</option>
+                <option value="1.0" data-i18n="settings.temperatureCreative">発想を広げる</option>
+              </select>
               <small data-i18n="settings.temperatureHelp">低いほど安定、高いほど表現に幅が出ます。</small>
             </label>
             <label class="setting-field">
-              <span>Top P</span>
-              <input id="top-p" type="number" min="0" max="1" step="0.05" value="0.9" />
+              <span data-i18n="settings.topP">Top P</span>
+              <select id="top-p">
+                <option value="0.9" data-i18n="settings.topPStandard">標準（おすすめ）</option>
+                <option value="0.75" data-i18n="settings.topPNarrow">狭め（安定）</option>
+                <option value="0.95" data-i18n="settings.topPWide">広め</option>
+              </select>
               <small data-i18n="settings.topPHelp">候補語の広がりを確率で絞ります。通常は0.8〜0.95で十分です。</small>
             </label>
             <label class="setting-field">
-              <span>Top K</span>
-              <input id="top-k" type="number" min="1" max="200" step="1" value="40" />
+              <span data-i18n="settings.topK">Top K</span>
+              <select id="top-k">
+                <option value="40" data-i18n="settings.topKStandard">標準（おすすめ）</option>
+                <option value="20" data-i18n="settings.topKSmall">少なめ（安定）</option>
+                <option value="80" data-i18n="settings.topKLarge">多め</option>
+              </select>
               <small data-i18n="settings.topKHelp">候補語の数を制限します。小さいほど安定しやすくなります。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.maxTokens">最大トークン</span>
-              <input id="num-predict" type="number" min="16" max="8192" step="16" value="96" />
+              <select id="num-predict">
+                <option value="96" data-i18n="settings.maxTokensShort">短め（速い）</option>
+                <option value="256" data-i18n="settings.maxTokensStandard">標準（おすすめ）</option>
+                <option value="768" data-i18n="settings.maxTokensLong">長め</option>
+                <option value="2048" data-i18n="settings.maxTokensVeryLong">とても長い（重い）</option>
+              </select>
               <small data-i18n="settings.maxTokensHelp">1回の返信で生成できる長さです。コード生成では自動で増やします。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.context">コンテキスト</span>
-              <input id="num-ctx" type="number" min="512" max="32768" step="512" value="2048" />
+              <select id="num-ctx">
+                <option value="2048" data-i18n="settings.contextStandard">標準（おすすめ）</option>
+                <option value="1024" data-i18n="settings.contextSmall">少なめ（速い）</option>
+                <option value="4096" data-i18n="settings.contextLarge">多め</option>
+                <option value="8192" data-i18n="settings.contextVeryLarge">とても多い（重い）</option>
+              </select>
               <small data-i18n="settings.contextHelp">モデルが一度に見られる文脈量です。大きいほど重くなります。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.historyTurns">記憶ターン</span>
-              <input id="history-turns" type="number" min="1" max="20" step="1" value="4" />
+              <select id="history-turns">
+                <option value="4" data-i18n="settings.historyTurnsStandard">標準（おすすめ）</option>
+                <option value="2" data-i18n="settings.historyTurnsSmall">少なめ（速い）</option>
+                <option value="8" data-i18n="settings.historyTurnsLarge">多め</option>
+              </select>
               <small data-i18n="settings.historyTurnsHelp">過去の会話を何往復ぶん送るかです。増やすと文脈は保てますが遅くなります。</small>
             </label>
             <label class="setting-field setting-toggle">
@@ -164,6 +284,372 @@
               <small data-i18n="settings.enterToSendHelp">OFFではEnterは改行です。送信は↑ボタン、またはCmd/Ctrl + Enterを使います。日本語変換中は送信しません。</small>
             </label>
           </div>
+          <section class="training-panel" aria-label="学習データ" data-i18n-aria-label="settings.trainingData">
+            <div class="training-title">
+              <strong data-i18n="settings.trainingData">学習データ</strong>
+              <span data-i18n="settings.trainingDataHelp">間違いを修正して学習セットに保存し、フォルダーで参照できます。十分に集まったら「学習用ファイル」として書き出し、あとで専用の学習処理に使います。</span>
+            </div>
+            <div class="training-explain" data-i18n="settings.trainingExplain">学習セットはすぐモデルを書き換えるものではありません。まず修正例をチャット時のヒントとして使い、十分に集まったらファインチューニング用ファイルにします。</div>
+            <div class="training-next" data-i18n="settings.trainingStoragePlan">書き出したファイルは、今はブラウザのダウンロード先に保存されます。次の段階ではアプリ管理フォルダーに保存し、そこから新しいモデルを作る画面を追加します。</div>
+            <input class="training-tab-input" id="training-tab-list" name="training-tab" type="radio" checked />
+            <input class="training-tab-input" id="training-tab-notes" name="training-tab" type="radio" />
+            <input class="training-tab-input" id="training-tab-export" name="training-tab" type="radio" />
+            <div class="training-tabs" role="tablist" aria-label="学習データの表示" data-i18n-aria-label="settings.trainingTabs">
+              <label for="training-tab-list" data-i18n="settings.trainingTabList">一覧</label>
+              <label for="training-tab-notes" data-i18n="settings.trainingTabNotes">ノート表示</label>
+              <label for="training-tab-export" data-i18n="settings.trainingTabExport">書き出し</label>
+            </div>
+            <div class="training-step training-view training-view-list">
+              <div class="training-step-title"><span>1</span><strong data-i18n="settings.trainingStepTeach">教える</strong></div>
+              <div class="training-action-row">
+                <label class="setting-field">
+                  <span data-i18n="settings.trainingSetName">新しい学習セット名</span>
+                  <input id="training-set-name" type="text" placeholder="例: 翻訳の修正例" data-i18n-placeholder="settings.trainingSetPlaceholder" />
+                  <small data-i18n="settings.trainingSetHelp">名前を入力して作成します。どのフォルダーで保存・参照するかは、フォルダー編集で選びます。</small>
+                </label>
+                <button class="ghost-button training-export-button" id="training-set-create" type="button" data-i18n="settings.trainingSetCreate">作成</button>
+              </div>
+              <div class="training-set-row">
+                <label class="setting-field">
+                  <span data-i18n="settings.trainingManageSet">学習セットを管理</span>
+                  <select id="training-set-select"></select>
+                  <small data-i18n="settings.trainingManageSetHelp">名前変更・削除・書き出し対象の学習セットを選びます。修正の保存先はフォルダー編集で選びます。</small>
+                </label>
+                <div class="training-mini-actions">
+                  <button class="ghost-button" id="training-set-rename" type="button" data-i18n="settings.trainingSetRename">名前変更</button>
+                  <button class="ghost-button" id="training-set-delete" type="button" data-i18n="settings.trainingSetDelete">削除</button>
+                </div>
+              </div>
+              <div class="training-summary" id="training-set-summary"></div>
+            </div>
+            <div class="training-step training-view training-view-notes">
+              <div class="training-step-title"><span>2</span><strong data-i18n="settings.trainingTabNotes">ノート表示</strong></div>
+              <details class="training-examples" id="training-examples">
+                <summary data-i18n="settings.trainingExamples">学習セットの中身を見る</summary>
+                <div id="training-example-list"></div>
+              </details>
+            </div>
+            <div class="training-step training-view training-view-export">
+              <div class="training-step-title"><span>3</span><strong data-i18n="settings.trainingStepExport">書き出す</strong></div>
+              <div class="training-action-row">
+                <label class="setting-field">
+                  <span data-i18n="settings.trainingScope">書き出す範囲</span>
+                  <select id="training-export-scope">
+                    <option value="set" data-i18n="settings.trainingScopeSet">選択中の学習セット</option>
+                    <option value="active" data-i18n="settings.trainingScopeActive">現在のチャット</option>
+                    <option value="folder" data-i18n="settings.trainingScopeFolder">現在のフォルダー</option>
+                    <option value="all" data-i18n="settings.trainingScopeAll">すべてのチャット</option>
+                  </select>
+                  <small data-i18n="settings.trainingScopeHelp">通常は「選択中の学習セット」を選びます。チャットやフォルダーを書き出すと、未修正の誤回答も含まれることがあります。</small>
+                </label>
+                <button class="ghost-button training-export-button" id="training-export" type="button" data-i18n="settings.trainingExport">学習用ファイルを書き出す</button>
+              </div>
+              <div class="training-next" data-i18n="settings.trainingExportNext">書き出しただけではモデルは変わりません。次の段階で、この学習用ファイルから新しいモデルを作ります。完成したモデルは設定の「モデル」から選び、チャットやフォルダーで使います。</div>
+              <div class="training-next" data-i18n="settings.trainingExportGuide">今はブラウザのダウンロード先に保存されます。編集する場合は、不要な例を削除し、保存した正しい回答だけを直します。保存場所はDownloadsのままで問題ありません。</div>
+            </div>
+            <div class="training-status" id="training-status" data-i18n="settings.trainingStatusIdle">未書き出し</div>
+          </section>
+        </section>
+
+        <section class="management-panel" id="training-management-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.trainingSets">学習セット</strong>
+              <span data-i18n="management.trainingSetsHelp">修正して学習で保存した正しい回答を管理します。</span>
+            </div>
+            <button class="ghost-button" id="training-management-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="management-panel-body" id="training-management-body"></div>
+        </section>
+
+        <section class="management-panel" id="response-settings-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.responseSettings">応答設定</strong>
+              <span data-i18n="management.responseSettingsHelp">回答の速さ、精度、文体、文脈量を調整します。変更は自動保存され、次の返信から反映されます。</span>
+            </div>
+            <button class="ghost-button" id="response-settings-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="management-note" data-i18n="management.responseSettingsNote">普段は自動のままで十分です。コード作成や調査で崩れる時だけ、精度優先や深い思考に切り替えます。保存ボタンはありません。</div>
+          <div class="management-panel-body" id="response-settings-body">
+            <div class="settings-grid" id="response-settings-grid"></div>
+          </div>
+        </section>
+
+        <section class="management-panel" id="asr-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="settings.asrTitle">音声認識</strong>
+              <span data-i18n="settings.asrPanelHelp">マイク、入力レベル、文字起こしモデルを管理します。</span>
+            </div>
+            <button class="ghost-button" id="asr-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <section class="asr-panel" id="asr-settings" aria-label="音声入力" data-i18n-aria-label="settings.asrTitle"></section>
+        </section>
+
+        <section class="management-panel" id="language-models-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.languageModels">言語モデル</strong>
+              <span data-i18n="management.languageModelsHelp">Gemma以外のAIモデルを取得したり、別のローカル推論サーバーへ接続します。</span>
+            </div>
+            <button class="ghost-button" id="language-models-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="management-note" data-i18n="management.languageModelsNote">Gemma 4 12Bは標準モデルです。追加モデル、コード用モデル、外部LLM接続はここでまとめて管理します。</div>
+          <div class="management-panel-body" id="language-models-body">
+            <input class="language-model-tab-input" id="language-model-tab-download" name="language-model-tab" type="radio" checked />
+            <input class="language-model-tab-input" id="language-model-tab-external" name="language-model-tab" type="radio" />
+            <div class="language-model-tabs" role="tablist" aria-label="言語モデル設定">
+              <label for="language-model-tab-download" data-i18n="settings.modelDownload">モデルをダウンロード</label>
+              <label for="language-model-tab-external" data-i18n="settings.externalLlmTitle">外部LLMサーバー接続</label>
+            </div>
+            <section class="language-model-view language-model-view-download" id="language-model-download-view">
+              <div class="settings-grid" id="language-model-settings-grid"></div>
+            </section>
+            <section class="language-model-view language-model-view-external" id="language-model-external-view"></section>
+          </div>
+        </section>
+
+        <section class="management-panel" id="character-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="character.settings">マイキャラ</strong>
+              <span data-i18n="character.settingsHelp">名前、見た目、話し方、記憶を管理します。</span>
+            </div>
+            <button class="ghost-button" id="character-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+
+          <input class="character-tab-input" id="character-tab-profile" name="character-tab" type="radio" checked />
+          <input class="character-tab-input" id="character-tab-tone" name="character-tab" type="radio" />
+          <input class="character-tab-input" id="character-tab-memory" name="character-tab" type="radio" />
+          <div class="character-tabs" role="tablist" aria-label="マイキャラ設定">
+            <label for="character-tab-profile" data-i18n="character.tabProfile">プロフィール</label>
+            <label for="character-tab-tone" data-i18n="character.tabTone">話し方</label>
+            <label for="character-tab-memory" data-i18n="character.tabMemory">記憶</label>
+          </div>
+
+          <section class="character-view character-view-profile">
+            <div class="character-profile-layout">
+              <div class="character-profile-fields">
+                <label class="setting-field">
+                  <span data-i18n="character.avatar">アイコン</span>
+                  <div class="character-avatar-picker">
+                    <span class="character-avatar-preview" id="character-avatar-preview"></span>
+                    <div class="character-avatar-actions">
+                      <button class="ghost-button" id="character-avatar-pick" type="button" data-i18n="character.avatarPick">画像を選択</button>
+                      <button class="ghost-button" id="character-avatar-clear" type="button" data-i18n="character.avatarClear">画像を外す</button>
+                    </div>
+                  </div>
+                  <input id="character-avatar" type="hidden" />
+                  <input id="character-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+                  <small data-i18n="character.avatarHelp">権利のある画像だけを選んでください。画像はこのブラウザに保存されます。</small>
+                </label>
+                <label class="setting-field">
+                  <span data-i18n="character.name">キャラの名前</span>
+                  <input id="character-name" type="text" placeholder="例: しばぱぱ" data-i18n-placeholder="character.namePlaceholder" />
+                  <small data-i18n="character.nameHelp">チャット横の名前と話し方に使います。</small>
+                </label>
+                <label class="setting-field">
+                  <span data-i18n="character.gender">キャラの性別</span>
+                  <select id="character-gender">
+                    <option value="unspecified" data-i18n="character.genderUnspecified">指定しない</option>
+                    <option value="female" data-i18n="character.genderFemale">女性</option>
+                    <option value="male" data-i18n="character.genderMale">男性</option>
+                    <option value="other" data-i18n="character.genderOther">その他</option>
+                  </select>
+                  <small data-i18n="character.genderHelp">性別は話し方や表示の参考にだけ使います。</small>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="character-view character-view-tone">
+            <div class="character-grid">
+              <label class="setting-field">
+                <span data-i18n="character.userName">あなたをどう呼ぶか</span>
+                <input id="character-user-name" type="text" placeholder="例: まさふみ" data-i18n-placeholder="character.userNamePlaceholder" />
+                <small data-i18n="character.userNameHelp">空欄なら呼び方を指定しません。会話の中で自然な範囲で使います。</small>
+              </label>
+              <label class="setting-field">
+                <span data-i18n="character.selfName">キャラ自身をどう呼ぶか</span>
+                <input id="character-self-name" type="text" placeholder="例: ぼく / 私 / しばぱぱ" data-i18n-placeholder="character.selfNamePlaceholder" />
+                <small data-i18n="character.selfNameHelp">空欄ならモデルに任せます。</small>
+              </label>
+              <label class="setting-field">
+                <span data-i18n="character.tone">話し方</span>
+                <select id="character-tone">
+                  <option value="friendly" data-i18n="character.toneFriendly">友だちっぽい</option>
+                  <option value="calm" data-i18n="character.toneCalm">やさしい</option>
+                  <option value="teacher" data-i18n="character.toneTeacher">先生っぽい</option>
+                  <option value="concise" data-i18n="character.toneConcise">短く答える</option>
+                </select>
+              </label>
+              <label class="setting-field setting-wide">
+                <span data-i18n="character.personality">話し方メモ</span>
+                <textarea id="character-personality" rows="3"></textarea>
+              </label>
+              <label class="setting-field setting-wide">
+                <span data-i18n="character.systemAddon">守ってほしいこと</span>
+                <textarea id="character-system-addon" rows="3" placeholder="例: 中学生にも分かる言葉で説明して"></textarea>
+                <small data-i18n="character.systemAddonHelp">正確さや安全性を下げる指示は反映されません。</small>
+              </label>
+            </div>
+          </section>
+
+          <section class="character-view character-view-memory">
+            <section class="character-memory-mode" role="radiogroup" aria-labelledby="character-memory-mode-title">
+              <h3 id="character-memory-mode-title" data-i18n="character.memoryMode">覚え方</h3>
+              <div class="character-memory-mode-options">
+                <label><input type="radio" name="character-memory-mode-choice" value="off" /> <span data-i18n="character.memoryOff">記憶しない</span></label>
+                <label><input type="radio" name="character-memory-mode-choice" value="suggest" /> <span data-i18n="character.memorySuggest">確認してから覚える</span></label>
+                <label><input type="radio" name="character-memory-mode-choice" value="auto" /> <span data-i18n="character.memoryAuto">自動で覚える beta</span></label>
+              </div>
+              <select id="character-memory-mode" hidden>
+                <option value="suggest">suggest</option>
+                <option value="auto">auto</option>
+                <option value="off">off</option>
+              </select>
+              <small data-i18n="character.memoryModeHelp">「確認してから覚える」は候補を確認して保存します。「自動で覚える」は名前・好み・勉強目標など安全な内容だけを自動保存します。</small>
+            </section>
+            <section class="character-memory">
+              <div class="training-title">
+                <strong data-i18n="character.memoryTitle">覚えていること</strong>
+                <span data-i18n="character.memoryHelp">保存した記憶は一覧で確認・編集・削除できます。</span>
+              </div>
+              <div class="character-memory-filters" id="character-memory-filters" aria-label="記憶カテゴリ"></div>
+              <input class="character-memory-search" id="character-memory-search" type="search" placeholder="記憶を検索" data-i18n-placeholder="character.memorySearchPlaceholder" />
+              <section class="character-memory-add-card">
+                <label class="setting-field setting-wide">
+                  <span data-i18n="character.memoryAdd">覚えてほしいことを追加</span>
+                  <textarea id="character-memory-new" rows="3" placeholder="例: ユーザーは短い説明を好む"></textarea>
+                </label>
+                <div class="character-actions">
+                  <button class="ghost-button" id="character-memory-add" type="button" data-i18n="character.memoryAddButton">覚える</button>
+                </div>
+              </section>
+              <div class="character-memory-list" id="character-memory-list"></div>
+            </section>
+          </section>
+          <div class="character-actions">
+            <button class="ghost-button primary-action" id="character-save" type="button" data-i18n="common.save">保存</button>
+          </div>
+        </section>
+
+        <section class="management-panel" id="study-packs-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.studyPacks">教材パック</strong>
+              <span data-i18n="management.studyPacksHelp">授業や練習用の教材、問題、プロンプトを追加します。</span>
+            </div>
+            <button class="ghost-button" id="study-packs-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="management-card">
+            <div>
+              <strong data-i18n="management.samplePack">サンプル教材</strong>
+              <span data-i18n="management.samplePackHelp">短い例文と練習プロンプトを試すための準備枠です。</span>
+            </div>
+            <button class="ghost-button" type="button" data-study-pack-toggle="sample-basic" data-i18n="management.add">追加</button>
+          </div>
+          <p class="management-note" data-i18n="management.studyPacksNote">教材パックは配布教材を扱う場所です。あなたの修正例は「学習セット」に保存されます。</p>
+        </section>
+
+        <section class="management-panel" id="plugins-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.plugins">プラグイン</strong>
+              <span data-i18n="management.pluginsHelp">アプリの機能を追加します。最初はコード理解から始めます。</span>
+            </div>
+            <button class="ghost-button" id="plugins-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="plugin-candidates">
+            <div class="training-title">
+              <strong data-i18n="management.pluginCandidates">追加できる機能</strong>
+              <span data-i18n="management.pluginCandidatesHelp">1クリックで追加できます。コード理解はすぐ使えます。その他は先にメニューへ追加する準備枠です。</span>
+            </div>
+            <div class="plugin-candidate-grid">
+              <article class="plugin-candidate-card plugin-available">
+                <strong data-i18n="management.codeUnderstanding">コード理解</strong>
+                <span class="plugin-kind-badge" data-i18n="management.pluginReadyNow">すぐ使える</span>
+                <span data-i18n="management.codeUnderstandingHelp">フォルダー内のファイル、関数、参照関係を調べて、AIがコード全体を把握しやすくします。</span>
+                <span class="plugin-candidate-meta" data-i18n="management.codeUnderstandingSize">0 MB（追加DLなし）</span>
+                <span class="plugin-candidate-meta" data-i18n="management.codeUnderstandingScope">HTML / CSS / JavaScript / Python などのローカルコード</span>
+                <span class="plugin-state-note" data-i18n="management.codeUnderstandingUseNote">追加後、フォルダー編集でONにして準備すると使えます。</span>
+                <div class="plugin-candidate-actions">
+                  <small id="codegraph-plugin-status" data-i18n="management.notAdded">未追加</small>
+                  <span class="plugin-built-in" data-i18n="management.pluginBuiltIn">内蔵</span>
+                  <button class="ghost-button" type="button" data-plugin-workspace="codegraph" data-i18n="management.openFolderSettings">フォルダー設定へ</button>
+                  <button class="ghost-button" id="codegraph-plugin-toggle" type="button" data-i18n="management.add">追加</button>
+                </div>
+              </article>
+              <article class="plugin-candidate-card plugin-integrated">
+                <strong data-i18n="management.pluginVoiceTitle">音声入力（Whisper）</strong>
+                <span class="plugin-kind-badge" data-i18n="management.pluginIntegratedNow">設定に統合済み</span>
+                <span data-i18n="management.pluginVoiceHelp">音声入力の候補として設定済みです。軽量な文字起こし候補として使えます。</span>
+                <span class="plugin-candidate-meta" data-i18n="management.pluginVoiceSize">導入済み機能。モデルサイズは選ぶWhisperモデルで変動します。</span>
+                <span class="plugin-state-note" data-i18n="management.pluginVoiceUseNote">設定の音声入力からモデルとマイクを選んで使います。</span>
+                <div class="plugin-candidate-actions">
+                  <small data-plugin-candidate-status="whisper" data-i18n="management.integrated">音声入力に統合済み</small>
+                  <a class="plugin-source-link" href="https://github.com/ggml-org/whisper.cpp" target="_blank" rel="noopener" data-i18n="management.pluginSource">公式を見る ↗</a>
+                  <button class="ghost-button" type="button" data-plugin-settings="asr" data-i18n="common.settings">設定</button>
+                </div>
+              </article>
+              <article class="plugin-candidate-card plugin-planned" data-plugin-card="ocr">
+                <strong data-i18n="management.pluginOcrTitle">画像文字読み取り（OCR）</strong>
+                <span class="plugin-kind-badge" data-plugin-kind="ocr" data-i18n="management.pluginOcrMissing">OCRエンジン未導入</span>
+                <span data-i18n="management.pluginOcrHelp">画像やPDF内の文字を読み取り、チャットに渡しやすくします。</span>
+                <span class="plugin-candidate-meta" data-i18n="management.pluginOcrSize">目安: 50〜200MB程度（言語データで変動）</span>
+                <span class="plugin-candidate-meta" id="plugin-ocr-capabilities" data-i18n="management.pluginOcrChecking">OCR環境を確認中</span>
+                <span class="plugin-candidate-meta" id="plugin-ocr-setup-status" data-i18n="management.pluginOcrSetupHelp">MacではTesseract / 日本語データ / Popplerを導入すると使えます。</span>
+                <div class="plugin-setup-progress" id="plugin-ocr-progress" hidden>
+                  <div class="plugin-setup-progress-head">
+                    <strong data-i18n="management.pluginSetupProgress">セットアップ進行状況</strong>
+                    <span id="plugin-ocr-progress-label">0%</span>
+                  </div>
+                  <div class="plugin-setup-bar" aria-hidden="true">
+                    <span id="plugin-ocr-progress-bar"></span>
+                  </div>
+                  <ol class="plugin-setup-log" id="plugin-ocr-log"></ol>
+                </div>
+                <span class="plugin-state-note" data-plugin-note="ocr" data-i18n="management.pluginOcrMissingNote">このPCにはOCRエンジンが見つかりません。Tesseract と Poppler を導入すると使えます。</span>
+                <div class="plugin-candidate-actions">
+                  <small data-plugin-candidate-status="ocr" data-i18n="management.notAdded">未追加</small>
+                  <a class="plugin-source-link" href="https://github.com/tesseract-ocr/tesseract" target="_blank" rel="noopener" data-i18n="management.pluginSource">公式を見る ↗</a>
+                  <a class="plugin-source-link" href="/docs/ocr-setup.ja.md" target="_blank" rel="noreferrer" data-i18n="management.pluginSetupGuide">手順を見る ↗</a>
+                  <button class="ghost-button" type="button" id="ocr-plugin-refresh" data-i18n="management.pluginOcrRefresh">再確認</button>
+                  <button class="ghost-button" type="button" id="ocr-plugin-setup" data-i18n="management.pluginOcrSetup">OCRをセットアップ</button>
+                  <button class="ghost-button" type="button" data-plugin-candidate-toggle="ocr" data-i18n="management.add">追加</button>
+                </div>
+              </article>
+              <article class="plugin-candidate-card plugin-available">
+                <strong data-i18n="management.pluginSearchTitle">高速ファイル検索</strong>
+                <span class="plugin-kind-badge" data-i18n="management.pluginReadyNow">すぐ使える</span>
+                <span data-i18n="management.pluginSearchHelp">フォルダー内の文字列検索を高速化し、AIが必要なファイルを探しやすくします。</span>
+                <span class="plugin-candidate-meta" data-i18n="management.pluginSearchSize">0 MB（追加DLなし・内蔵）</span>
+                <span class="plugin-candidate-meta" id="plugin-search-capabilities" data-i18n="management.pluginSearchChecking">検索対象を確認中</span>
+                <span class="plugin-state-note" data-i18n="management.pluginSearchUseNote">追加後すぐにフォルダー編集の検索欄とチャットで使えます。</span>
+                <div class="plugin-candidate-actions">
+                  <small data-plugin-candidate-status="fast-search" data-i18n="management.notAdded">未追加</small>
+                  <a class="plugin-source-link" href="https://github.com/BurntSushi/ripgrep" target="_blank" rel="noopener" data-i18n="management.pluginSource">公式を見る ↗</a>
+                  <button class="ghost-button" type="button" data-plugin-workspace="fast-search" data-i18n="management.openFolderSettings">フォルダー設定へ</button>
+                  <button class="ghost-button" type="button" data-plugin-candidate-toggle="fast-search" data-i18n="management.add">追加</button>
+                </div>
+              </article>
+              <article class="plugin-candidate-card plugin-planned">
+                <strong data-i18n="management.pluginAstTitle">高度なコード解析</strong>
+                <span class="plugin-kind-badge" data-i18n="management.pluginPlannedOnly">今後の候補</span>
+                <span data-i18n="management.pluginAstHelp">構文木を使って、関数・クラス・参照関係をより正確に調べます。</span>
+                <span class="plugin-candidate-meta" data-i18n="management.pluginAstSize">目安: 数MB〜数十MB</span>
+                <span class="plugin-candidate-note" data-i18n="management.pluginFutureNote">候補に追加しても、まだ機能は使えません。今後の導入候補として保存します。</span>
+                <span class="plugin-state-note" data-i18n="management.pluginCandidateUseNote">候補に追加しても、今はまだ実行されません。</span>
+                <div class="plugin-candidate-actions">
+                  <small data-plugin-candidate-status="tree-sitter" data-i18n="management.notAdded">未追加</small>
+                  <a class="plugin-source-link" href="https://tree-sitter.github.io/tree-sitter/" target="_blank" rel="noopener" data-i18n="management.pluginSource">公式を見る ↗</a>
+                  <button class="ghost-button" type="button" data-plugin-candidate-toggle="tree-sitter" data-i18n="management.add">追加</button>
+                </div>
+              </article>
+            </div>
+          </div>
+          <p class="management-note" data-i18n="management.pluginsNote">コード理解を追加後、フォルダー編集で「このフォルダーで使う」をONにし、「準備する」を押すとローカルコードを解析できます。</p>
         </section>
 
         <aside class="workspace-panel" id="workspace-panel" hidden>
@@ -187,13 +673,53 @@
             <button class="ghost-button" id="workspace-load" type="button" data-i18n="workspace.reload">再読込</button>
           </div>
           <div class="workspace-status" id="workspace-status">フォルダー未選択</div>
+          <label class="workspace-learning">
+            <span data-i18n="workspace.trainingSet">このフォルダーで保存・参照する学習セット</span>
+            <select id="workspace-training-set"></select>
+            <small data-i18n="workspace.trainingSetHelp">このフォルダーの「修正して学習」はここへ保存され、同じフォルダーのチャットでヒントとして使います。</small>
+          </label>
+          <div class="workspace-learning" id="workspace-codegraph-row" hidden>
+            <span data-i18n="workspace.codeUnderstanding">コード理解</span>
+            <span class="workspace-toggle-row">
+              <input id="workspace-codegraph-enabled" type="checkbox" />
+              <strong data-i18n="workspace.codeUnderstandingUse">このフォルダーで使う</strong>
+            </span>
+            <button class="ghost-button" id="workspace-codegraph-prepare" type="button" data-i18n="workspace.codeUnderstandingPrepare">準備する</button>
+            <small id="workspace-codegraph-status" data-i18n="workspace.codeUnderstandingHelp">このフォルダー内のファイル、関数、参照関係を調べてAIの文脈に使います。</small>
+            <div class="workspace-codegraph-files" id="workspace-codegraph-files" hidden></div>
+          </div>
+          <div class="workspace-learning" id="workspace-search-row" hidden>
+            <span data-i18n="workspace.fastSearch">フォルダー内検索</span>
+            <div class="workspace-search-controls">
+              <input id="workspace-search-query" type="search" placeholder="検索キーワード" data-i18n-placeholder="workspace.searchPlaceholder" />
+              <button class="ghost-button" id="workspace-search-run" type="button" data-i18n="workspace.searchRun">検索</button>
+            </div>
+            <small id="workspace-search-status" data-i18n="workspace.searchHelp">このフォルダー内のテキストを検索します。</small>
+            <div class="workspace-search-results" id="workspace-search-results" hidden></div>
+          </div>
           <div class="workspace-body">
             <div class="workspace-files" id="workspace-files"></div>
+            <section class="workspace-preview" id="workspace-preview" hidden>
+              <div class="workspace-preview-header">
+                <strong data-i18n="workspace.previewTitle">ファイルプレビュー</strong>
+                <span id="workspace-preview-path"></span>
+              </div>
+              <div class="workspace-preview-search">
+                <input id="workspace-preview-search" type="search" placeholder="プレビュー内を検索" data-i18n-placeholder="workspace.previewSearchPlaceholder" />
+                <div class="workspace-preview-search-actions">
+                  <button class="ghost-button" id="workspace-preview-prev" type="button" data-i18n="workspace.previewSearchPrev">前へ</button>
+                  <span id="workspace-preview-search-count"></span>
+                  <button class="ghost-button" id="workspace-preview-next" type="button" data-i18n="workspace.previewSearchNext">次へ</button>
+                </div>
+              </div>
+              <pre id="workspace-preview-content"></pre>
+            </section>
             <div class="workspace-write">
               <label>
                 <span data-i18n="workspace.savePath">保存先ファイル</span>
                 <input id="write-path" type="text" placeholder="src/example.py" />
               </label>
+              <button class="ghost-button" id="reveal-path" type="button" data-i18n="workspace.revealPath">Finderで開く</button>
               <textarea id="write-content" rows="7" placeholder="生成されたコードを貼り付けてから保存してください。" data-i18n-placeholder="workspace.writePlaceholder"></textarea>
               <button class="ghost-button" id="write-file" type="button" data-i18n="workspace.saveFile">ファイルを保存</button>
             </div>
@@ -208,9 +734,9 @@
         </div>
 
         <form class="composer" id="composer">
-          <div class="image-strip" id="image-strip" hidden></div>
-          <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />
+          <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.pdf,.txt,.md,.docx" multiple hidden />
           <div class="composer-box">
+            <div class="image-strip composer-attachments" id="image-strip" hidden></div>
             <button class="attach-button" id="attach-image" type="button" title="画像を添付" aria-label="画像を添付" data-i18n-title="composer.attachImage" data-i18n-aria-label="composer.attachImage">+</button>
             <textarea id="prompt" rows="1" placeholder="Gemma 4 12B に送信。例: 赤いリンゴの画像を生成して" data-i18n-placeholder="composer.placeholder"></textarea>
             <select class="composer-mode-select" id="composer-response-mode" title="応答モード" aria-label="応答モード" data-i18n-title="settings.responseMode" data-i18n-aria-label="settings.responseMode">
@@ -222,9 +748,19 @@
             <select class="composer-model-select" id="composer-model" title="使用モデル" aria-label="使用モデル" data-i18n-title="composer.model" data-i18n-aria-label="composer.model">
               <option value="" data-i18n="model.auto">モデル自動</option>
             </select>
+            <button class="voice-button" id="voice-input" type="button" title="音声入力" aria-label="音声入力" data-i18n-title="composer.voiceInput" data-i18n-aria-label="composer.voiceInput">
+              <svg class="voice-idle-icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path>
+                <path d="M5 11a7 7 0 0 0 14 0"></path>
+                <path d="M12 18v3"></path>
+                <path d="M8 21h8"></path>
+              </svg>
+              <span class="voice-recording-icon" aria-hidden="true"></span>
+            </button>
             <button class="send-button" id="send" type="submit" title="送信" aria-label="送信" data-i18n-title="common.send" data-i18n-aria-label="common.send">↑</button>
             <button class="stop-button" id="stop" type="button" title="停止" aria-label="停止" data-i18n-title="common.stop" data-i18n-aria-label="common.stop" hidden>■</button>
           </div>
+          <div class="composer-status" id="composer-status" hidden></div>
         </form>
       </main>
     </div>
@@ -235,6 +771,70 @@
       <button class="undo-close" id="undo-close" type="button" title="閉じる" aria-label="閉じる" data-i18n-title="common.close" data-i18n-aria-label="common.close">×</button>
     </div>
 
-    <script src="/app.js"></script>
+    <div class="modal-backdrop" id="correction-modal" hidden>
+      <section class="correction-dialog" role="dialog" aria-modal="true" aria-labelledby="correction-title">
+        <div class="correction-header">
+          <div>
+            <strong id="correction-title" data-i18n="training.correct">修正して学習</strong>
+            <span data-i18n="training.correctHelp">正しい回答を複数行で入力できます。保存すると選択中の学習セットに追加されます。</span>
+          </div>
+          <button class="ghost-button correction-close" id="correction-close" type="button" data-i18n="common.close">閉じる</button>
+        </div>
+        <label class="correction-field correction-target">
+          <span data-i18n="training.targetSet">保存先の学習セット</span>
+          <select id="correction-training-set"></select>
+          <small data-i18n="training.targetSetHelp">通常はこのフォルダーに設定された学習セットが選ばれます。必要に応じて変更できます。</small>
+        </label>
+        <label class="correction-field">
+          <span data-i18n="training.correctAnswer">正しい回答</span>
+          <textarea id="correction-text" rows="10"></textarea>
+        </label>
+        <div class="correction-actions">
+          <button class="ghost-button" id="correction-cancel" type="button" data-i18n="common.cancel">キャンセル</button>
+          <button class="ghost-button primary-action" id="correction-save" type="button" data-i18n="training.saveCorrection">学習セットに保存</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="memory-candidate-modal" hidden>
+      <section class="correction-dialog memory-candidate-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-candidate-title">
+        <div class="correction-header">
+          <div>
+            <strong id="memory-candidate-title" data-i18n="character.memoryCandidate">記憶候補</strong>
+            <span data-i18n="character.memoryCandidateHelp">まだ保存されていません。内容を確認してから覚えるか選べます。</span>
+          </div>
+          <button class="ghost-button" id="memory-candidate-close" type="button" data-i18n="common.close">閉じる</button>
+        </div>
+        <label class="correction-field">
+          <span data-i18n="character.memoryCandidateText">覚える内容</span>
+          <textarea id="memory-candidate-text" rows="6"></textarea>
+        </label>
+        <div class="correction-actions">
+          <button class="ghost-button" id="memory-candidate-discard" type="button" data-i18n="character.memoryDiscard">今回は覚えない</button>
+          <button class="ghost-button primary-action" id="memory-candidate-save" type="button" data-i18n="character.memorySave">編集して覚える</button>
+        </div>
+      </section>
+    </div>
+
+  <script src="/i18n.js?v=0.8.185"></script>
+  <script src="/utils.js?v=0.8.185"></script>
+  <script src="/translation.js?v=0.8.185"></script>
+  <script src="/local-tools.js?v=0.8.185"></script>
+  <script src="/weather.js?v=0.8.185"></script>
+  <script src="/image-tools.js?v=0.8.185"></script>
+  <script src="/asr.js?v=0.8.185"></script>
+  <script src="/attachments.js?v=0.8.185"></script>
+  <script src="/composer.js?v=0.8.185"></script>
+  <script src="/workspace.js?v=0.8.185"></script>
+  <script src="/training.js?v=0.8.185"></script>
+  <script src="/character.js?v=0.8.185"></script>
+  <script src="/models.js?v=0.8.185"></script>
+  <script src="/messages.js?v=0.8.185"></script>
+  <script src="/sidebar.js?v=0.8.185"></script>
+  <script src="/settings.js?v=0.8.185"></script>
+  <script src="/management.js?v=0.8.185"></script>
+  <script src="/router.js?v=0.8.185"></script>
+  <script src="/search.js?v=0.8.185"></script>
+  <script src="/app.js?v=0.8.185"></script>
   </body>
 </html>
