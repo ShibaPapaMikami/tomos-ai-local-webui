@@ -11,6 +11,16 @@
 - [ ] 起動後、ブラウザーで `http://127.0.0.1:54876/` が開く
 - [ ] 設定画面にアプリ版、モデル状態、利用モデルが表示される
 
+## GitHub Release配布
+
+- [ ] `bash scripts/make-release-archives.sh` でMac/Windows ZIPを作成できる
+- [ ] `dist/Gemma4_12B-vX.X.X-mac.zip` が作成される
+- [ ] `dist/Gemma4_12B-vX.X.X-windows.zip` が作成される
+- [ ] ZIPに `.git/`、`ComfyUI/`、`.venv/`、`.venv-asr/`、モデルファイルが含まれていない
+- [ ] GitHub Releaseに2つのZIPを添付している
+- [ ] 古いReleaseを削除せず残している
+- [ ] 学生向け案内に、使うReleaseのURLとOS別ZIP名を記載している
+
 ## モデル
 
 - [ ] Gemma 4 12Bが未取得の場合、設定からダウンロード案内が分かる

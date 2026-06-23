@@ -49,6 +49,13 @@ After launching the app, open `Settings` and use `Download models` to install su
 
 ## Quick Start on Mac
 
+For classroom distribution, download the OS-specific ZIP from GitHub Releases.
+
+- Mac: `Gemma4_12B-vX.X.X-mac.zip`
+- Windows: `Gemma4_12B-vX.X.X-windows.zip`
+
+Japanese install notes are available in [docs/install-students.ja.md](docs/install-students.ja.md). Release packaging notes are in [docs/github-release-guide.ja.md](docs/github-release-guide.ja.md).
+
 1. Install [Ollama](https://ollama.com/download).
 2. Open this folder.
 3. Run the setup script:
@@ -60,10 +67,10 @@ After launching the app, open `Settings` and use `Download models` to install su
 4. Start the app:
 
 ```sh
-./Start_Mac.command
+./Gemma4_12B_全部起動.command
 ```
 
-You can also double-click `Start_Mac.command`.
+You can also double-click `Gemma4_12B_全部起動.command`.
 
 If Terminal opens in your home directory, move to this folder first:
 
@@ -83,7 +90,7 @@ cd ~/Documents/desktop/Gemma4_12B
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
 ```
 
-4. Double-click `Start_Windows.bat`.
+4. Double-click `Gemma4_12B_All_Start.bat`.
 
 ## App URL
 

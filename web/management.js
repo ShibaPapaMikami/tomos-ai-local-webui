@@ -1,4 +1,79 @@
 window.GEMMA_MANAGEMENT = (() => {
+  const STUDY_PACK_DEFINITIONS = {
+    "sample-basic": {
+      id: "sample-basic",
+      version: "0.1.0",
+      nameKey: "management.samplePack",
+      helpKey: "management.samplePackHelp",
+      modes: [],
+    },
+    "ja-report-writing-basic": {
+      id: "ja-report-writing-basic",
+      version: "0.1.0",
+      nameKey: "management.reportWritingPack",
+      helpKey: "management.reportWritingPackHelp",
+      sourceNotes: [
+        "Inspired by f4ah6o/tech-write-ja and k16shikano japanese-tech-writing. Do not copy source text until license/permission is confirmed.",
+      ],
+      modes: [
+        {
+          id: "make-readable",
+          nameKey: "studyPack.mode.makeReadable",
+          shortKey: "studyPack.mode.makeReadableShort",
+          prompt:
+            "渡された本文そのものを読みやすく整えてください。意味は変えず、長すぎる文を分け、同じ内容の繰り返しを減らしてください。",
+          examples: [
+            {
+              input: "昨日学校に行きましたそして先生に質問して課題を直しました。",
+              output: "昨日、学校で先生に質問し、課題を直しました。",
+            },
+          ],
+        },
+        {
+          id: "logic-gap-check",
+          nameKey: "studyPack.mode.logicGap",
+          shortKey: "studyPack.mode.logicGapShort",
+          prompt:
+            "渡された本文の主張、理由、例、結論のつながりを確認してください。説明不足、飛躍、曖昧な指示語、根拠の弱い断定を指摘してください。",
+          examples: [
+            {
+              input: "この商品は便利です。だから多くの人に使われると思います。",
+              output:
+                "気になる点:\n- 何が便利なのか、誰にとって便利なのかが不足しています。\n直し方:\n- 利用場面と具体的な理由を1つ追加すると、主張が伝わりやすくなります。",
+            },
+          ],
+        },
+        {
+          id: "reduce-ai-tone",
+          nameKey: "studyPack.mode.reduceAiTone",
+          shortKey: "studyPack.mode.reduceAiToneShort",
+          prompt:
+            "渡された本文そのものを、AIが書いたような定型句、過剰な強調、抽象的すぎる表現を減らして、具体的で自然な日本語に整えてください。",
+          examples: [
+            {
+              input: "本取り組みは多角的な観点から価値創出を実現するものです。",
+              output: "この取り組みでは、複数の視点から課題を整理し、具体的な成果につなげます。",
+            },
+          ],
+        },
+        {
+          id: "report-style",
+          nameKey: "studyPack.mode.reportStyle",
+          shortKey: "studyPack.mode.reportStyleShort",
+          prompt:
+            "渡された本文そのものを学生レポートとして読みやすい構成に整えてください。主張、理由、具体例、まとめの流れを明確にしてください。",
+          examples: [
+            {
+              input: "環境問題は大切です。みんなで気をつけるべきです。",
+              output:
+                "環境問題への対策は、個人の行動と社会全体の仕組みの両方から考える必要があります。例えば、節電やごみの分別は個人で取り組める一方、再生可能エネルギーの整備には社会的な仕組みが必要です。",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
   const PLUGIN_CANDIDATES = {
     whisper: { implemented: true, integrated: true, version: "0.1.0" },
     ocr: { implemented: true, version: "0.1.0" },
@@ -21,6 +96,18 @@ window.GEMMA_MANAGEMENT = (() => {
 
   function saveStudyPacks(studyPacks) {
     localStorage.setItem("gemma4.studyPacks", JSON.stringify(studyPacks || {}));
+  }
+
+  function studyPackDefinitions() {
+    return STUDY_PACK_DEFINITIONS;
+  }
+
+  function studyPackById(id) {
+    return STUDY_PACK_DEFINITIONS[id] || null;
+  }
+
+  function installedStudyPackDefinitions(studyPacks = {}) {
+    return Object.values(STUDY_PACK_DEFINITIONS).filter((pack) => Boolean(studyPacks?.[pack.id]?.installed));
   }
 
   function loadPlugins() {
@@ -281,23 +368,30 @@ window.GEMMA_MANAGEMENT = (() => {
   }
 
   function renderStudyPacksPanel({ state, t }) {
-    const installed = Boolean(state.studyPacks?.["sample-basic"]?.installed);
-    const button = document.querySelector("[data-study-pack-toggle='sample-basic']");
-    if (!button) return;
-    button.textContent = installed ? t("management.remove") : t("management.add");
-    button.setAttribute("aria-pressed", String(installed));
+    document.querySelectorAll("[data-study-pack-toggle]").forEach((button) => {
+      const packId = button.dataset.studyPackToggle || "";
+      const installed = Boolean(state.studyPacks?.[packId]?.installed);
+      button.textContent = installed ? t("management.remove") : t("management.add");
+      button.setAttribute("aria-pressed", String(installed));
+    });
   }
 
-  function toggleSampleStudyPack({ state, t }) {
+  function toggleStudyPack({ state, t, packId }) {
+    const definition = studyPackById(packId);
+    if (!definition) return;
     state.studyPacks = state.studyPacks || {};
-    const current = Boolean(state.studyPacks["sample-basic"]?.installed);
-    state.studyPacks["sample-basic"] = {
+    const current = Boolean(state.studyPacks[packId]?.installed);
+    state.studyPacks[packId] = {
       installed: !current,
-      version: "0.1.0",
+      version: definition.version || "0.1.0",
       status: !current ? "ready" : "removed",
     };
     saveStudyPacks(state.studyPacks);
     renderStudyPacksPanel({ state, t });
+  }
+
+  function toggleSampleStudyPack({ state, t }) {
+    toggleStudyPack({ state, t, packId: "sample-basic" });
   }
 
   function renderPluginsPanel({ state, els, t }) {
@@ -450,9 +544,12 @@ window.GEMMA_MANAGEMENT = (() => {
       if (els.studyPacksPanel) els.studyPacksPanel.hidden = true;
       syncManagementLayout({ els });
     });
-    document
-      .querySelector("[data-study-pack-toggle='sample-basic']")
-      ?.addEventListener("click", () => toggleSampleStudyPack({ state, t }));
+    document.querySelectorAll("[data-study-pack-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        toggleStudyPack({ state, t, packId: button.dataset.studyPackToggle || "" });
+        onPluginsChanged?.();
+      });
+    });
 
     els.trainingManagementToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.trainingManagementPanel });
@@ -508,6 +605,9 @@ window.GEMMA_MANAGEMENT = (() => {
   return {
     loadStudyPacks,
     saveStudyPacks,
+    studyPackDefinitions,
+    studyPackById,
+    installedStudyPackDefinitions,
     loadPlugins,
     savePlugins,
     formatPluginSearchCapabilities,
@@ -518,6 +618,7 @@ window.GEMMA_MANAGEMENT = (() => {
     setupManagementPanels,
     renderStudyPacksPanel,
     toggleSampleStudyPack,
+    toggleStudyPack,
     renderPluginsPanel,
     toggleCodegraphPlugin,
     togglePluginCandidate,

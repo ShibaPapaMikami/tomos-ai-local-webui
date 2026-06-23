@@ -217,6 +217,7 @@ function renderGemmaMessages(deps) {
       if (message.runMeta?.modelLabel) details.push(`${t("chat.model")}: ${message.runMeta.modelLabel}`);
       if (message.runMeta?.taskLabel) details.push(`${t("chat.task")}: ${message.runMeta.taskLabel}`);
       if (message.runMeta?.modelReason) details.push(`${t("chat.modelReason")}: ${message.runMeta.modelReason}`);
+      if (message.runMeta?.studyPackModeLabel) details.push(`${t("chat.studyPackMode")}: ${message.runMeta.studyPackModeLabel}`);
       if (message.runMeta?.responseModeLabel) details.push(`${t("chat.mode")}: ${message.runMeta.responseModeLabel}`);
       if (message.runMeta?.codeUnderstanding) details.push(t("workspace.codeUnderstanding"));
       duration.textContent = details.join(" / ");

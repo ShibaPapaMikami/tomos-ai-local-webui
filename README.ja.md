@@ -46,6 +46,13 @@ Gemma 4 12B の初回ダウンロードは数GBあります。学校のネット
 
 ## はじめての導入
 
+授業や学生配布では、GitHub Releases から OS 別の ZIP をダウンロードする方法が一番簡単です。
+
+- Mac: `Gemma4_12B-vX.X.X-mac.zip`
+- Windows: `Gemma4_12B-vX.X.X-windows.zip`
+
+詳しくは [学生向けインストール手順](docs/install-students.ja.md) を見てください。配布者向けの手順は [GitHub Release 配布手順](docs/github-release-guide.ja.md) にまとめています。
+
 ### Mac
 
 1. [Ollama](https://ollama.com/download) をインストールします。
@@ -59,10 +66,10 @@ Gemma 4 12B の初回ダウンロードは数GBあります。学校のネット
 4. 起動します。
 
 ```sh
-./Start_Mac.command
+./Gemma4_12B_全部起動.command
 ```
 
-または `Start_Mac.command` をダブルクリックします。
+または `Gemma4_12B_全部起動.command` をダブルクリックします。
 
 ターミナルがホーム `~` を開いている場合は、先にこのフォルダーへ移動してから実行します。
 
@@ -83,7 +90,7 @@ export GEMMA_CODING_MODEL="hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
 ```
 
-4. `Start_Windows.bat` をダブルクリックします。
+4. `Gemma4_12B_All_Start.bat` をダブルクリックします。
 
 ## 起動URL
 

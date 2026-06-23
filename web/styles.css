@@ -3400,6 +3400,7 @@ select:focus {
   grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
   grid-template-areas:
     "attachments attachments attachments attachments attachments attachments"
+    "study study study study study study"
     "prompt prompt prompt prompt prompt prompt"
     "attach . mode model voice send";
   align-items: end;
@@ -3410,6 +3411,59 @@ select:focus {
   background: var(--input-bg);
   padding: 6px;
   min-height: 82px;
+}
+
+.study-pack-mode-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.study-pack-mode-list span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.study-pack-mode-row {
+  grid-area: study;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 2px;
+}
+
+.study-pack-mode-row[hidden] {
+  display: none;
+}
+
+.study-pack-mode-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.study-pack-mode-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--button-bg);
+  color: var(--text);
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.study-pack-mode-button[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .pending-image {

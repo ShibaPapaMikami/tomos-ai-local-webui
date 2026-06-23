@@ -9,7 +9,7 @@
         window.location.replace("http://127.0.0.1:54876/");
       }
     </script>
-    <link rel="stylesheet" href="/styles.css?v=0.8.185" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.189" />
   </head>
   <body>
     <div class="app-shell">
@@ -19,7 +19,7 @@
           <div class="brand-copy">
             <div class="brand-title">Gemma 4</div>
             <div class="brand-subtitle" data-i18n="brand.subtitle">12B ローカル</div>
-            <div class="brand-version" id="sidebar-app-version">アプリ版 0.8.185</div>
+            <div class="brand-version" id="sidebar-app-version">アプリ版 0.8.189</div>
           </div>
           <button class="sidebar-collapse-button" id="sidebar-collapse" type="button" title="サイドバーを隠す" aria-label="サイドバーを隠す" data-i18n-title="sidebar.hide" data-i18n-aria-label="sidebar.hide">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -550,6 +550,20 @@
             </div>
             <button class="ghost-button" type="button" data-study-pack-toggle="sample-basic" data-i18n="management.add">追加</button>
           </div>
+          <div class="management-card study-pack-card">
+            <div>
+              <strong data-i18n="management.reportWritingPack">日本語レポート添削</strong>
+              <span data-i18n="management.reportWritingPackHelp">レポートや解説文を読みやすくし、論理の抜けやAIっぽい表現を見つけます。</span>
+              <div class="study-pack-mode-list" aria-label="教材パックのモード">
+                <span data-i18n="studyPack.mode.makeReadableShort">読みやすくする</span>
+                <span data-i18n="studyPack.mode.logicGapShort">論理チェック</span>
+                <span data-i18n="studyPack.mode.reduceAiToneShort">AIっぽさを減らす</span>
+                <span data-i18n="studyPack.mode.reportStyleShort">レポート向け</span>
+              </div>
+              <small data-i18n="management.reportWritingPackSource">tech-write-ja を参考にした独自簡略版です。外部本文は同梱していません。</small>
+            </div>
+            <button class="ghost-button" type="button" data-study-pack-toggle="ja-report-writing-basic" data-i18n="management.add">追加</button>
+          </div>
           <p class="management-note" data-i18n="management.studyPacksNote">教材パックは配布教材を扱う場所です。あなたの修正例は「学習セット」に保存されます。</p>
         </section>
 
@@ -737,6 +751,7 @@
           <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,application/pdf,text/plain,text/markdown,.pdf,.txt,.md,.docx" multiple hidden />
           <div class="composer-box">
             <div class="image-strip composer-attachments" id="image-strip" hidden></div>
+            <div class="study-pack-mode-row" id="study-pack-mode-row" hidden></div>
             <button class="attach-button" id="attach-image" type="button" title="画像を添付" aria-label="画像を添付" data-i18n-title="composer.attachImage" data-i18n-aria-label="composer.attachImage">+</button>
             <textarea id="prompt" rows="1" placeholder="Gemma 4 12B に送信。例: 赤いリンゴの画像を生成して" data-i18n-placeholder="composer.placeholder"></textarea>
             <select class="composer-mode-select" id="composer-response-mode" title="応答モード" aria-label="応答モード" data-i18n-title="settings.responseMode" data-i18n-aria-label="settings.responseMode">
@@ -816,25 +831,25 @@
       </section>
     </div>
 
-  <script src="/i18n.js?v=0.8.185"></script>
-  <script src="/utils.js?v=0.8.185"></script>
-  <script src="/translation.js?v=0.8.185"></script>
-  <script src="/local-tools.js?v=0.8.185"></script>
-  <script src="/weather.js?v=0.8.185"></script>
-  <script src="/image-tools.js?v=0.8.185"></script>
-  <script src="/asr.js?v=0.8.185"></script>
-  <script src="/attachments.js?v=0.8.185"></script>
-  <script src="/composer.js?v=0.8.185"></script>
-  <script src="/workspace.js?v=0.8.185"></script>
-  <script src="/training.js?v=0.8.185"></script>
-  <script src="/character.js?v=0.8.185"></script>
-  <script src="/models.js?v=0.8.185"></script>
-  <script src="/messages.js?v=0.8.185"></script>
-  <script src="/sidebar.js?v=0.8.185"></script>
-  <script src="/settings.js?v=0.8.185"></script>
-  <script src="/management.js?v=0.8.185"></script>
-  <script src="/router.js?v=0.8.185"></script>
-  <script src="/search.js?v=0.8.185"></script>
-  <script src="/app.js?v=0.8.185"></script>
+  <script src="/i18n.js?v=0.8.189"></script>
+  <script src="/utils.js?v=0.8.189"></script>
+  <script src="/translation.js?v=0.8.189"></script>
+  <script src="/local-tools.js?v=0.8.189"></script>
+  <script src="/weather.js?v=0.8.189"></script>
+  <script src="/image-tools.js?v=0.8.189"></script>
+  <script src="/asr.js?v=0.8.189"></script>
+  <script src="/attachments.js?v=0.8.189"></script>
+  <script src="/composer.js?v=0.8.189"></script>
+  <script src="/workspace.js?v=0.8.189"></script>
+  <script src="/training.js?v=0.8.189"></script>
+  <script src="/character.js?v=0.8.189"></script>
+  <script src="/models.js?v=0.8.189"></script>
+  <script src="/messages.js?v=0.8.189"></script>
+  <script src="/sidebar.js?v=0.8.189"></script>
+  <script src="/settings.js?v=0.8.189"></script>
+  <script src="/management.js?v=0.8.189"></script>
+  <script src="/router.js?v=0.8.189"></script>
+  <script src="/search.js?v=0.8.189"></script>
+  <script src="/app.js?v=0.8.189"></script>
   </body>
 </html>

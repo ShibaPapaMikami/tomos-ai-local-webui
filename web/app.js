@@ -22,6 +22,7 @@ const state = {
   characterMemoryFilter: "all",
   characterMemoryQuery: "",
   studyPacks: window.GEMMA_MANAGEMENT?.loadStudyPacks?.() || {},
+  selectedStudyPackMode: "",
   plugins: window.GEMMA_MANAGEMENT?.loadPlugins?.() || {},
   activeId: null,
   activeFolderId: localStorage.getItem("gemma4.activeFolderId") || null,
@@ -179,6 +180,7 @@ const els = {
   progressLine: document.querySelector("#progress-line"),
   progressText: document.querySelector("#progress-text"),
   imageStrip: document.querySelector("#image-strip"),
+  studyPackModeRow: document.querySelector("#study-pack-mode-row"),
   imageInput: document.querySelector("#image-input"),
   attachImage: document.querySelector("#attach-image"),
   voiceInput: document.querySelector("#voice-input"),
@@ -1633,7 +1635,7 @@ async function startModelPull(model) {
 
 function renderSettingsMeta() {
   if (els.sidebarAppVersion) {
-    const version = state.appInfo.version || "0.8.185";
+    const version = state.appInfo.version || "0.8.189";
     els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
   }
   const deps = {
@@ -2028,6 +2030,62 @@ function characterContextSystemPrompt() {
     ? ""
     : (window.GEMMA_CHARACTER?.buildMemorySystemPrompt?.(activeCharacterMemorySet()) || "");
   return `${characterPrompt}${memoryPrompt}`;
+}
+
+function installedStudyPacks() {
+  return window.GEMMA_MANAGEMENT?.installedStudyPackDefinitions?.(state.studyPacks) || [];
+}
+
+function selectedStudyPackMode() {
+  const [packId, modeId] = String(state.selectedStudyPackMode || "").split(":");
+  if (!packId || !modeId) return null;
+  const pack = window.GEMMA_MANAGEMENT?.studyPackById?.(packId);
+  const mode = pack?.modes?.find((item) => item.id === modeId);
+  if (!pack || !mode || !state.studyPacks?.[pack.id]?.installed) return null;
+  return { pack, mode };
+}
+
+function studyPackModeDisplayLabel(selected = selectedStudyPackMode()) {
+  if (!selected) return "";
+  return t(selected.mode.shortKey) || t(selected.mode.nameKey) || selected.mode.id;
+}
+
+function studyPackModeOutputPrompt(selected) {
+  const modeId = selected?.mode?.id || "";
+  if (modeId === "logic-gap-check") {
+    return "出力は「気になる点」「直し方」「必要なら修正版」の順にしてください。指摘だけで十分な場合は、無理に全文を書き換えないでください。ファイル保存やダウンロード案内は、ユーザーが明示しない限り行わないでください。";
+  }
+  if (modeId === "reduce-ai-tone") {
+    return "出力はまず「修正版:」として、対象本文そのものを自然な日本語に書き換えてください。ユーザーの依頼文をプロンプト化したり、AI向け指示に変換したりしないでください。必要な場合だけ、最後に「変更点:」を2〜3個添えてください。ファイル保存やダウンロード案内は、ユーザーが明示しない限り行わないでください。";
+  }
+  if (modeId === "make-readable" || modeId === "report-style") {
+    return "出力はまず「修正版:」として、対象本文そのものを書き換えてください。必要な場合だけ、最後に「変更点:」を2〜3個添えてください。ファイル保存やダウンロード案内は、ユーザーが明示しない限り行わないでください。";
+  }
+  return "出力は、ユーザーの依頼に合わせてチャット内に返してください。ファイル保存やダウンロード案内は、ユーザーが明示しない限り行わないでください。";
+}
+
+function studyPackModeExamplePrompt(selected) {
+  const examples = Array.isArray(selected?.mode?.examples) ? selected.mode.examples : [];
+  const lines = examples.slice(0, 2).map((example, index) => {
+    const input = String(example?.input || "").trim();
+    const output = String(example?.output || "").trim();
+    if (!input || !output) return "";
+    return `例${index + 1}:\n入力: ${input}\n出力: ${output}`;
+  }).filter(Boolean);
+  if (!lines.length) return "";
+  return `良い出力例です。内容をコピーせず、形式と粒度だけ参考にしてください。\n${lines.join("\n")}\n`;
+}
+
+function studyPackContextSystemPrompt() {
+  const selected = selectedStudyPackMode();
+  const packs = installedStudyPacks().filter((pack) => pack.modes?.length);
+  if (!selected && packs.length === 0) return "";
+  const names = packs.map((pack) => t(pack.nameKey) || pack.id).join("、");
+  const activeLine = names ? `\n有効な教材パック: ${names}\n` : "";
+  if (!selected) {
+    return `${activeLine}ユーザーが文章添削、論理チェック、レポート改善を求めた場合だけ、教材パックの考え方を参考にしてください。教材パック本体は書き換えず、ユーザーの修正は学習セットに保存します。\n`;
+  }
+  return `${activeLine}教材パック「${t(selected.pack.nameKey) || selected.pack.id}」のモード「${t(selected.mode.nameKey) || selected.mode.id}」を次の回答に使います。\n指示: ${selected.mode.prompt}\n${studyPackModeOutputPrompt(selected)}\n${studyPackModeExamplePrompt(selected)}教材パック本体は書き換えません。\n`;
 }
 
 function renderCharacterPanel() {
@@ -2637,6 +2695,7 @@ function render() {
   els.stop.hidden = !state.busy;
   els.stop.disabled = !state.abortController;
   renderPendingImages();
+  renderStudyPackModeRow();
   renderWebSearchToggle({ button: els.webSearchToggle, enabled: state.webSearch });
   els.progressLine.hidden = true;
 }
@@ -2655,6 +2714,38 @@ function renderPendingImages() {
       render();
     },
   });
+}
+
+function renderStudyPackModeRow() {
+  if (!els.studyPackModeRow) return;
+  const packs = installedStudyPacks().filter((pack) => pack.modes?.length);
+  els.studyPackModeRow.innerHTML = "";
+  if (packs.length === 0) {
+    state.selectedStudyPackMode = "";
+    els.studyPackModeRow.hidden = true;
+    return;
+  }
+  const label = document.createElement("span");
+  label.className = "study-pack-mode-label";
+  label.textContent = t("studyPack.modeLabel");
+  els.studyPackModeRow.appendChild(label);
+  packs.forEach((pack) => {
+    pack.modes.forEach((mode) => {
+      const value = `${pack.id}:${mode.id}`;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "study-pack-mode-button";
+      button.textContent = t(mode.shortKey) || t(mode.nameKey) || mode.id;
+      button.dataset.active = state.selectedStudyPackMode === value ? "true" : "false";
+      button.setAttribute("aria-pressed", state.selectedStudyPackMode === value ? "true" : "false");
+      button.addEventListener("click", () => {
+        state.selectedStudyPackMode = state.selectedStudyPackMode === value ? "" : value;
+        renderStudyPackModeRow();
+      });
+      els.studyPackModeRow.appendChild(button);
+    });
+  });
+  els.studyPackModeRow.hidden = false;
 }
 
 function renderWorkspace() {
@@ -2795,8 +2886,26 @@ const {
 function isWorkspaceBuildRequest(text) {
   if (!state.workspaceRoot) return false;
   if (isTranslationRequest(text)) return false;
+  if (isStudyPackRewriteRequest(text) && !explicitlyRequestsWorkspaceSave(text)) return false;
+  if (shouldKeepStudyPackReplyInChat(text)) return false;
   if (isWorkspaceLookupRequest(text)) return false;
   return /テトリス|ゲーム|サイト|アプリ|ページ|ツール|作って|つくって|作成|生成|構築|実装|修正|変更|保存|ファイル|html|css|javascript|コード|program|app|game|build|create|implement/i.test(text);
+}
+
+function explicitlyRequestsWorkspaceSave(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  return /(保存して|保存する|保存$|ファイルに保存|ファイルとして保存|書き出して|書き出し|ダウンロード|上書き|新規ファイル)/i.test(normalized);
+}
+
+function shouldKeepStudyPackReplyInChat(text) {
+  return Boolean(selectedStudyPackMode()) && !explicitlyRequestsWorkspaceSave(text);
+}
+
+function isStudyPackRewriteRequest(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  return /(リライト|書き直|書き換|言い換|推敲|添削|校正|読みやすく|読みやすい|論理チェック|論理の抜け|AIっぽさ|レポート向け|レポート添削|文章を整|文を整|rewrite|proofread|revise|polish)/i.test(normalized);
 }
 
 function hasExplicitWorkspaceLookupIntent(text) {
@@ -2822,6 +2931,8 @@ function isWorkspaceLookupRequest(text) {
   const normalized = String(text || "").trim();
   if (!normalized) return false;
   if (isCharacterPreferenceRequest(normalized)) return false;
+  if (shouldKeepStudyPackReplyInChat(normalized)) return false;
+  if (isStudyPackRewriteRequest(normalized) && !explicitlyRequestsWorkspaceSave(normalized)) return false;
   return hasExplicitWorkspaceLookupIntent(normalized)
     && /(フォルダ|フォルダー|PDF|pdf|どこにある|どこに保存|場所|ある|あります|入って|情報|内容|中身|本文|一覧|検索|探|教えて|おしえて|説明|要約|読んで|見つけ|含ま|書か|記載|where|search|find|contain|which)/i.test(normalized)
     && !/(保存|作って|つくって|作成|生成|構築|実装|修正|変更|write|save|create|build|implement)/i.test(normalized);
@@ -2829,6 +2940,7 @@ function isWorkspaceLookupRequest(text) {
 
 function shouldUseWorkspaceContextForChat(text, requestOptions = {}) {
   if (requestOptions.translationMode) return false;
+  if (isStudyPackRewriteRequest(text) && !explicitlyRequestsWorkspaceSave(text)) return false;
   if (requestOptions.codingMode) return true;
   return isWorkspaceLookupRequest(text);
 }
@@ -3949,6 +4061,9 @@ async function sendMessage(text) {
     sizeLabel: file.sizeLabel,
   }));
   const requestOptions = chatRequestOptions(text, images.length > 0);
+  const appliedStudyPackMode = state.selectedStudyPackMode;
+  const appliedStudyPackSelection = selectedStudyPackMode();
+  const appliedStudyPackModeLabel = studyPackModeDisplayLabel(appliedStudyPackSelection);
   const userMessage = { role: "user", content: text, images, imagePreviews, attachments };
   session.messages.push(userMessage);
   const memoryCandidate = window.GEMMA_CHARACTER?.memoryCandidateFromText?.(text, {
@@ -3966,7 +4081,8 @@ async function sendMessage(text) {
   let assistantMessage = null;
   let renderScheduled = false;
   let requestModel = "";
-  let runMetaOverrides = {};
+  const studyPackRunMeta = appliedStudyPackModeLabel ? { studyPackModeLabel: appliedStudyPackModeLabel } : {};
+  let runMetaOverrides = { ...studyPackRunMeta };
   const scheduleStreamRender = () => {
     if (renderScheduled) return;
     renderScheduled = true;
@@ -3984,8 +4100,8 @@ async function sendMessage(text) {
     const hasReadableAttachments = attachmentResults.some((item) => String(item.content || "").trim());
     const attachmentSources = attachmentSummarySources(attachmentResults);
     runMetaOverrides = hasAttachmentFiles
-      ? { modelReason: "添付ファイルを優先", codeUnderstanding: false }
-      : {};
+      ? { ...studyPackRunMeta, modelReason: "添付ファイルを優先", codeUnderstanding: false }
+      : { ...studyPackRunMeta };
     if (attachmentResults.length > 0) {
       userMessage.attachments = attachmentResults.map((item) => ({
         name: item.name,
@@ -4075,7 +4191,7 @@ async function sendMessage(text) {
             requestOptions.thinkingMode,
             requestOptions.translationMode,
           );
-    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${baseRequestSystem}${trainingContextSystemPrompt()}`;
+    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${baseRequestSystem}${requestOptions.translationMode ? "" : studyPackContextSystemPrompt()}${trainingContextSystemPrompt()}`;
     const modelUserMessage = messageWithAttachmentContext(userMessage, attachmentContext);
     const requestMessages = requestOptions.translationMode || requestOptions.fastModel
       ? [modelUserMessage]
@@ -4307,6 +4423,9 @@ async function sendMessage(text) {
       });
     }
   } finally {
+    if (appliedStudyPackMode && state.selectedStudyPackMode === appliedStudyPackMode) {
+      state.selectedStudyPackMode = "";
+    }
     state.abortController = null;
     state.busy = false;
     stopProgressTimer();
