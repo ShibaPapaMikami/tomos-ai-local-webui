@@ -1,6 +1,6 @@
 # GitHub Release 配布手順
 
-このプロジェクトは、GitHub Releases に Mac/Windows 用 ZIP を添付して配布します。アプリ本体は軽く保ち、Ollamaモデル、ComfyUI、画像モデル、ASR/OCRの大きなデータは同梱しません。
+このプロジェクトは、GitHub Releases に Mac/Windows 用 ZIP とネイティブインストーラーを添付して配布します。アプリ本体は軽く保ち、Ollamaモデル、ComfyUI、画像モデル、ASR/OCRの大きなデータは同梱しません。
 
 ## バージョン管理方針
 
@@ -25,6 +25,26 @@ bash scripts/make-release-archives.sh
 ```sh
 bash scripts/make-release-archives.sh 0.8.189
 ```
+
+## ネイティブインストーラーを作る
+
+macOS の `.pkg` はローカルで作れます。
+
+```sh
+bash scripts/make-mac-pkg.sh
+```
+
+作成されるファイル:
+
+- `dist/Gemma4_12B-vX.X.X-mac.pkg`
+
+Windows の `.msi` は GitHub Actions の Windows runner で作る想定です。ローカルでは WiX 定義だけ確認できます。
+
+```sh
+python3 scripts/make-windows-msi.py --no-build
+```
+
+GitHub Actions の `Build native installers` を手動実行すると、`.pkg` と `.msi` の artifact を取得できます。
 
 ## ZIPに含めるもの
 
@@ -53,7 +73,7 @@ bash scripts/make-release-archives.sh 0.8.189
 
 ## GitHub Releaseに添付する
 
-GitHubの Releases 画面から新しい Release を作り、作成した2つのZIPを添付します。
+GitHubの Releases 画面から新しい Release を作り、ZIP とネイティブインストーラーを添付します。
 
 GitHub CLI を使う場合の例:
 
@@ -61,14 +81,16 @@ GitHub CLI を使う場合の例:
 gh release create v0.8.189 \
   dist/Gemma4_12B-v0.8.189-mac.zip \
   dist/Gemma4_12B-v0.8.189-windows.zip \
+  dist/Gemma4_12B-v0.8.189-mac.pkg \
+  dist/Gemma4_12B-v0.8.189-windows.msi \
   --title "Gemma4_12B v0.8.189" \
-  --notes "学生向け配布版。Mac/Windows ZIPを添付。"
+  --notes "学生向け配布版。Mac/Windows ZIP とネイティブインストーラーを添付。"
 ```
 
 実行前に `docs/release-checklist.ja.md` を確認します。
 
 ## 明日の授業向けの現実的な配布
 
-`.pkg`、`.dmg`、`.msi` の本格インストーラーは署名や検証に時間がかかります。明日使うなら、まずは GitHub Release ZIP が安全です。
+ZIP はフォールバックとして必ず残します。`.pkg` と `.msi` は導入しやすい配布物ですが、現時点では未署名のため OS の警告が出る可能性があります。
 
 次の段階で、Tauri/Electron を使った独自デスクトップアプリ化、署名付きインストーラー、自動更新へ進めます。

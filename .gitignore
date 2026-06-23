@@ -36,6 +36,7 @@ models/
 
 # Temporary downloads
 downloads/
+dist/
 Asset/
 tmp/
 *.zip

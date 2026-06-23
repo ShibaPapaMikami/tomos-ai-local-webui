@@ -52,6 +52,7 @@ copy_common() {
   copy_if_exists "docs/install-students.ja.md" "$target/docs/"
   copy_if_exists "docs/github-release-guide.ja.md" "$target/docs/"
   copy_if_exists "docs/release-checklist.ja.md" "$target/docs/"
+  copy_if_exists "docs/native-installers.ja.md" "$target/docs/"
 
   copy_if_exists "scripts/setup-mac.sh" "$target/scripts/"
   copy_if_exists "scripts/setup-windows.ps1" "$target/scripts/"
@@ -93,4 +94,5 @@ cat <<EOF
 - $DIST_DIR/Gemma4_12B-${TAG}-windows.zip
 
 GitHub Release には、この2つのZIPを添付してください。
+ネイティブインストーラーを使う場合は、別途 .pkg / .msi も添付してください。
 EOF

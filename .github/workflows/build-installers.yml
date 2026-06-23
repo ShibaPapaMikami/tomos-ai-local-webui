@@ -1,0 +1,56 @@
+name: Build native installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "App version. Leave blank to read server.py."
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  mac-pkg:
+    name: macOS PKG
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build PKG
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            bash scripts/make-mac-pkg.sh "${{ github.event.inputs.version }}"
+          else
+            bash scripts/make-mac-pkg.sh
+          fi
+      - name: Upload PKG
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-mac-pkg
+          path: dist/*.pkg
+
+  windows-msi:
+    name: Windows MSI
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          if ("${{ github.event.inputs.version }}") {
+            python scripts/make-windows-msi.py "${{ github.event.inputs.version }}"
+          } else {
+            python scripts/make-windows-msi.py
+          }
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-windows-msi
+          path: dist/*.msi
