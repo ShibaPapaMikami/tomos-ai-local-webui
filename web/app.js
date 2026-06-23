@@ -23,6 +23,7 @@ const state = {
   characterMemoryQuery: "",
   studyPacks: window.GEMMA_MANAGEMENT?.loadStudyPacks?.() || {},
   selectedStudyPackMode: "",
+  selectedStudyPackModes: [],
   plugins: window.GEMMA_MANAGEMENT?.loadPlugins?.() || {},
   activeId: null,
   activeFolderId: localStorage.getItem("gemma4.activeFolderId") || null,
@@ -266,6 +267,9 @@ const els = {
   studyPacksToggle: document.querySelector("#study-packs-toggle"),
   studyPacksPanel: document.querySelector("#study-packs-panel"),
   studyPacksClose: document.querySelector("#study-packs-close"),
+  studyPackImportButton: document.querySelector("#study-pack-import-button"),
+  studyPackImportInput: document.querySelector("#study-pack-import-input"),
+  studyPackImportStatus: document.querySelector("#study-pack-import-status"),
   trainingManagementToggle: document.querySelector("#training-panel-toggle"),
   trainingManagementPanel: document.querySelector("#training-management-panel"),
   trainingManagementClose: document.querySelector("#training-management-close"),
@@ -339,7 +343,7 @@ if (window.matchMedia("(max-width: 760px)").matches && localStorage.getItem("gem
 
 function t(key, params = {}) {
   const dictionary = I18N[state.language] || I18N.ja;
-  let text = dictionary[key] || I18N.ja[key] || key;
+  let text = dictionary[key] || I18N.ja[key] || window.GEMMA_IMPORTED_STUDY_PACK_LABELS?.[key] || key;
   for (const [name, value] of Object.entries(params)) {
     text = text.replaceAll(`{${name}}`, String(value));
   }
@@ -1635,7 +1639,7 @@ async function startModelPull(model) {
 
 function renderSettingsMeta() {
   if (els.sidebarAppVersion) {
-    const version = state.appInfo.version || "0.8.189";
+    const version = state.appInfo.version || "0.8.190";
     els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
   }
   const deps = {
@@ -2045,9 +2049,27 @@ function selectedStudyPackMode() {
   return { pack, mode };
 }
 
+function selectedStudyPackModes() {
+  const values = Array.isArray(state.selectedStudyPackModes) ? state.selectedStudyPackModes : [];
+  return values.map((value) => {
+    const [packId, modeId] = String(value || "").split(":");
+    if (!packId || !modeId) return null;
+    const pack = window.GEMMA_MANAGEMENT?.studyPackById?.(packId);
+    const mode = pack?.modes?.find((item) => item.id === modeId);
+    if (!pack || !mode || !state.studyPacks?.[pack.id]?.installed) return null;
+    return { pack, mode, value };
+  }).filter(Boolean);
+}
+
 function studyPackModeDisplayLabel(selected = selectedStudyPackMode()) {
   if (!selected) return "";
   return t(selected.mode.shortKey) || t(selected.mode.nameKey) || selected.mode.id;
+}
+
+function studyPackModesDisplayLabel(selectedItems = selectedStudyPackModes()) {
+  if (!selectedItems.length) return "";
+  if (selectedItems.length === 1) return studyPackModeDisplayLabel(selectedItems[0]);
+  return `教材パック ${selectedItems.length}件`;
 }
 
 function studyPackModeOutputPrompt(selected) {
@@ -2077,15 +2099,22 @@ function studyPackModeExamplePrompt(selected) {
 }
 
 function studyPackContextSystemPrompt() {
-  const selected = selectedStudyPackMode();
+  const selectedItems = selectedStudyPackModes();
+  const selected = selectedItems[0] || selectedStudyPackMode();
   const packs = installedStudyPacks().filter((pack) => pack.modes?.length);
-  if (!selected && packs.length === 0) return "";
+  if (selectedItems.length === 0 && !selected && packs.length === 0) return "";
   const names = packs.map((pack) => t(pack.nameKey) || pack.id).join("、");
   const activeLine = names ? `\n有効な教材パック: ${names}\n` : "";
-  if (!selected) {
+  if (selectedItems.length === 0 && !selected) {
     return `${activeLine}ユーザーが文章添削、論理チェック、レポート改善を求めた場合だけ、教材パックの考え方を参考にしてください。教材パック本体は書き換えず、ユーザーの修正は学習セットに保存します。\n`;
   }
-  return `${activeLine}教材パック「${t(selected.pack.nameKey) || selected.pack.id}」のモード「${t(selected.mode.nameKey) || selected.mode.id}」を次の回答に使います。\n指示: ${selected.mode.prompt}\n${studyPackModeOutputPrompt(selected)}\n${studyPackModeExamplePrompt(selected)}教材パック本体は書き換えません。\n`;
+  const selectedForPrompt = selectedItems.length > 0 ? selectedItems : [selected];
+  const modePrompts = selectedForPrompt.map((item, index) => {
+    const packName = t(item.pack.nameKey) || item.pack.id;
+    const modeName = t(item.mode.nameKey) || item.mode.id;
+    return `教材${index + 1}: ${packName} / ${modeName}\n指示: ${item.mode.prompt}\n${studyPackModeOutputPrompt(item)}\n${studyPackModeExamplePrompt(item)}`;
+  }).join("\n---\n");
+  return `${activeLine}選択された教材パックのモードを次の回答に使います。\n${modePrompts}複数の教材が選択されている場合は、矛盾しない範囲で統合し、最終回答を1つにまとめてください。教材パック本体は書き換えません。\n`;
 }
 
 function renderCharacterPanel() {
@@ -2719,32 +2748,115 @@ function renderPendingImages() {
 function renderStudyPackModeRow() {
   if (!els.studyPackModeRow) return;
   const packs = installedStudyPacks().filter((pack) => pack.modes?.length);
+  els.studyPackModeRow.querySelectorAll(".study-pack-picker[open]").forEach((picker) => {
+    picker.open = false;
+  });
   els.studyPackModeRow.innerHTML = "";
   if (packs.length === 0) {
     state.selectedStudyPackMode = "";
+    state.selectedStudyPackModes = [];
     els.studyPackModeRow.hidden = true;
     return;
   }
-  const label = document.createElement("span");
-  label.className = "study-pack-mode-label";
-  label.textContent = t("studyPack.modeLabel");
-  els.studyPackModeRow.appendChild(label);
-  packs.forEach((pack) => {
-    pack.modes.forEach((mode) => {
-      const value = `${pack.id}:${mode.id}`;
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "study-pack-mode-button";
-      button.textContent = t(mode.shortKey) || t(mode.nameKey) || mode.id;
-      button.dataset.active = state.selectedStudyPackMode === value ? "true" : "false";
-      button.setAttribute("aria-pressed", state.selectedStudyPackMode === value ? "true" : "false");
-      button.addEventListener("click", () => {
-        state.selectedStudyPackMode = state.selectedStudyPackMode === value ? "" : value;
-        renderStudyPackModeRow();
-      });
-      els.studyPackModeRow.appendChild(button);
-    });
+  const selectionModel = window.GEMMA_MANAGEMENT?.studyPackMultiSelectionModel?.({
+    packs,
+    selectedValues: state.selectedStudyPackModes,
+    t,
+  }) || { groups: [], selectedCount: 0, summaryLabel: t("studyPack.selectPack") };
+  const validValues = new Set(selectionModel.groups.flatMap((group) => group.modes.map((mode) => mode.value)));
+  state.selectedStudyPackModes = (state.selectedStudyPackModes || []).filter((value) => validValues.has(value));
+  state.selectedStudyPackMode = state.selectedStudyPackModes[0] || "";
+
+  const details = document.createElement("details");
+  details.className = "study-pack-picker";
+  const summary = document.createElement("summary");
+  summary.className = "study-pack-picker-summary";
+  const updatePickerSummary = () => {
+    const count = state.selectedStudyPackModes?.length || 0;
+    summary.textContent = count > 0
+      ? t("studyPack.selectedCount", { count })
+      : t("studyPack.selectPack");
+    const clear = details.querySelector(".study-pack-picker-clear");
+    if (clear) clear.disabled = count === 0;
+  };
+  updatePickerSummary();
+  details.appendChild(summary);
+
+  const panel = document.createElement("div");
+  panel.className = "study-pack-picker-panel";
+  const header = document.createElement("div");
+  header.className = "study-pack-picker-header";
+  const headerTitle = document.createElement("span");
+  headerTitle.textContent = t("studyPack.menuLabel");
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "study-pack-picker-close";
+  closeButton.setAttribute("aria-label", t("common.close"));
+  closeButton.textContent = "×";
+  closeButton.addEventListener("click", () => {
+    details.open = false;
   });
+  header.append(headerTitle, closeButton);
+  panel.appendChild(header);
+  selectionModel.groups.forEach((group) => {
+    const groupEl = document.createElement("fieldset");
+    groupEl.className = "study-pack-picker-group";
+    const legend = document.createElement("legend");
+    legend.textContent = group.label;
+    groupEl.appendChild(legend);
+    group.modes.forEach((mode) => {
+      const item = document.createElement("label");
+      item.className = "study-pack-picker-item";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = mode.value;
+      checkbox.checked = mode.checked;
+      const text = document.createElement("span");
+      text.textContent = mode.label;
+      checkbox.addEventListener("change", () => {
+        state.selectedStudyPackModes = window.GEMMA_MANAGEMENT?.toggleStudyPackModeValue?.(
+          state.selectedStudyPackModes,
+          mode.value,
+          checkbox.checked,
+        ) || [];
+        state.selectedStudyPackMode = state.selectedStudyPackModes[0] || "";
+        updatePickerSummary();
+      });
+      item.append(checkbox, text);
+      groupEl.appendChild(item);
+    });
+    panel.appendChild(groupEl);
+  });
+  const actions = document.createElement("div");
+  actions.className = "study-pack-picker-actions";
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "study-pack-picker-clear";
+  clearButton.textContent = t("studyPack.clearSelection");
+  clearButton.disabled = selectionModel.selectedCount === 0;
+  clearButton.addEventListener("click", () => {
+    state.selectedStudyPackModes = [];
+    state.selectedStudyPackMode = "";
+    panel.querySelectorAll(".study-pack-picker-item input").forEach((input) => {
+      input.checked = false;
+    });
+    updatePickerSummary();
+  });
+  actions.appendChild(clearButton);
+  panel.appendChild(actions);
+  details.appendChild(panel);
+  const closeOnOutsideClick = (event) => {
+    if (!details.open || details.contains(event.target)) return;
+    details.open = false;
+  };
+  details.addEventListener("toggle", () => {
+    if (details.open) {
+      document.addEventListener("pointerdown", closeOnOutsideClick);
+    } else {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+    }
+  });
+  els.studyPackModeRow.appendChild(details);
   els.studyPackModeRow.hidden = false;
 }
 
@@ -2899,7 +3011,7 @@ function explicitlyRequestsWorkspaceSave(text) {
 }
 
 function shouldKeepStudyPackReplyInChat(text) {
-  return Boolean(selectedStudyPackMode()) && !explicitlyRequestsWorkspaceSave(text);
+  return selectedStudyPackModes().length > 0 && !explicitlyRequestsWorkspaceSave(text);
 }
 
 function isStudyPackRewriteRequest(text) {
@@ -3142,7 +3254,8 @@ function modelReasonText(reasonKey) {
 function chatRequestOptions(text, hasImages = false) {
   const translationMode = isTranslationRequest(text);
   const codingMode = !translationMode && isWorkspaceBuildRequest(text);
-  const lightweightMode = !codingMode && !translationMode && isLightweightChatRequest(text, hasImages);
+  const hasStudyPackSelection = selectedStudyPackModes().length > 0 || Boolean(selectedStudyPackMode());
+  const lightweightMode = !hasStudyPackSelection && !codingMode && !translationMode && isLightweightChatRequest(text, hasImages);
   const mode = effectiveResponseMode(text, codingMode);
   const thinkingMode = effectiveThinkingMode(text, codingMode, mode);
   const maxTokens = numberValue(els.numPredict, 96);
@@ -3200,7 +3313,7 @@ function chatRequestOptions(text, hasImages = false) {
       temperature: Math.min(numberValue(els.temperature, 0.7), 0.5),
       topP: Math.min(numberValue(els.topP, 0.9), 0.8),
       topK: Math.min(numberValue(els.topK, 40), 20),
-      numPredict: Math.min(Math.max(maxTokens, 64), 128),
+      numPredict: hasStudyPackSelection ? Math.max(maxTokens, 512) : Math.min(Math.max(maxTokens, 64), 128),
       numCtx: Math.min(Math.max(contextSize, 1024), 2048),
       historyTurns: 1,
       keepAlive: "30m",
@@ -3248,8 +3361,8 @@ function chatRequestOptions(text, hasImages = false) {
     temperature: numberValue(els.temperature, 0.7),
     topP: numberValue(els.topP, 0.9),
     topK: numberValue(els.topK, 40),
-    numPredict: searchBudget.numPredict,
-    numCtx: searchBudget.numCtx,
+    numPredict: hasStudyPackSelection ? Math.max(searchBudget.numPredict, 768) : searchBudget.numPredict,
+    numCtx: hasStudyPackSelection ? Math.max(searchBudget.numCtx, 4096) : searchBudget.numCtx,
     historyTurns: searchBudget.historyTurns,
     keepAlive: codingMode ? "20m" : "15m",
     think: false,
@@ -4061,9 +4174,9 @@ async function sendMessage(text) {
     sizeLabel: file.sizeLabel,
   }));
   const requestOptions = chatRequestOptions(text, images.length > 0);
-  const appliedStudyPackMode = state.selectedStudyPackMode;
-  const appliedStudyPackSelection = selectedStudyPackMode();
-  const appliedStudyPackModeLabel = studyPackModeDisplayLabel(appliedStudyPackSelection);
+  const appliedStudyPackModes = [...(state.selectedStudyPackModes || [])];
+  const appliedStudyPackSelections = selectedStudyPackModes();
+  const appliedStudyPackModeLabel = studyPackModesDisplayLabel(appliedStudyPackSelections);
   const userMessage = { role: "user", content: text, images, imagePreviews, attachments };
   session.messages.push(userMessage);
   const memoryCandidate = window.GEMMA_CHARACTER?.memoryCandidateFromText?.(text, {
@@ -4423,7 +4536,8 @@ async function sendMessage(text) {
       });
     }
   } finally {
-    if (appliedStudyPackMode && state.selectedStudyPackMode === appliedStudyPackMode) {
+    if (appliedStudyPackModes.length > 0 && appliedStudyPackModes.every((value, index) => state.selectedStudyPackModes?.[index] === value)) {
+      state.selectedStudyPackModes = [];
       state.selectedStudyPackMode = "";
     }
     state.abortController = null;

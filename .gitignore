@@ -34,6 +34,9 @@ models/
 .codegraph/
 .gemma4-data/
 
+# Local private user/company content. Never commit these.
+private-content/
+
 # Temporary downloads
 downloads/
 dist/

@@ -44,6 +44,7 @@ DOC_FILES = [
     "docs/github-release-guide.ja.md",
     "docs/release-checklist.ja.md",
     "docs/native-installers.ja.md",
+    "docs/study-pack-import-guide.ja.md",
 ]
 
 SCRIPT_FILES = [

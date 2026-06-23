@@ -53,6 +53,7 @@ copy_common() {
   copy_if_exists "docs/github-release-guide.ja.md" "$target/docs/"
   copy_if_exists "docs/release-checklist.ja.md" "$target/docs/"
   copy_if_exists "docs/native-installers.ja.md" "$target/docs/"
+  copy_if_exists "docs/study-pack-import-guide.ja.md" "$target/docs/"
 
   copy_if_exists "scripts/setup-mac.sh" "$target/scripts/"
   copy_if_exists "scripts/setup-windows.ps1" "$target/scripts/"

@@ -1,4 +1,5 @@
 window.GEMMA_MANAGEMENT = (() => {
+  const IMPORTED_STUDY_PACK_DEFINITIONS_KEY = "gemma4.importedStudyPackDefinitions";
   const STUDY_PACK_DEFINITIONS = {
     "sample-basic": {
       id: "sample-basic",
@@ -99,15 +100,221 @@ window.GEMMA_MANAGEMENT = (() => {
   }
 
   function studyPackDefinitions() {
-    return STUDY_PACK_DEFINITIONS;
+    return {
+      ...STUDY_PACK_DEFINITIONS,
+      ...loadImportedStudyPackDefinitions(),
+    };
   }
 
   function studyPackById(id) {
-    return STUDY_PACK_DEFINITIONS[id] || null;
+    return studyPackDefinitions()[id] || null;
   }
 
   function installedStudyPackDefinitions(studyPacks = {}) {
-    return Object.values(STUDY_PACK_DEFINITIONS).filter((pack) => Boolean(studyPacks?.[pack.id]?.installed));
+    return Object.values(studyPackDefinitions()).filter((pack) => Boolean(studyPacks?.[pack.id]?.installed));
+  }
+
+  function studyPackMenuGroups({ packs = [], selectedValue = "", t }) {
+    return packs.map((pack) => ({
+      id: pack.id,
+      label: t?.(pack.nameKey) || pack.name || pack.id,
+      modes: (pack.modes || []).map((mode) => {
+        const value = `${pack.id}:${mode.id}`;
+        return {
+          id: mode.id,
+          value,
+          label: t?.(mode.shortKey) || t?.(mode.nameKey) || mode.name || mode.id,
+          active: selectedValue === value,
+        };
+      }),
+    })).filter((group) => group.modes.length > 0);
+  }
+
+  function studyPackSelectionModel({ packs = [], selectedPackId = "", selectedValue = "", t }) {
+    const groups = studyPackMenuGroups({ packs, selectedValue, t });
+    const selectedValuePackId = String(selectedValue || "").split(":")[0] || "";
+    const hasPack = (packId) => groups.some((group) => group.id === packId);
+    const activePackId = hasPack(selectedPackId)
+      ? selectedPackId
+      : hasPack(selectedValuePackId)
+        ? selectedValuePackId
+        : "";
+    const activeGroup = groups.find((group) => group.id === activePackId) || null;
+    return {
+      activePackId,
+      packOptions: groups.map((group) => ({
+        id: group.id,
+        value: group.id,
+        label: group.label,
+        active: group.id === activePackId,
+      })),
+      modeOptions: activeGroup?.modes || [],
+    };
+  }
+
+  function studyPackMultiSelectionModel({ packs = [], selectedValues = [], t }) {
+    const selectedSet = new Set((selectedValues || []).filter(Boolean));
+    const groups = studyPackMenuGroups({ packs, selectedValue: "", t }).map((group) => ({
+      ...group,
+      modes: group.modes.map((mode) => ({
+        ...mode,
+        checked: selectedSet.has(mode.value),
+      })),
+    }));
+    const selectedCount = groups.reduce(
+      (count, group) => count + group.modes.filter((mode) => mode.checked).length,
+      0,
+    );
+    return {
+      groups,
+      selectedCount,
+      summaryLabel: selectedCount > 0
+        ? `教材パック ${selectedCount}件`
+        : "教材パックを選択",
+    };
+  }
+
+  function toggleStudyPackModeValue(selectedValues = [], value = "", checked = false) {
+    const selected = new Set((selectedValues || []).filter(Boolean));
+    if (checked) selected.add(value);
+    else selected.delete(value);
+    return Array.from(selected);
+  }
+
+  function loadImportedStudyPackDefinitions() {
+    return readJsonStorage(IMPORTED_STUDY_PACK_DEFINITIONS_KEY, {});
+  }
+
+  function saveImportedStudyPackDefinitions(definitions) {
+    localStorage.setItem(IMPORTED_STUDY_PACK_DEFINITIONS_KEY, JSON.stringify(definitions || {}));
+  }
+
+  function filePathOf(file) {
+    return String(file?.webkitRelativePath || file?.name || "").replace(/^\/+/, "");
+  }
+
+  function normalizePackRelativePath(path) {
+    const clean = String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    const parts = clean.split("/").filter(Boolean);
+    const packIndex = parts.findIndex((part) => part === "pack.json");
+    if (packIndex >= 0) return parts.slice(packIndex).join("/");
+    if (parts.length > 1 && parts[0].endsWith("-pack")) return parts.slice(1).join("/");
+    return parts.join("/");
+  }
+
+  async function readStudyPackFiles(files) {
+    const map = new Map();
+    for (const file of Array.from(files || [])) {
+      const normalized = normalizePackRelativePath(filePathOf(file));
+      if (!normalized) continue;
+      map.set(normalized, await file.text());
+    }
+    return map;
+  }
+
+  function importedStudyPackNameKey(id) {
+    return `importedStudyPack.${id}.name`;
+  }
+
+  function importedStudyPackHelpKey(id) {
+    return `importedStudyPack.${id}.help`;
+  }
+
+  function importedStudyPackModeNameKey(packId, modeId) {
+    return `importedStudyPack.${packId}.mode.${modeId}.name`;
+  }
+
+  function importedStudyPackModeShortKey(packId, modeId) {
+    return `importedStudyPack.${packId}.mode.${modeId}.short`;
+  }
+
+  function registerImportedStudyPackTranslations(definition) {
+    window.GEMMA_IMPORTED_STUDY_PACK_LABELS = window.GEMMA_IMPORTED_STUDY_PACK_LABELS || {};
+    window.GEMMA_IMPORTED_STUDY_PACK_LABELS[definition.nameKey] = definition.name || definition.id;
+    window.GEMMA_IMPORTED_STUDY_PACK_LABELS[definition.helpKey] = definition.description || "";
+    (definition.modes || []).forEach((mode) => {
+      window.GEMMA_IMPORTED_STUDY_PACK_LABELS[mode.nameKey] = mode.name || mode.id;
+      window.GEMMA_IMPORTED_STUDY_PACK_LABELS[mode.shortKey] = mode.shortName || mode.name || mode.id;
+    });
+  }
+
+  function registerImportedStudyPackTranslationsForAll() {
+    Object.values(loadImportedStudyPackDefinitions()).forEach(registerImportedStudyPackTranslations);
+  }
+
+  function validateImportedStudyPackManifest(manifest) {
+    if (!manifest || typeof manifest !== "object") return "pack.json が正しくありません。";
+    if (!String(manifest.id || "").trim()) return "pack.json に id が必要です。";
+    if (STUDY_PACK_DEFINITIONS[manifest.id]) return "内蔵教材パックと同じ id は使えません。";
+    if (!String(manifest.name || "").trim()) return "pack.json に name が必要です。";
+    if (!Array.isArray(manifest.modes) || manifest.modes.length === 0) return "pack.json に modes が必要です。";
+    return "";
+  }
+
+  function buildImportedStudyPackDefinition({ manifest, fileMap }) {
+    const packId = String(manifest.id).trim();
+    const modes = manifest.modes.map((mode) => {
+      const modeId = String(mode.id || "").trim();
+      const promptFile = String(mode.promptFile || "").trim();
+      const prompt = String(mode.prompt || (promptFile ? fileMap.get(promptFile) : "") || "").trim();
+      if (!modeId || !prompt) return null;
+      return {
+        id: modeId,
+        name: String(mode.name || modeId),
+        nameKey: importedStudyPackModeNameKey(packId, modeId),
+        shortKey: importedStudyPackModeShortKey(packId, modeId),
+        prompt,
+        promptFile: promptFile || "",
+        examples: Array.isArray(mode.examples) ? mode.examples : [],
+      };
+    }).filter(Boolean);
+    if (modes.length === 0) return null;
+    return {
+      id: packId,
+      version: String(manifest.version || "0.1.0"),
+      name: String(manifest.name || packId),
+      nameKey: importedStudyPackNameKey(packId),
+      helpKey: importedStudyPackHelpKey(packId),
+      description: String(manifest.description || ""),
+      visibility: String(manifest.visibility || "private"),
+      private: String(manifest.visibility || "private") === "private",
+      imported: true,
+      importedAt: new Date().toISOString(),
+      modes,
+    };
+  }
+
+  async function importStudyPackFromFiles({ state, files, t }) {
+    const fileMap = await readStudyPackFiles(files);
+    const manifestText = fileMap.get("pack.json");
+    if (!manifestText) {
+      return { ok: false, error: t?.("management.studyPackImportMissingManifest") || "pack.json が見つかりません。" };
+    }
+    let manifest = null;
+    try {
+      manifest = JSON.parse(manifestText);
+    } catch {
+      return { ok: false, error: t?.("management.studyPackImportInvalidJson") || "pack.json のJSONが正しくありません。" };
+    }
+    const validationError = validateImportedStudyPackManifest(manifest);
+    if (validationError) return { ok: false, error: validationError };
+    const definition = buildImportedStudyPackDefinition({ manifest, fileMap });
+    if (!definition) {
+      return { ok: false, error: t?.("management.studyPackImportMissingPrompt") || "読み込めるモード本文がありません。" };
+    }
+    const definitions = loadImportedStudyPackDefinitions();
+    definitions[definition.id] = definition;
+    saveImportedStudyPackDefinitions(definitions);
+    registerImportedStudyPackTranslations(definition);
+    state.studyPacks = state.studyPacks || {};
+    state.studyPacks[definition.id] = {
+      installed: true,
+      version: definition.version,
+      status: "ready",
+      source: "imported",
+    };
+    saveStudyPacks(state.studyPacks);
+    return { ok: true, definition };
   }
 
   function loadPlugins() {
@@ -368,7 +575,46 @@ window.GEMMA_MANAGEMENT = (() => {
   }
 
   function renderStudyPacksPanel({ state, t }) {
+    registerImportedStudyPackTranslationsForAll();
     document.querySelectorAll("[data-study-pack-toggle]").forEach((button) => {
+      const packId = button.dataset.studyPackToggle || "";
+      const installed = Boolean(state.studyPacks?.[packId]?.installed);
+      button.textContent = installed ? t("management.remove") : t("management.add");
+      button.setAttribute("aria-pressed", String(installed));
+    });
+    const list = document.querySelector("#imported-study-pack-list");
+    if (!list) return;
+    const imported = Object.values(loadImportedStudyPackDefinitions());
+    list.innerHTML = "";
+    imported.forEach((pack) => {
+      const card = document.createElement("div");
+      card.className = "management-card study-pack-card";
+      const body = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = t(pack.nameKey) || pack.name || pack.id;
+      const help = document.createElement("span");
+      help.textContent = t(pack.helpKey) || pack.description || t("management.studyPackImportedHelp");
+      const modeList = document.createElement("div");
+      modeList.className = "study-pack-mode-list";
+      modeList.setAttribute("aria-label", t("management.studyPackModes"));
+      (pack.modes || []).forEach((mode) => {
+        const item = document.createElement("span");
+        item.textContent = t(mode.shortKey) || t(mode.nameKey) || mode.id;
+        modeList.appendChild(item);
+      });
+      const source = document.createElement("small");
+      source.textContent = pack.private
+        ? t("management.studyPackPrivateImported")
+        : t("management.studyPackImported");
+      body.append(title, help, modeList, source);
+      const button = document.createElement("button");
+      button.className = "ghost-button";
+      button.type = "button";
+      button.dataset.studyPackToggle = pack.id;
+      card.append(body, button);
+      list.appendChild(card);
+    });
+    list.querySelectorAll("[data-study-pack-toggle]").forEach((button) => {
       const packId = button.dataset.studyPackToggle || "";
       const installed = Boolean(state.studyPacks?.[packId]?.installed);
       button.textContent = installed ? t("management.remove") : t("management.add");
@@ -544,11 +790,23 @@ window.GEMMA_MANAGEMENT = (() => {
       if (els.studyPacksPanel) els.studyPacksPanel.hidden = true;
       syncManagementLayout({ els });
     });
-    document.querySelectorAll("[data-study-pack-toggle]").forEach((button) => {
-      button.addEventListener("click", () => {
-        toggleStudyPack({ state, t, packId: button.dataset.studyPackToggle || "" });
-        onPluginsChanged?.();
-      });
+    els.studyPacksPanel?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-study-pack-toggle]");
+      if (!button) return;
+      toggleStudyPack({ state, t, packId: button.dataset.studyPackToggle || "" });
+      onPluginsChanged?.();
+    });
+    els.studyPackImportButton?.addEventListener("click", () => els.studyPackImportInput?.click());
+    els.studyPackImportInput?.addEventListener("change", async () => {
+      const result = await importStudyPackFromFiles({ state, files: els.studyPackImportInput.files, t });
+      if (els.studyPackImportStatus) {
+        els.studyPackImportStatus.textContent = result.ok
+          ? t("management.studyPackImportDone", { name: t(result.definition.nameKey) || result.definition.name })
+          : result.error;
+      }
+      if (els.studyPackImportInput) els.studyPackImportInput.value = "";
+      renderStudyPacksPanel({ state, t });
+      onPluginsChanged?.();
     });
 
     els.trainingManagementToggle?.addEventListener("click", () => {
@@ -605,9 +863,16 @@ window.GEMMA_MANAGEMENT = (() => {
   return {
     loadStudyPacks,
     saveStudyPacks,
+    loadImportedStudyPackDefinitions,
+    saveImportedStudyPackDefinitions,
     studyPackDefinitions,
     studyPackById,
     installedStudyPackDefinitions,
+    studyPackMenuGroups,
+    studyPackSelectionModel,
+    studyPackMultiSelectionModel,
+    toggleStudyPackModeValue,
+    importStudyPackFromFiles,
     loadPlugins,
     savePlugins,
     formatPluginSearchCapabilities,

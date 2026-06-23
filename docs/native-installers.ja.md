@@ -70,7 +70,7 @@ ZIP 版は従来どおり `.bat` を直接起動する予備配布です。
 ## GitHub Actionsで作る
 
 `.github/workflows/build-installers.yml` を手動実行すると、以下の artifact ができます。
-手動実行時は `version` に `0.8.189` のようなアプリ版を入れてください。Actions の実行名、artifact 名、ジョブ概要に同じバージョンが表示されます。
+手動実行時は `version` に `0.8.190` のようなアプリ版を入れてください。Actions の実行名、artifact 名、ジョブ概要に同じバージョンが表示されます。
 
 - `gemma4-mac-pkg-X.X.X`
 - `gemma4-windows-msi-X.X.X`

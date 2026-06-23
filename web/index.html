@@ -9,7 +9,7 @@
         window.location.replace("http://127.0.0.1:54876/");
       }
     </script>
-    <link rel="stylesheet" href="/styles.css?v=0.8.189" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.190" />
   </head>
   <body>
     <div class="app-shell">
@@ -19,7 +19,7 @@
           <div class="brand-copy">
             <div class="brand-title">Gemma 4</div>
             <div class="brand-subtitle" data-i18n="brand.subtitle">12B ローカル</div>
-            <div class="brand-version" id="sidebar-app-version">アプリ版 0.8.189</div>
+            <div class="brand-version" id="sidebar-app-version">アプリ版 0.8.190</div>
           </div>
           <button class="sidebar-collapse-button" id="sidebar-collapse" type="button" title="サイドバーを隠す" aria-label="サイドバーを隠す" data-i18n-title="sidebar.hide" data-i18n-aria-label="sidebar.hide">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -564,6 +564,17 @@
             </div>
             <button class="ghost-button" type="button" data-study-pack-toggle="ja-report-writing-basic" data-i18n="management.add">追加</button>
           </div>
+          <div class="management-card study-pack-card">
+            <div>
+              <strong data-i18n="management.importStudyPack">外部教材データをインポート</strong>
+              <span data-i18n="management.importStudyPackHelp">pack.json を含む教材パックフォルダーを、この端末だけに追加します。</span>
+              <small data-i18n="management.importStudyPackNote">private教材は公開一覧に出さず、修正例は学習セットに保存します。</small>
+              <input id="study-pack-import-input" type="file" webkitdirectory multiple hidden />
+              <div class="management-card-meta" id="study-pack-import-status" aria-live="polite"></div>
+            </div>
+            <button class="ghost-button" id="study-pack-import-button" type="button" data-i18n="management.import">インポート</button>
+          </div>
+          <div id="imported-study-pack-list"></div>
           <p class="management-note" data-i18n="management.studyPacksNote">教材パックは配布教材を扱う場所です。あなたの修正例は「学習セット」に保存されます。</p>
         </section>
 
@@ -831,25 +842,25 @@
       </section>
     </div>
 
-  <script src="/i18n.js?v=0.8.189"></script>
-  <script src="/utils.js?v=0.8.189"></script>
-  <script src="/translation.js?v=0.8.189"></script>
-  <script src="/local-tools.js?v=0.8.189"></script>
-  <script src="/weather.js?v=0.8.189"></script>
-  <script src="/image-tools.js?v=0.8.189"></script>
-  <script src="/asr.js?v=0.8.189"></script>
-  <script src="/attachments.js?v=0.8.189"></script>
-  <script src="/composer.js?v=0.8.189"></script>
-  <script src="/workspace.js?v=0.8.189"></script>
-  <script src="/training.js?v=0.8.189"></script>
-  <script src="/character.js?v=0.8.189"></script>
-  <script src="/models.js?v=0.8.189"></script>
-  <script src="/messages.js?v=0.8.189"></script>
-  <script src="/sidebar.js?v=0.8.189"></script>
-  <script src="/settings.js?v=0.8.189"></script>
-  <script src="/management.js?v=0.8.189"></script>
-  <script src="/router.js?v=0.8.189"></script>
-  <script src="/search.js?v=0.8.189"></script>
-  <script src="/app.js?v=0.8.189"></script>
+  <script src="/i18n.js?v=0.8.190"></script>
+  <script src="/utils.js?v=0.8.190"></script>
+  <script src="/translation.js?v=0.8.190"></script>
+  <script src="/local-tools.js?v=0.8.190"></script>
+  <script src="/weather.js?v=0.8.190"></script>
+  <script src="/image-tools.js?v=0.8.190"></script>
+  <script src="/asr.js?v=0.8.190"></script>
+  <script src="/attachments.js?v=0.8.190"></script>
+  <script src="/composer.js?v=0.8.190"></script>
+  <script src="/workspace.js?v=0.8.190"></script>
+  <script src="/training.js?v=0.8.190"></script>
+  <script src="/character.js?v=0.8.190"></script>
+  <script src="/models.js?v=0.8.190"></script>
+  <script src="/messages.js?v=0.8.190"></script>
+  <script src="/sidebar.js?v=0.8.190"></script>
+  <script src="/settings.js?v=0.8.190"></script>
+  <script src="/management.js?v=0.8.190"></script>
+  <script src="/router.js?v=0.8.190"></script>
+  <script src="/search.js?v=0.8.190"></script>
+  <script src="/app.js?v=0.8.190"></script>
   </body>
 </html>

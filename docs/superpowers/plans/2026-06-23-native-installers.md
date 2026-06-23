@@ -131,7 +131,7 @@ bash scripts/make-mac-pkg.sh
 - [ ] **Step 3: Inspect package payload**
 
 ```bash
-pkgutil --payload-files dist/Gemma4_12B-v0.8.189-mac.pkg | sed -n '1,40p'
+pkgutil --payload-files dist/Gemma4_12B-v0.8.190-mac.pkg | sed -n '1,40p'
 ```
 
 - [ ] **Step 4: Report MSI status**
