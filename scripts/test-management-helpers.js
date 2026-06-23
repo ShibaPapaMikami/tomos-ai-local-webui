@@ -141,6 +141,10 @@ assert.equal(
   studyPackMenuGroups({ packs: [codingPack], selectedValue: "coding-assist-basic:code-review", t })[0].modes[0].label,
   "コードレビュー",
 );
+const indexHtml = fs.readFileSync("web/index.html", "utf8");
+assert.match(indexHtml, /data-study-pack-toggle="coding-assist-basic"/);
+assert.match(indexHtml, /data-i18n="management\.codingAssistPack"/);
+assert.match(indexHtml, /data-i18n="studyPack\.mode\.releaseCheckShort"/);
 
 async function runImportTests() {
   const makeFile = (name, content) => ({
