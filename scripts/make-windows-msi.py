@@ -23,6 +23,8 @@ DIST = ROOT / "dist"
 STAGING_ROOT = DIST / "msi-staging" / "Gemma4_12B"
 WIX_DIR = DIST / "msi"
 WXS_PATH = WIX_DIR / "Gemma4_12B.wxs"
+WINDOWS_LAUNCHER_SOURCE = ROOT / "tools" / "windows-launcher" / "Gemma4Launcher.cs"
+WINDOWS_LAUNCHER_EXE = "Gemma4_12B_Launcher.exe"
 
 COMMON_FILES = [
     "server.py",
@@ -64,6 +66,56 @@ WINDOWS_FILES = [
     "ComfyUI_Start.bat",
     "Start_Windows.bat",
 ]
+
+
+def find_csc() -> str | None:
+    csc = shutil.which("csc")
+    if csc:
+        return csc
+
+    windir = Path(os.environ.get("WINDIR", r"C:\Windows"))
+    candidates = [
+        windir / "Microsoft.NET" / "Framework64" / "v4.0.30319" / "csc.exe",
+        windir / "Microsoft.NET" / "Framework" / "v4.0.30319" / "csc.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def build_or_stub_windows_launcher(target_root: Path) -> None:
+    if not WINDOWS_LAUNCHER_SOURCE.exists():
+        raise SystemExit(f"Windows launcher source not found: {WINDOWS_LAUNCHER_SOURCE}")
+
+    target = target_root / WINDOWS_LAUNCHER_EXE
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if os.name != "nt":
+        target.write_bytes(
+            b"Gemma4_12B Windows launcher placeholder for MSI XML verification.\n"
+        )
+        return
+
+    csc = find_csc()
+    if not csc:
+        raise SystemExit(
+            "Windows launcher のビルドに必要な csc.exe が見つかりません。"
+        )
+
+    subprocess.run(
+        [
+            csc,
+            "/nologo",
+            "/target:winexe",
+            "/optimize+",
+            "/reference:System.Windows.Forms.dll",
+            "/codepage:65001",
+            f"/out:{target}",
+            str(WINDOWS_LAUNCHER_SOURCE),
+        ],
+        check=True,
+    )
 
 
 def read_app_version() -> str:
@@ -116,6 +168,7 @@ def stage_payload() -> None:
         copy_file(rel_path, STAGING_ROOT)
     for rel_path in COMMON_DIRS:
         copy_dir(rel_path, STAGING_ROOT)
+    build_or_stub_windows_launcher(STAGING_ROOT)
 
 
 def wix_id(raw: str) -> str:
@@ -158,7 +211,14 @@ def emit_directory(path: Path, indent: str = "      ") -> tuple[list[str], list[
 def generate_wxs(version: str) -> None:
     WIX_DIR.mkdir(parents=True, exist_ok=True)
     directory_lines, component_refs = emit_directory(STAGING_ROOT)
-    refs = "\n".join(f'      <ComponentRef Id="{component_id}" />' for component_id in component_refs)
+    shortcut_component_refs = [
+        "Cmp_StartMenuShortcuts",
+        "Cmp_DesktopShortcut",
+    ]
+    refs = "\n".join(
+        f'      <ComponentRef Id="{component_id}" />'
+        for component_id in component_refs + shortcut_component_refs
+    )
     body = "\n".join(directory_lines)
     wxs = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
@@ -173,8 +233,51 @@ def generate_wxs(version: str) -> None:
     <StandardDirectory Id="ProgramFilesFolder">
       <Directory Id="INSTALLFOLDER" Name="Gemma4_12B">
 {body}
+        <Component Id="Cmp_StartMenuShortcuts" Guid="*">
+          <Shortcut
+            Id="StartMenuWebShortcut"
+            Directory="ApplicationProgramsFolder"
+            Name="Gemma4 12B Web UI"
+            Description="Gemma4 12B Web UIを起動"
+            Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
+            Arguments="web"
+            WorkingDirectory="INSTALLFOLDER" />
+          <Shortcut
+            Id="StartMenuAllShortcut"
+            Directory="ApplicationProgramsFolder"
+            Name="Gemma4 12B 全部起動"
+            Description="Gemma4 12B Web UIと周辺機能を起動"
+            Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
+            Arguments="all"
+            WorkingDirectory="INSTALLFOLDER" />
+          <Shortcut
+            Id="StartMenuStopShortcut"
+            Directory="ApplicationProgramsFolder"
+            Name="Gemma4 12B 重い処理を停止"
+            Description="Gemma4 12Bの重い処理を停止"
+            Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
+            Arguments="stop-heavy"
+            WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue Root="HKLM" Key="Software\\Gemma4_12B" Name="startMenuShortcuts" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+        <Component Id="Cmp_DesktopShortcut" Guid="*">
+          <Shortcut
+            Id="DesktopWebShortcut"
+            Directory="DesktopFolder"
+            Name="Gemma4 12B Web UI"
+            Description="Gemma4 12B Web UIを起動"
+            Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
+            Arguments="web"
+            WorkingDirectory="INSTALLFOLDER" />
+          <RegistryValue Root="HKLM" Key="Software\\Gemma4_12B" Name="desktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Gemma4 12B" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
     <Feature Id="MainFeature" Title="Gemma4_12B" Level="1">
 {refs}
     </Feature>

@@ -45,7 +45,7 @@ python3 scripts/make-windows-msi.py --no-build
 Windows で実際に MSI を作る場合:
 
 ```powershell
-dotnet tool install --global wix
+dotnet tool install --global wix --version 4.0.6
 python scripts/make-windows-msi.py
 ```
 
@@ -55,12 +55,25 @@ python scripts/make-windows-msi.py
 dist/Gemma4_12B-vX.X.X-windows.msi
 ```
 
+MSI でインストールすると、以下の起動ショートカットを作ります。
+
+- デスクトップ: `Gemma4 12B Web UI`
+- スタートメニュー: `Gemma4 12B > Gemma4 12B Web UI`
+- スタートメニュー: `Gemma4 12B > Gemma4 12B 全部起動`
+- スタートメニュー: `Gemma4 12B > Gemma4 12B 重い処理を停止`
+
+通常は `Gemma4 12B Web UI` から起動します。ComfyUI など周辺機能もまとめて起動したい場合だけ `全部起動` を使います。
+ショートカットは `Gemma4_12B_Launcher.exe` を起動します。このランチャーが内部で既存の `.bat` を呼び出すため、学生が Program Files 内の `.bat` を探す必要はありません。
+
+ZIP 版は従来どおり `.bat` を直接起動する予備配布です。
+
 ## GitHub Actionsで作る
 
 `.github/workflows/build-installers.yml` を手動実行すると、以下の artifact ができます。
+手動実行時は `version` に `0.8.189` のようなアプリ版を入れてください。Actions の実行名、artifact 名、ジョブ概要に同じバージョンが表示されます。
 
-- `gemma4-mac-pkg`
-- `gemma4-windows-msi`
+- `gemma4-mac-pkg-X.X.X`
+- `gemma4-windows-msi-X.X.X`
 
 Release に添付する基本セット:
 
