@@ -64,6 +64,7 @@ const labels = {
   "management.added": "追加済み",
   "management.addCandidate": "あとで検討に入れる",
   "management.addFirst": "先に追加してください",
+  "management.codingAssistPack": "コーディング支援",
   "management.reportWritingPack": "日本語レポート添削",
   "management.candidateSaved": "検討リスト入り（まだ使えません）",
   "management.notAdded": "未追加",
@@ -82,6 +83,7 @@ const labels = {
   "management.pluginSearchPdfFilenameOnly": "PDFはファイル名のみ",
   "management.pluginSearchImageOcrUnsupported": "画像内文字",
   "management.pluginSearchNone": "未確認",
+  "studyPack.mode.codeReviewShort": "コードレビュー",
   "studyPack.mode.makeReadableShort": "読みやすくする",
 };
 const t = (key, vars = {}) => Object.entries(vars).reduce(
@@ -130,6 +132,15 @@ assert.equal(pluginEls.codegraphPluginStatus.textContent, "フォルダー設定
 assert.match(searchCapabilitiesElement.textContent, /PDF本文/);
 assert.equal(ocrCandidateStatus.textContent, "検討リスト入り（まだ使えません）");
 assert.equal(ocrCandidateToggle.textContent, "検討リストから外す");
+
+const codingPack = studyPackById("coding-assist-basic");
+assert.equal(codingPack.nameKey, "management.codingAssistPack");
+assert.equal(codingPack.modes.length, 5);
+assert.equal(codingPack.modes[0].id, "code-review");
+assert.equal(
+  studyPackMenuGroups({ packs: [codingPack], selectedValue: "coding-assist-basic:code-review", t })[0].modes[0].label,
+  "コードレビュー",
+);
 
 async function runImportTests() {
   const makeFile = (name, content) => ({

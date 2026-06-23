@@ -73,6 +73,49 @@ window.GEMMA_MANAGEMENT = (() => {
         },
       ],
     },
+    "coding-assist-basic": {
+      id: "coding-assist-basic",
+      version: "0.1.0",
+      nameKey: "management.codingAssistPack",
+      helpKey: "management.codingAssistPackHelp",
+      modes: [
+        {
+          id: "code-review",
+          nameKey: "studyPack.mode.codeReview",
+          shortKey: "studyPack.mode.codeReviewShort",
+          prompt:
+            "コードや差分をレビューしてください。最初に重大度順の指摘を出し、ファイル名・関数名・該当箇所が分かる形で、バグ、破壊的変更、セキュリティ、テスト不足を優先してください。問題がない場合は、その旨と残るリスクだけを短く伝えてください。",
+        },
+        {
+          id: "bug-fix",
+          nameKey: "studyPack.mode.bugFix",
+          shortKey: "studyPack.mode.bugFixShort",
+          prompt:
+            "不具合の原因を切り分けて修正方針を出してください。症状、再現条件、原因候補、確認コマンド、最小修正、追加すべきテストの順で整理してください。事実として確認できていないことは推測として分けてください。",
+        },
+        {
+          id: "tdd",
+          nameKey: "studyPack.mode.tdd",
+          shortKey: "studyPack.mode.tddShort",
+          prompt:
+            "TDDの流れで支援してください。まず期待する振る舞いを1つの失敗するテストとして表現し、次に最小実装、最後にリファクタリング観点を示してください。既存テストや既存パターンを優先し、過剰な抽象化は避けてください。",
+        },
+        {
+          id: "error-debug",
+          nameKey: "studyPack.mode.errorDebug",
+          shortKey: "studyPack.mode.errorDebugShort",
+          prompt:
+            "エラーログや失敗したコマンドを解析してください。エラーの直接原因、根本原因の候補、追加で見るべきログやファイル、次に実行する確認コマンドを分けてください。ログにない事実を断定しないでください。",
+        },
+        {
+          id: "release-check",
+          nameKey: "studyPack.mode.releaseCheck",
+          shortKey: "studyPack.mode.releaseCheckShort",
+          prompt:
+            "リリース前チェックとして確認してください。変更概要、影響範囲、必要なテスト、バージョン更新、配布物、ロールバック方法、未解決リスクを短いチェックリストで整理してください。未確認項目は未確認として明記してください。",
+        },
+      ],
+    },
   };
 
   const PLUGIN_CANDIDATES = {
