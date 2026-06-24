@@ -6,6 +6,7 @@ import base64
 import binascii
 import importlib.util
 import json
+import locale
 import mimetypes
 import os
 import queue
@@ -35,7 +36,7 @@ from search_tools import build_search_context, search_web
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.192")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.193")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -49,6 +50,34 @@ CODING_MODEL_CANDIDATES = [
 ]
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
+
+SUBPROCESS_OUTPUT_ENCODINGS = tuple(dict.fromkeys(
+    encoding
+    for encoding in ("utf-8", locale.getpreferredencoding(False), "cp932", "shift_jis")
+    if encoding
+))
+
+
+def decode_subprocess_output(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    for encoding in SUBPROCESS_OUTPUT_ENCODINGS:
+        try:
+            return value.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return value.decode("utf-8", errors="replace")
+
+
+def iter_subprocess_output_lines(process):
+    if not process.stdout:
+        return
+    for raw_line in process.stdout:
+        yield decode_subprocess_output(raw_line).strip()
+
+
 ASR_MODEL = os.environ.get("GEMMA_ASR_MODEL", "").strip()
 ASR_RUNNER = os.environ.get("GEMMA_ASR_RUNNER", "").strip()
 ASR_WORKER = os.environ.get("GEMMA_ASR_WORKER", "").strip()
@@ -375,6 +404,8 @@ def asr_python_environment_status() -> dict[str, object]:
             capture_output=True,
             check=False,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
         if result.returncode == 0:
@@ -755,6 +786,8 @@ def ensure_wav_audio(audio_path: Path, mime_type: str) -> tuple[Path, Path | Non
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         timeout=60,
     )
@@ -805,6 +838,8 @@ def run_whisper_cpp_transcription(audio_path: Path, mime_type: str, model: str =
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=ASR_TIMEOUT,
             check=False,
         )
@@ -846,6 +881,8 @@ def start_asr_worker_process() -> subprocess.Popen:
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     ASR_WORKER_PROCESS = process
@@ -939,6 +976,8 @@ def run_asr_transcription(audio_base64: str, mime_type: str, model: str) -> dict
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=ASR_TIMEOUT,
                 check=False,
             )
@@ -1046,6 +1085,8 @@ def app_commit() -> str:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=2,
         )
         _GIT_COMMIT_CACHE = result.stdout.strip()
@@ -1403,6 +1444,8 @@ def pick_workspace_folder() -> dict:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
         if result.returncode != 0:
@@ -1555,6 +1598,8 @@ def available_tesseract_languages(tesseract_binary: str) -> list[str]:
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -1626,6 +1671,8 @@ def extract_image_ocr_text(path: Path) -> str:
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=90,
             check=False,
         )
@@ -1664,6 +1711,8 @@ def extract_pdf_ocr_text(path: Path) -> str:
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=90,
                 check=False,
             )
@@ -1685,19 +1734,24 @@ def extract_pdf_text(path: Path) -> str:
         text = extract_pdf_text_with_pdftotext(path)
         return (
             usable_pdf_text(text)
-            or usable_pdf_text(extract_pdf_text_with_mdls(path))
+            or extract_pdf_text_with_mdls(path)
             or extract_pdf_text_from_streams(path)
             or extract_pdf_ocr_text(path)
         )
     try:
         reader = PdfReader(str(path))
         text = "\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
-        return usable_pdf_text(text) or extract_pdf_text_from_streams(path) or extract_pdf_ocr_text(path)
+        return (
+            usable_pdf_text(text)
+            or extract_pdf_text_with_mdls(path)
+            or extract_pdf_text_from_streams(path)
+            or extract_pdf_ocr_text(path)
+        )
     except Exception:
         text = extract_pdf_text_with_pdftotext(path)
         return (
             usable_pdf_text(text)
-            or usable_pdf_text(extract_pdf_text_with_mdls(path))
+            or extract_pdf_text_with_mdls(path)
             or extract_pdf_text_from_streams(path)
             or extract_pdf_ocr_text(path)
         )
@@ -1713,6 +1767,8 @@ def extract_pdf_text_with_pdftotext(path: Path) -> str:
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=20,
             check=False,
         )
@@ -1733,6 +1789,8 @@ def extract_pdf_text_with_mdls(path: Path) -> str:
             cwd=ROOT,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=20,
             check=False,
         )
@@ -2309,6 +2367,8 @@ def node_check(source: str, suffix: str = ".js") -> list[str]:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=20,
         )
     except FileNotFoundError:
@@ -2829,18 +2889,15 @@ def run_model_pull(model: str) -> None:
             ["ollama", "pull", model],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
         )
         last_line = ""
-        if process.stdout:
-            for line in process.stdout:
-                last_line = line.strip() or last_line
-                if last_line:
-                    with MODEL_PULL_LOCK:
-                        job = MODEL_PULL_JOBS.get(model, {})
-                        job.update({"message": last_line})
-                        MODEL_PULL_JOBS[model] = job
+        for line in iter_subprocess_output_lines(process):
+            last_line = line or last_line
+            if last_line:
+                with MODEL_PULL_LOCK:
+                    job = MODEL_PULL_JOBS.get(model, {})
+                    job.update({"message": last_line})
+                    MODEL_PULL_JOBS[model] = job
         code = process.wait()
         with MODEL_PULL_LOCK:
             job = MODEL_PULL_JOBS.get(model, {})
@@ -2911,16 +2968,13 @@ def run_asr_setup() -> None:
             cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
         )
         last_line = ""
-        if process.stdout:
-            for line in process.stdout:
-                last_line = line.strip() or last_line
-                if last_line:
-                    with ASR_SETUP_LOCK:
-                        ASR_SETUP_JOB.update({"message": last_line})
+        for line in iter_subprocess_output_lines(process):
+            last_line = line or last_line
+            if last_line:
+                with ASR_SETUP_LOCK:
+                    ASR_SETUP_JOB.update({"message": last_line})
         code = process.wait()
         with ASR_SETUP_LOCK:
             ASR_SETUP_JOB.update({
@@ -2980,32 +3034,29 @@ def run_ocr_setup() -> None:
             cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
         )
         last_line = ""
-        if process.stdout:
-            for line in process.stdout:
-                last_line = line.strip() or last_line
-                if last_line:
-                    progress_match = re.match(r"^PROGRESS\s+(\d+)/(\d+)\s+(.+)$", last_line)
-                    with OCR_SETUP_LOCK:
-                        logs = list(OCR_SETUP_JOB.get("logs") or [])
-                        if progress_match:
-                            step = int(progress_match.group(1))
-                            total = max(int(progress_match.group(2)), 1)
-                            message = progress_match.group(3)
-                            logs.append(message)
-                            OCR_SETUP_JOB.update({
-                                "message": message,
-                                "step": step,
-                                "total": total,
-                                "percent": min(99, round(step / total * 100)),
-                                "logs": logs[-8:],
-                            })
-                        else:
-                            logs.append(last_line)
-                            OCR_SETUP_JOB.update({"message": last_line, "logs": logs[-8:]})
+        for line in iter_subprocess_output_lines(process):
+            last_line = line or last_line
+            if last_line:
+                progress_match = re.match(r"^PROGRESS\s+(\d+)/(\d+)\s+(.+)$", last_line)
+                with OCR_SETUP_LOCK:
+                    logs = list(OCR_SETUP_JOB.get("logs") or [])
+                    if progress_match:
+                        step = int(progress_match.group(1))
+                        total = max(int(progress_match.group(2)), 1)
+                        message = progress_match.group(3)
+                        logs.append(message)
+                        OCR_SETUP_JOB.update({
+                            "message": message,
+                            "step": step,
+                            "total": total,
+                            "percent": min(99, round(step / total * 100)),
+                            "logs": logs[-8:],
+                        })
+                    else:
+                        logs.append(last_line)
+                        OCR_SETUP_JOB.update({"message": last_line, "logs": logs[-8:]})
         code = process.wait()
         with OCR_SETUP_LOCK:
             logs = list(OCR_SETUP_JOB.get("logs") or [])

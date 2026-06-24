@@ -42,6 +42,8 @@ def ensure_wav(audio_path: Path, mime_type: str) -> tuple[Path, Path | None]:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if result.returncode != 0:

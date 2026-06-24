@@ -23,6 +23,8 @@ class WindowsMsiLauncherTest(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         cls.wxs = WXS_PATH.read_text(encoding="utf-8")
 

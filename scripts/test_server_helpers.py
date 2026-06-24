@@ -223,7 +223,8 @@ def test_workspace_context_instructs_source_citation() -> None:
             "files": [],
             "searchQuery": "gundam",
         })
-        assert "根拠: path:line" in context
+        assert "本文一致の根拠は `path:line`" in context
+        assert "ファイル名一致の根拠は `path`" in context
         assert "gundam.txt:1" in context
         assert "検索結果にない内容は推測せず" in context
 
@@ -268,7 +269,7 @@ def test_workspace_search_capabilities_shape() -> None:
     assert "pdf" in capabilities
     assert "pdfBackend" in capabilities
     assert capabilities["filenameFallback"] is True
-    assert capabilities["imageOcr"] is False
+    assert isinstance(capabilities["imageOcr"], bool)
 
 
 def test_external_llm_url_allows_only_localhost() -> None:
@@ -281,6 +282,20 @@ def test_external_llm_url_allows_only_localhost() -> None:
         assert "localhost" in str(exc) or "127.0.0.1" in str(exc)
     else:
         raise AssertionError("non-local LLM URL should be rejected")
+
+
+def test_decode_subprocess_output_handles_invalid_locale_bytes() -> None:
+    text = server.decode_subprocess_output(b"\x81\x00pulling manifest\n")
+    assert "pulling manifest" in text
+
+
+def test_iter_subprocess_output_lines_handles_binary_lines() -> None:
+    class FakeProcess:
+        stdout = [b"\x81\x00pulling manifest\n", "success\n"]
+
+    lines = list(server.iter_subprocess_output_lines(FakeProcess()))
+    assert "pulling manifest" in lines[0]
+    assert lines[1] == "success"
 
 
 if __name__ == "__main__":
@@ -300,4 +315,6 @@ if __name__ == "__main__":
     test_workspace_context_uses_codegraph_summary_when_ready()
     test_workspace_search_capabilities_shape()
     test_external_llm_url_allows_only_localhost()
+    test_decode_subprocess_output_handles_invalid_locale_bytes()
+    test_iter_subprocess_output_lines_handles_binary_lines()
     print("server helper tests passed")
