@@ -231,6 +231,39 @@ function installedOrCurrentModels({ models, task, state, modelIsInstalled }) {
   ));
 }
 
+const COMPOSER_OPTIONAL_MODEL_IDS = [
+  "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
+];
+
+function isComposerModelCandidate(model) {
+  if (!model) return false;
+  return (
+    model === "gemma4:12b" ||
+    model === "qwen2.5:3b" ||
+    model.includes("gemma-4-12B-agentic-fable5-composer2.5-v2") ||
+    model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")
+  );
+}
+
+function composerModelCandidates({ state, modelIsInstalled }) {
+  const installed = (models, task) => installedOrCurrentModels({
+    models,
+    task,
+    state,
+    modelIsInstalled,
+  });
+  return installed([
+    state.serverModels.chat,
+    state.serverModels.coding,
+    state.serverModels.translation,
+    ...state.serverModels.recommendedCoding,
+    ...COMPOSER_OPTIONAL_MODEL_IDS,
+    "gemma4:12b",
+    "qwen2.5:3b",
+    isComposerModelCandidate(state.composerModel) ? state.composerModel : "",
+  ].filter(isComposerModelCandidate), "chat");
+}
+
 function renderModelSettingsSelects({
   composerModelLabel,
   displayModelName,
@@ -281,14 +314,7 @@ function renderModelSettingsSelects({
     displayModelName,
     t,
   });
-  const composerModels = installed([
-    state.serverModels.chat,
-    state.serverModels.coding,
-    state.serverModels.translation,
-    ...state.serverModels.recommendedCoding,
-    "gemma4:12b",
-    "qwen2.5:3b",
-  ], "chat");
+  const composerModels = composerModelCandidates({ state, modelIsInstalled });
   renderComposerModelSelect({
     select: els.composerModel,
     models: composerModels,
@@ -324,6 +350,7 @@ function bindSettingsEvents({
 
 window.GEMMA_SETTINGS = {
   bindSettingsEvents,
+  composerModelCandidates,
   fetchModelPullStatus,
   installedOrCurrentModels,
   renderComposerModelSelect,

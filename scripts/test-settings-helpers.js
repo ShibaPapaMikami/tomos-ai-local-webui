@@ -6,9 +6,11 @@ const context = { window: {}, console };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("web/settings.js", "utf8"), context, { filename: "web/settings.js" });
 
-const { installedOrCurrentModels } = context.window.GEMMA_SETTINGS;
+const { composerModelCandidates, installedOrCurrentModels } = context.window.GEMMA_SETTINGS;
 
-const coder = "hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M";
+const agenticCoder = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-GGUF:Q4_K_M";
+const legacyCoder = "hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M";
+const hauhauBalanced = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
 const state = {
   composerModel: "qwen2.5:3b",
   modelOverrides: {
@@ -17,10 +19,23 @@ const state = {
     translation: "",
   },
   serverModels: {
-    recommendedCoding: [coder],
+    available: [
+      "gemma4:12b",
+      "qwen2.5:3b",
+      agenticCoder,
+      hauhauBalanced,
+      legacyCoder,
+      "llama3:latest",
+      "phi3:latest",
+      "qwen3:4b",
+    ],
+    chat: "gemma4:12b",
+    coding: agenticCoder,
+    translation: "qwen2.5:3b",
+    recommendedCoding: [agenticCoder],
   },
 };
-const modelIsInstalled = (model) => model === "gemma4:12b";
+const modelIsInstalled = (model) => state.serverModels.available.includes(model);
 
 assert.deepEqual(
   installedOrCurrentModels({
@@ -29,17 +44,47 @@ assert.deepEqual(
     state,
     modelIsInstalled,
   }),
-  ["gemma4:12b", "qwen2.5:3b"],
+  ["gemma4:12b", "qwen2.5:3b", "llama3:latest"],
 );
 
 assert.deepEqual(
   installedOrCurrentModels({
-    models: ["missing-coder:latest", coder, "llama3:latest"],
+    models: ["missing-coder:latest", agenticCoder, "llama3:latest"],
     task: "coding",
     state,
     modelIsInstalled,
   }),
-  ["missing-coder:latest", coder],
+  ["missing-coder:latest", agenticCoder, "llama3:latest"],
+);
+
+const composerCandidates = composerModelCandidates({ state, modelIsInstalled });
+assert.ok(
+  composerCandidates.includes(agenticCoder),
+  "agentic coder should be available in the composer model menu",
+);
+assert.ok(
+  composerCandidates.includes(hauhauBalanced),
+  "downloaded optional models should be shown in the composer model menu",
+);
+assert.equal(
+  composerCandidates.includes(legacyCoder),
+  false,
+  "legacy coder should stay out of the composer model menu",
+);
+assert.equal(
+  composerCandidates.includes("llama3:latest"),
+  false,
+  "llama should stay out of the composer model menu",
+);
+assert.equal(
+  composerCandidates.includes("phi3:latest"),
+  false,
+  "phi-3 should stay out of the composer model menu",
+);
+assert.equal(
+  composerCandidates.includes("qwen3:4b"),
+  false,
+  "qwen3 should stay out of the composer model menu",
 );
 
 console.log("settings helper tests passed");
