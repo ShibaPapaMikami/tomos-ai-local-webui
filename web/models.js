@@ -4,8 +4,14 @@ function gemmaDisplayModelName(model, task = "chat", helpers = {}) {
   const translate = typeof t === "function" ? t : (key) => key;
   const installed = typeof modelIsInstalled === "function" ? modelIsInstalled(model) : false;
   if (!model) return translate("model.serverDefault");
+  if (model.includes("gemma-4-12B-agentic-fable5")) {
+    return `Gemma 4 Agentic Coder 12B Q4 (${translate("model.coderRecommended")}${installed ? "" : ` / ${translate("model.downloadRequired")}`})`;
+  }
   if (model.includes("gemma-4-12B-coder-fable5")) {
     return `Gemma 4 Coder 12B Q4 (${translate("model.coderRecommended")}${installed ? "" : ` / ${translate("model.downloadRequired")}`})`;
+  }
+  if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) {
+    return `HauhauCS Balanced 12B Q4 (${translate("model.downloadRequired")})`;
   }
   if (model === "gemma4:12b") {
     if (task === "coding") return `Gemma 4 12B (${translate("model.gemmaCoding")})`;
@@ -32,7 +38,9 @@ function gemmaComposerModelLabel(model, helpers = {}) {
   const { t } = helpers;
   const translate = typeof t === "function" ? t : (key) => key;
   if (!model) return translate("model.auto");
+  if (model.includes("gemma-4-12B-agentic-fable5")) return "Agentic Coder";
   if (model.includes("gemma-4-12B-coder-fable5")) return "Coder";
+  if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) return "HauhauCS";
   if (model === "gemma4:12b") return "Gemma 4";
   if (model === "qwen2.5:3b") return "Qwen";
   if (model === "phi3:latest") return "Phi-3";

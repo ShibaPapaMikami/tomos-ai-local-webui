@@ -7,13 +7,16 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync("web/models.js", "utf8"), context, { filename: "web/models.js" });
 
 const {
+  displayModelName,
+  composerModelLabel,
   modelForTask,
   modelForRequestTask,
   fastChatModel,
   fallbackCodingModel,
 } = context.window.GEMMA_MODELS;
 
-const coder = "hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M";
+const coder = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M";
+const hauhauBalanced = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
 const baseModels = {
   chat: "gemma4:12b",
   coding: coder,
@@ -96,5 +99,21 @@ assert.equal(
   }),
   "gemma4:12b",
 );
+
+assert.match(
+  displayModelName(coder, "coding", { t: (key) => key, modelIsInstalled: () => false }),
+  /Gemma 4 Agentic Coder 12B Q4/,
+);
+assert.equal(composerModelLabel(coder, { t: (key) => key }), "Agentic Coder");
+assert.match(
+  displayModelName(hauhauBalanced, "chat", { t: (key) => key, modelIsInstalled: () => false }),
+  /HauhauCS Balanced 12B Q4/,
+);
+assert.equal(composerModelLabel(hauhauBalanced, { t: (key) => key }), "HauhauCS");
+
+const serverSource = fs.readFileSync("server.py", "utf8");
+assert.match(serverSource, /gemma-4-12B-agentic-fable5-composer2\.5-v2-3\.5x-tau2-GGUF:Q4_K_M/);
+assert.doesNotMatch(serverSource, /CODING_MODEL_CANDIDATES = \[\s*"hf\.co\/yuxinlu1\/gemma-4-12B-coder-fable5-composer2\.5-v1-GGUF:Q4_K_M"/);
+assert.match(serverSource, /HauhauCS\/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M/);
 
 console.log("model selection tests passed");
