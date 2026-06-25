@@ -36,7 +36,7 @@ from search_tools import build_search_context, search_web
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.194")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.195")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -143,18 +143,20 @@ DEFAULT_SYSTEM_PROMPT = (
     "箇条書きは、比較・手順・整理が必要な場合だけ使ってください。"
 )
 PULLABLE_MODELS = [
-    {"model": MODEL, "label": "Gemma 4 12B", "purpose": "標準チャット・画像理解"},
-    {"model": "qwen2.5:3b", "label": "Qwen 2.5 3B", "purpose": "高速チャット・翻訳"},
+    {"model": MODEL, "label": "Gemma 4 12B", "purpose": "標準チャット・画像理解", "family": "Gemma系"},
     {
         "model": "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M",
         "label": "Gemma 4 Agentic Coder 12B Q4",
         "purpose": "コード生成・修正・デバッグ",
+        "family": "Gemma系",
     },
     {
         "model": "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
         "label": "HauhauCS Balanced 12B Q4",
         "purpose": "強化型チャット・制限弱め・PC負荷強",
+        "family": "Gemma系",
     },
+    {"model": "qwen2.5:3b", "label": "Qwen 2.5 3B", "purpose": "高速チャット・翻訳", "family": "Qwen系"},
 ]
 PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"]}
 MODEL_PULL_JOBS: dict[str, dict[str, object]] = {}

@@ -87,12 +87,24 @@ function renderModelInstaller(deps) {
     : "ターミナルを使わずにOllamaモデルを取得します。初回は数GBの通信が発生します。";
   title.append(titleStrong, titleHelp);
   els.modelInstaller.append(title);
+  let lastFamily = "";
+  let firstInFamily = false;
   for (const item of pullable) {
     const model = item.model;
     const installed = modelIsInstalled(model);
     const job = state.modelPullJobs[model] || null;
+    const family = modelFamilyLabel(item, state.language);
+    if (family && family !== lastFamily) {
+      const heading = document.createElement("div");
+      heading.className = `model-family-heading${lastFamily ? "" : " first-family"}`;
+      heading.textContent = family;
+      els.modelInstaller.append(heading);
+      lastFamily = family;
+      firstInFamily = true;
+    }
     const row = document.createElement("div");
-    row.className = "model-install-row";
+    row.className = `model-install-row${firstInFamily ? " first-in-family" : ""}`;
+    firstInFamily = false;
     const info = document.createElement("div");
     info.className = "model-install-info";
     const name = document.createElement("strong");
@@ -115,6 +127,16 @@ function renderModelInstaller(deps) {
     row.append(info, button);
     els.modelInstaller.append(row);
   }
+}
+
+function modelFamilyLabel(item, language) {
+  const family = item?.family || "";
+  if (!family) return "";
+  if (language === "en") {
+    if (family.includes("Gemma")) return "Gemma family";
+    if (family.includes("Qwen")) return "Qwen family";
+  }
+  return family;
 }
 
 async function fetchModelPullStatus() {
