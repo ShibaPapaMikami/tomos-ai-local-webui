@@ -538,6 +538,7 @@ window.GEMMA_MANAGEMENT = (() => {
   function closeManagementPanels({ els, except = null }) {
     [
       els.settingsPanel,
+      els.mobileConnectPanel,
       els.responseSettingsPanel,
       els.asrPanel,
       els.characterPanel,
@@ -574,6 +575,7 @@ window.GEMMA_MANAGEMENT = (() => {
   function visibleManagementPanels(els) {
     return [
       els.settingsPanel,
+      els.mobileConnectPanel,
       els.responseSettingsPanel,
       els.asrPanel,
       els.characterPanel,
@@ -615,6 +617,47 @@ window.GEMMA_MANAGEMENT = (() => {
     }
     renderStudyPacksPanel();
     renderPluginsPanel();
+  }
+
+  function renderMobileConnectInfo({ els, t, info }) {
+    if (!info?.ok) {
+      if (els.mobileConnectStatus) els.mobileConnectStatus.textContent = t("management.mobileConnectError");
+      return;
+    }
+    if (els.mobileConnectCode) {
+      els.mobileConnectCode.textContent = info.pairingCode || "------";
+    }
+    if (els.mobileConnectExpires) {
+      els.mobileConnectExpires.textContent = info.expiresAt
+        ? t("management.mobileConnectExpires", { time: info.expiresAt })
+        : "";
+    }
+    if (els.mobileConnectStatus) {
+      els.mobileConnectStatus.textContent = info.pairingEnabled
+        ? t("management.mobileConnectReady")
+        : t("management.mobileConnectPairingPending");
+    }
+    if (els.mobileConnectHosts) {
+      const hosts = Array.isArray(info.hostCandidates) ? info.hostCandidates : [];
+      els.mobileConnectHosts.textContent = hosts.length > 0
+        ? hosts.join("\n")
+        : t("management.mobileConnectNoLan");
+    }
+  }
+
+  async function refreshMobileConnectInfo({ els, t }) {
+    if (els.mobileConnectStatus) els.mobileConnectStatus.textContent = t("management.mobileConnectLoading");
+    try {
+      const response = await fetch("/api/mobile/connect-info");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const info = await response.json();
+      renderMobileConnectInfo({ els, t, info });
+      return info;
+    } catch {
+      if (els.mobileConnectStatus) els.mobileConnectStatus.textContent = t("management.mobileConnectError");
+      if (els.mobileConnectHosts) els.mobileConnectHosts.textContent = t("management.mobileConnectNoLan");
+      return null;
+    }
   }
 
   function renderStudyPacksPanel({ state, t }) {
@@ -803,6 +846,17 @@ window.GEMMA_MANAGEMENT = (() => {
       if (els.settingsPanel) els.settingsPanel.hidden = true;
       syncManagementLayout({ els });
     });
+    els.mobileConnectToggle?.addEventListener("click", () => {
+      openManagementPanel({ els, panel: els.mobileConnectPanel });
+      refreshMobileConnectInfo({ els, t });
+    });
+    els.mobileConnectClose?.addEventListener("click", () => {
+      if (els.mobileConnectPanel) els.mobileConnectPanel.hidden = true;
+      syncManagementLayout({ els });
+    });
+    els.mobileConnectRefresh?.addEventListener("click", () => {
+      refreshMobileConnectInfo({ els, t });
+    });
     els.responseSettingsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.responseSettingsPanel });
     });
@@ -924,6 +978,8 @@ window.GEMMA_MANAGEMENT = (() => {
     handleEscapeKey,
     openManagementPanel,
     setupManagementPanels,
+    renderMobileConnectInfo,
+    refreshMobileConnectInfo,
     renderStudyPacksPanel,
     toggleSampleStudyPack,
     toggleStudyPack,

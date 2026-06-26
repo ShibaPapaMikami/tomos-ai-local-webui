@@ -13,6 +13,7 @@ import queue
 import re
 import shutil
 import shlex
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import random
@@ -360,6 +361,45 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
         return {}
     raw = handler.rfile.read(length)
     return json.loads(raw.decode("utf-8"))
+
+
+def local_lan_ipv4_addresses() -> list[str]:
+    addresses: set[str] = set()
+    try:
+        hostname = socket.gethostname()
+        for result in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            address = result[4][0]
+            if address and not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+    return sorted(addresses)
+
+
+def mobile_connect_info(host: str, port: int, lan_addresses: list[str] | None = None) -> dict:
+    bind_host = str(host or "127.0.0.1")
+    normalized_host = bind_host.lower()
+    lan_enabled = normalized_host not in {"127.0.0.1", "localhost", "::1"}
+    addresses = lan_addresses if lan_addresses is not None else local_lan_ipv4_addresses()
+    host_candidates = [f"http://{address}:{port}" for address in addresses] if lan_enabled else []
+    pairing_code = f"{random.SystemRandom().randint(0, 999999):06d}"
+    expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600))
+    qr_payload = {
+        "host": host_candidates[0],
+        "pairingCode": pairing_code,
+        "expiresAt": expires_at,
+    } if host_candidates else {}
+    return {
+        "ok": True,
+        "bindHost": bind_host,
+        "port": port,
+        "lanAccessEnabled": lan_enabled,
+        "pairingEnabled": False,
+        "pairingCode": pairing_code,
+        "expiresAt": expires_at,
+        "hostCandidates": host_candidates,
+        "qrPayload": qr_payload,
+    }
 
 
 def python_module_available(module_name: str) -> bool:
@@ -3147,6 +3187,10 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/health":
             payload = health_payload()
             json_response(self, 200 if payload["ok"] else 503, payload)
+            return
+        if parsed.path == "/api/mobile/connect-info":
+            host, port = self.server.server_address[:2]
+            json_response(self, 200, mobile_connect_info(str(host), int(port)))
             return
         if parsed.path == "/api/asr/status":
             json_response(self, 200, asr_status_payload())

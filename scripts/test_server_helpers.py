@@ -3,6 +3,7 @@ from pathlib import Path
 import base64
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -284,6 +285,31 @@ def test_external_llm_url_allows_only_localhost() -> None:
         raise AssertionError("non-local LLM URL should be rejected")
 
 
+def test_mobile_connect_info_localhost_is_not_lan_enabled() -> None:
+    payload = server.mobile_connect_info("127.0.0.1", 54876)
+    assert payload["ok"] is True
+    assert payload["lanAccessEnabled"] is False
+    assert payload["pairingEnabled"] is False
+    assert payload["bindHost"] == "127.0.0.1"
+    assert payload["port"] == 54876
+    assert payload["pairingCode"].isdigit()
+    assert len(payload["pairingCode"]) == 6
+    assert payload["hostCandidates"] == []
+    assert payload["qrPayload"] == {}
+    assert datetime.fromisoformat(payload["expiresAt"].replace("Z", "+00:00")) > datetime.now(timezone.utc)
+
+
+def test_mobile_connect_info_lan_host_builds_pairing_payload() -> None:
+    payload = server.mobile_connect_info("0.0.0.0", 54876, lan_addresses=["192.168.1.20"])
+    assert payload["ok"] is True
+    assert payload["lanAccessEnabled"] is True
+    assert payload["pairingEnabled"] is False
+    assert payload["hostCandidates"] == ["http://192.168.1.20:54876"]
+    assert payload["qrPayload"]["host"] == "http://192.168.1.20:54876"
+    assert payload["qrPayload"]["pairingCode"] == payload["pairingCode"]
+    assert payload["qrPayload"]["expiresAt"] == payload["expiresAt"]
+
+
 def test_decode_subprocess_output_handles_invalid_locale_bytes() -> None:
     text = server.decode_subprocess_output(b"\x81\x00pulling manifest\n")
     assert "pulling manifest" in text
@@ -315,6 +341,8 @@ if __name__ == "__main__":
     test_workspace_context_uses_codegraph_summary_when_ready()
     test_workspace_search_capabilities_shape()
     test_external_llm_url_allows_only_localhost()
+    test_mobile_connect_info_localhost_is_not_lan_enabled()
+    test_mobile_connect_info_lan_host_builds_pairing_payload()
     test_decode_subprocess_output_handles_invalid_locale_bytes()
     test_iter_subprocess_output_lines_handles_binary_lines()
     print("server helper tests passed")

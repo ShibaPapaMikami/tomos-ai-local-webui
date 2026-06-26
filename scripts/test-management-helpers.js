@@ -26,12 +26,14 @@ const {
   toggleStudyPackModeValue,
   studyPackMenuGroups,
   openManagementPanel,
+  renderMobileConnectInfo,
   renderPluginsPanel,
   studyPackById,
 } = context.window.GEMMA_MANAGEMENT;
 
 const els = {
   settingsPanel: { hidden: false },
+  mobileConnectPanel: { hidden: true },
   studyPacksPanel: { hidden: true },
   trainingManagementPanel: { hidden: true },
   pluginsPanel: { hidden: true },
@@ -55,7 +57,12 @@ openManagementPanel({ els, panel: els.pluginsPanel });
 assert.equal(els.pluginsPanel.hidden, false);
 assert.equal(els.settingsPanel.hidden, true);
 
+openManagementPanel({ els, panel: els.mobileConnectPanel });
+assert.equal(els.pluginsPanel.hidden, true);
+assert.equal(els.mobileConnectPanel.hidden, false);
+
 openManagementPanel({ els, panel: els.studyPacksPanel });
+assert.equal(els.mobileConnectPanel.hidden, true);
 assert.equal(els.pluginsPanel.hidden, true);
 assert.equal(els.studyPacksPanel.hidden, false);
 
@@ -65,6 +72,11 @@ const labels = {
   "management.addCandidate": "あとで検討に入れる",
   "management.addFirst": "先に追加してください",
   "management.codingAssistPack": "コーディング支援",
+  "management.mobileConnectError": "接続情報を取得できませんでした。",
+  "management.mobileConnectExpires": "有効期限: {time}",
+  "management.mobileConnectNoLan": "今はPC内だけで待ち受けています。",
+  "management.mobileConnectPairingPending": "コード表示のみです。",
+  "management.mobileConnectReady": "ペアリングコードを発行しました。",
   "management.reportWritingPack": "日本語レポート添削",
   "management.candidateSaved": "検討リスト入り（まだ使えません）",
   "management.notAdded": "未追加",
@@ -142,9 +154,43 @@ assert.equal(
   "コードレビュー",
 );
 const indexHtml = fs.readFileSync("web/index.html", "utf8");
+const mobileConnectMenuIndex = indexHtml.indexOf('id="mobile-connect-toggle"');
+const basicSettingsMenuIndex = indexHtml.indexOf('id="settings-toggle"');
+assert.notEqual(mobileConnectMenuIndex, -1);
+assert.notEqual(basicSettingsMenuIndex, -1);
+assert.ok(mobileConnectMenuIndex < basicSettingsMenuIndex, "mobile connection should be the first settings item");
+assert.match(indexHtml, /id="mobile-connect-panel"/);
+assert.match(indexHtml, /id="mobile-connect-code"/);
+assert.match(indexHtml, /id="mobile-connect-hosts"/);
+assert.match(indexHtml, /data-i18n="management\.mobileConnect"/);
+assert.match(indexHtml, /data-i18n="management\.mobileConnectLocalOnly"/);
+assert.match(indexHtml, /data-i18n="management\.mobileConnectQrPending"/);
+assert.match(indexHtml, /data-i18n="management\.mobileConnectCode"/);
 assert.match(indexHtml, /data-study-pack-toggle="coding-assist-basic"/);
 assert.match(indexHtml, /data-i18n="management\.codingAssistPack"/);
 assert.match(indexHtml, /data-i18n="studyPack\.mode\.releaseCheckShort"/);
+
+const mobileConnectEls = {
+  mobileConnectCode: { textContent: "" },
+  mobileConnectExpires: { textContent: "" },
+  mobileConnectHosts: { textContent: "" },
+  mobileConnectStatus: { textContent: "" },
+};
+renderMobileConnectInfo({
+  els: mobileConnectEls,
+  t,
+  info: {
+    ok: true,
+    pairingCode: "123456",
+    expiresAt: "2026-06-27T10:00:00Z",
+    pairingEnabled: false,
+    hostCandidates: ["http://192.168.1.20:54876"],
+  },
+});
+assert.equal(mobileConnectEls.mobileConnectCode.textContent, "123456");
+assert.equal(mobileConnectEls.mobileConnectStatus.textContent, "コード表示のみです。");
+assert.equal(mobileConnectEls.mobileConnectHosts.textContent, "http://192.168.1.20:54876");
+assert.match(mobileConnectEls.mobileConnectExpires.textContent, /2026-06-27T10:00:00Z/);
 
 async function runImportTests() {
   const makeFile = (name, content) => ({

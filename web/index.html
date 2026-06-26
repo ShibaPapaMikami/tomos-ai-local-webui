@@ -38,6 +38,7 @@
 
         <div class="sidebar-settings-menu" id="sidebar-settings-menu" hidden>
           <button class="ghost-button sidebar-back-button" id="settings-menu-back" type="button" data-i18n="management.back">←戻る</button>
+          <button class="ghost-button" id="mobile-connect-toggle" type="button" data-i18n="management.mobileConnect">スマホ接続</button>
           <button class="ghost-button" id="settings-toggle" type="button" data-i18n="management.basicSettings">基本設定</button>
           <button class="ghost-button" id="response-settings-toggle" type="button" data-i18n="management.responseSettings">応答設定</button>
           <button class="ghost-button" id="character-toggle" type="button" data-i18n="character.settings">マイキャラ</button>
@@ -360,6 +361,57 @@
             <button class="ghost-button" id="training-management-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
           <div class="management-panel-body" id="training-management-body"></div>
+        </section>
+
+        <section class="management-panel" id="mobile-connect-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.mobileConnect">スマホ接続</strong>
+              <span data-i18n="management.mobileConnectHelp">同じWi-Fi内のスマホPWAから、このPC版のチャットと記憶を使うための接続画面です。</span>
+            </div>
+            <button class="ghost-button" id="mobile-connect-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="management-note" data-i18n="management.mobileConnectLocalOnly">外部公開やクラウド同期は使いません。スマホから接続する時は、このPCと同じLAN内だけに限定します。</div>
+          <div class="management-panel-body mobile-connect-body">
+            <div class="mobile-connect-qr" aria-label="スマホ接続QRコード準備中" data-i18n-aria-label="management.mobileConnectQrLabel">
+              <span data-i18n="management.mobileConnectQrPending">QRはペアリングコード実装時にここへ表示します</span>
+            </div>
+            <div class="mobile-connect-steps">
+              <div class="management-card mobile-connect-code-card">
+                <div>
+                  <strong data-i18n="management.mobileConnectCode">接続コード</strong>
+                  <span id="mobile-connect-status" data-i18n="management.mobileConnectLoading">接続情報を確認中です。</span>
+                  <code id="mobile-connect-code">------</code>
+                  <small id="mobile-connect-expires"></small>
+                </div>
+                <button class="ghost-button" id="mobile-connect-refresh" type="button" data-i18n="management.mobileConnectRefresh">更新</button>
+              </div>
+              <div class="management-card">
+                <div>
+                  <strong data-i18n="management.mobileConnectHosts">接続先候補</strong>
+                  <span id="mobile-connect-hosts" data-i18n="management.mobileConnectNoLan">今はPC内だけで待ち受けています。LAN接続はペアリング実装後に有効化します。</span>
+                </div>
+              </div>
+              <div class="management-card">
+                <div>
+                  <strong data-i18n="management.mobileConnectSameLan">同じWi-Fiで接続</strong>
+                  <span data-i18n="management.mobileConnectSameLanHelp">今は安全のためPC内だけで待ち受けます。ペアリング実装後、同じLAN内のPCアドレスへ接続します。</span>
+                </div>
+              </div>
+              <div class="management-card">
+                <div>
+                  <strong data-i18n="management.mobileConnectPairing">QR / 6桁コードでペアリング</strong>
+                  <span data-i18n="management.mobileConnectPairingHelp">次の実装で、有効期限つきワンタイムコードと接続済み端末の解除を追加します。</span>
+                </div>
+              </div>
+              <div class="management-card">
+                <div>
+                  <strong data-i18n="management.mobileConnectMemoryHome">記憶はPC側に保存</strong>
+                  <span data-i18n="management.mobileConnectMemoryHomeHelp">スマホは軽いリモートUIとして扱い、チャット履歴・キャラ記憶・学習セットはPC側に保存します。</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="management-panel" id="response-settings-panel" hidden>

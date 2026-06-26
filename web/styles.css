@@ -790,6 +790,32 @@ h1 {
   align-items: start;
 }
 
+.mobile-connect-body {
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.mobile-connect-qr {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(45deg, transparent 48%, rgba(127, 127, 127, 0.08) 49%, rgba(127, 127, 127, 0.08) 51%, transparent 52%),
+    var(--input-bg);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 18px;
+  text-align: center;
+}
+
+.mobile-connect-steps {
+  display: grid;
+  gap: 10px;
+}
+
 .plugin-main {
   display: grid;
   gap: 8px;
@@ -4115,6 +4141,14 @@ select:focus {
 
   .management-card {
     grid-template-columns: 1fr;
+  }
+
+  .mobile-connect-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mobile-connect-qr {
+    min-height: 180px;
   }
 
   .plugin-facts div,
