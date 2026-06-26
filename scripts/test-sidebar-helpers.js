@@ -16,6 +16,7 @@ const {
   restoreDeletedToState,
   selectFolderInState,
   selectSessionInState,
+  shouldCloseMobileSidebar,
   shouldStartSidebarHidden,
   startSessionRenameInState,
   visibleFolders,
@@ -54,6 +55,36 @@ assert.equal(
   shouldStartSidebarHidden({ isMobile: false, storedValue: "true" }),
   true,
   "desktop should keep the stored hidden sidebar state",
+);
+assert.equal(
+  shouldCloseMobileSidebar({
+    isMobile: true,
+    sidebarHidden: false,
+    targetInsideSidebar: false,
+    targetInsideToggle: false,
+  }),
+  true,
+  "mobile sidebar should close when tapping outside the drawer",
+);
+assert.equal(
+  shouldCloseMobileSidebar({
+    isMobile: true,
+    sidebarHidden: false,
+    targetInsideSidebar: true,
+    targetInsideToggle: false,
+  }),
+  false,
+  "mobile sidebar should stay open when tapping inside the drawer",
+);
+assert.equal(
+  shouldCloseMobileSidebar({
+    isMobile: false,
+    sidebarHidden: false,
+    targetInsideSidebar: false,
+    targetInsideToggle: false,
+  }),
+  false,
+  "desktop sidebar should not close from outside click",
 );
 
 const folderCreation = createFolderInState({

@@ -52,6 +52,15 @@ function shouldStartSidebarHidden({ isMobile, storedValue }) {
   return storedValue === "true";
 }
 
+function shouldCloseMobileSidebar({
+  isMobile,
+  sidebarHidden,
+  targetInsideSidebar,
+  targetInsideToggle,
+}) {
+  return Boolean(isMobile && !sidebarHidden && !targetInsideSidebar && !targetInsideToggle);
+}
+
 function setSidebarWidth({ state, width }) {
   state.sidebarWidth = Math.min(420, Math.max(220, Math.round(width)));
   localStorage.setItem("gemma4.sidebarWidth", String(state.sidebarWidth));
@@ -89,6 +98,24 @@ function bindSidebarEvents({ els, state, onRender }) {
 
   els.sidebarToggle?.addEventListener("click", () => setSidebarHidden({ hidden: false, state, onRender }));
   els.sidebarCollapse?.addEventListener("click", () => setSidebarHidden({ hidden: !state.sidebarHidden, state, onRender }));
+
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target;
+    if (shouldCloseMobileSidebar({
+      isMobile: window.matchMedia("(max-width: 760px)").matches,
+      sidebarHidden: state.sidebarHidden,
+      targetInsideSidebar: Boolean(els.sidebar?.contains(target)),
+      targetInsideToggle: Boolean(els.sidebarToggle?.contains(target)),
+    })) {
+      setSidebarHidden({ hidden: true, state, onRender });
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && window.matchMedia("(max-width: 760px)").matches && !state.sidebarHidden) {
+      setSidebarHidden({ hidden: true, state, onRender });
+    }
+  });
 }
 
 function createFolderInState({
@@ -478,6 +505,7 @@ window.GEMMA_SIDEBAR = {
   selectSessionInState,
   setSidebarHidden,
   setSidebarWidth,
+  shouldCloseMobileSidebar,
   shouldStartSidebarHidden,
   startSessionRenameInState,
   visibleFolders,

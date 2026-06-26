@@ -4010,6 +4010,14 @@ select:focus {
     box-shadow: 16px 0 36px rgba(0, 0, 0, 0.35);
   }
 
+  body:not(.sidebar-hidden)::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgba(0, 0, 0, 0.36);
+  }
+
   .sidebar-resizer {
     display: none;
   }

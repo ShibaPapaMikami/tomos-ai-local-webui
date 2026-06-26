@@ -18,6 +18,11 @@ const sidebarRule = mobileRule(".sidebar");
 assert.match(sidebarRule, /position:\s*fixed;/, "mobile sidebar should behave as a drawer");
 assert.match(sidebarRule, /width:\s*min\(286px,\s*86vw\);/, "mobile sidebar should fit narrow screens");
 
+const sidebarBackdropRule = mobileRule("body:not(.sidebar-hidden)::after");
+assert.match(sidebarBackdropRule, /content:\s*"";/, "open mobile sidebar should create a backdrop");
+assert.match(sidebarBackdropRule, /position:\s*fixed;/, "mobile sidebar backdrop should cover the viewport");
+assert.match(sidebarBackdropRule, /z-index:\s*20;/, "mobile sidebar backdrop should sit behind the drawer");
+
 const topbarRule = mobileRule(".topbar");
 assert.match(topbarRule, /grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto;/, "mobile topbar should keep controls from squeezing title text");
 
