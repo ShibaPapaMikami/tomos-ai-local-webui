@@ -47,6 +47,11 @@ function setSidebarHidden({ hidden, state, onRender }) {
   onRender?.();
 }
 
+function shouldStartSidebarHidden({ isMobile, storedValue }) {
+  if (isMobile) return true;
+  return storedValue === "true";
+}
+
 function setSidebarWidth({ state, width }) {
   state.sidebarWidth = Math.min(420, Math.max(220, Math.round(width)));
   localStorage.setItem("gemma4.sidebarWidth", String(state.sidebarWidth));
@@ -473,6 +478,7 @@ window.GEMMA_SIDEBAR = {
   selectSessionInState,
   setSidebarHidden,
   setSidebarWidth,
+  shouldStartSidebarHidden,
   startSessionRenameInState,
   visibleFolders,
   visibleSessionsForFolder,

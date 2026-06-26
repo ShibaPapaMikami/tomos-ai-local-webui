@@ -45,7 +45,10 @@ const state = {
   editingSessionId: null,
   sidebarQuery: "",
   collapsedFolderIds: new Set(loadCollapsedFolderIds()),
-  sidebarHidden: localStorage.getItem("gemma4.sidebarHidden") === "true",
+  sidebarHidden: window.GEMMA_SIDEBAR?.shouldStartSidebarHidden?.({
+    isMobile: window.matchMedia("(max-width: 760px)").matches,
+    storedValue: localStorage.getItem("gemma4.sidebarHidden"),
+  }) ?? localStorage.getItem("gemma4.sidebarHidden") === "true",
   sidebarWidth: Number(localStorage.getItem("gemma4.sidebarWidth")) || 268,
   language: localStorage.getItem("gemma4.language") || "ja",
   theme: localStorage.getItem("gemma4.theme") || "dark",
@@ -336,10 +339,6 @@ const els = {
   memoryCandidateDiscard: document.querySelector("#memory-candidate-discard"),
   memoryCandidateSave: document.querySelector("#memory-candidate-save"),
 };
-
-if (window.matchMedia("(max-width: 760px)").matches && localStorage.getItem("gemma4.sidebarHidden") === null) {
-  state.sidebarHidden = true;
-}
 
 function t(key, params = {}) {
   const dictionary = I18N[state.language] || I18N.ja;

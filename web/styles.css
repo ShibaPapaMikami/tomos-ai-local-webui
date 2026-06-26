@@ -4033,6 +4033,33 @@ select:focus {
     padding-right: 14px;
   }
 
+  .topbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .topbar > div:not(.top-actions) {
+    min-width: 0;
+  }
+
+  .topbar h1,
+  #chat-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .top-actions {
+    gap: 6px;
+  }
+
+  .top-actions .icon-button {
+    min-width: 0;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
   .settings-grid {
     grid-template-columns: 1fr;
   }
@@ -4094,7 +4121,27 @@ select:focus {
     font-size: 11px;
   }
 
+  .composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 15;
+    padding-top: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -10px 26px rgba(0, 0, 0, 0.16);
+  }
+
+  .composer-box {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "attachments attachments attachments attachments"
+      "study study study study"
+      "prompt prompt prompt prompt"
+      "attach mode voice send";
+    min-height: 0;
+  }
+
   .composer-model-select {
+    display: none;
     max-width: 96px;
   }
 

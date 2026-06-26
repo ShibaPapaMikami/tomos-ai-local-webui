@@ -16,6 +16,7 @@ const {
   restoreDeletedToState,
   selectFolderInState,
   selectSessionInState,
+  shouldStartSidebarHidden,
   startSessionRenameInState,
   visibleFolders,
   visibleSessionsForFolder,
@@ -38,6 +39,22 @@ const sessions = [
   { id: "chat-3", folderId: "folder-2", title: "テトリス" },
 ];
 const sessionsForFolder = (folderId) => sessions.filter((session) => session.folderId === folderId);
+
+assert.equal(
+  shouldStartSidebarHidden({ isMobile: true, storedValue: "false" }),
+  true,
+  "mobile should start with the sidebar drawer closed even after desktop use",
+);
+assert.equal(
+  shouldStartSidebarHidden({ isMobile: false, storedValue: "false" }),
+  false,
+  "desktop should keep the stored visible sidebar state",
+);
+assert.equal(
+  shouldStartSidebarHidden({ isMobile: false, storedValue: "true" }),
+  true,
+  "desktop should keep the stored hidden sidebar state",
+);
 
 const folderCreation = createFolderInState({
   state,
