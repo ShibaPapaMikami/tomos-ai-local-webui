@@ -1599,6 +1599,9 @@ async function refreshModelPullStatus() {
   try {
     const data = await window.GEMMA_SETTINGS.fetchModelPullStatus();
     state.modelPullJobs = data.jobs || {};
+    if (Array.isArray(data.availableModels)) {
+      state.serverModels.available = data.availableModels;
+    }
     renderModelInstaller();
     const running = Object.values(state.modelPullJobs).some((job) => job.status === "running" || job.status === "queued");
     if (!running && state.modelPullTimer) {
@@ -1639,7 +1642,7 @@ async function startModelPull(model) {
 
 function renderSettingsMeta() {
   if (els.sidebarAppVersion) {
-    const version = state.appInfo.version || "0.8.194";
+    const version = state.appInfo.version || "0.8.196";
     els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
   }
   const deps = {

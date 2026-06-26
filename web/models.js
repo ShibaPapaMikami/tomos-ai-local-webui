@@ -11,7 +11,7 @@ function gemmaDisplayModelName(model, task = "chat", helpers = {}) {
     return `Gemma 4 Coder 12B Q4 (${translate("model.coderRecommended")}${installed ? "" : ` / ${translate("model.downloadRequired")}`})`;
   }
   if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) {
-    return `HauhauCS Balanced 12B Q4 (${translate("model.downloadRequired")})`;
+    return `HauhauCS Balanced 12B Q4${installed ? "" : ` (${translate("model.downloadRequired")})`}`;
   }
   if (model === "gemma4:12b") {
     if (task === "coding") return `Gemma 4 12B (${translate("model.gemmaCoding")})`;
@@ -47,6 +47,21 @@ function gemmaComposerModelLabel(model, helpers = {}) {
   if (model === "llama3:latest") return "Llama";
   if (model === "qwen3:4b") return "Qwen3";
   return gemmaShortModelName(model, "chat", helpers);
+}
+
+function gemmaModelPurpose(model, task = "chat", helpers = {}) {
+  const pullable = Array.isArray(helpers.pullable) ? helpers.pullable : [];
+  const matched = pullable.find((item) => item && item.model === model);
+  if (matched?.purpose) return matched.purpose;
+  if (!model) return "";
+  if (model.includes("gemma-4-12B-agentic-fable5")) return "コード生成・修正・デバッグ";
+  if (model.includes("gemma-4-12B-coder-fable5")) return "コード生成・修正・デバッグ";
+  if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) return "強化型チャット・制限弱め・PC負荷強";
+  if (model === "gemma4:12b") return "標準チャット・画像理解";
+  if (model === "qwen2.5:3b") return "高速チャット・翻訳";
+  if (task === "coding") return "コード生成";
+  if (task === "translation") return "翻訳";
+  return "";
 }
 
 function gemmaTaskLabel(task, t) {
@@ -107,6 +122,7 @@ window.GEMMA_MODELS = {
   displayModelName: gemmaDisplayModelName,
   shortModelName: gemmaShortModelName,
   composerModelLabel: gemmaComposerModelLabel,
+  modelPurpose: gemmaModelPurpose,
   taskLabel: gemmaTaskLabel,
   responseModeLabel: gemmaResponseModeLabel,
   modelIsInstalled: gemmaModelIsInstalled,

@@ -36,7 +36,7 @@ from search_tools import build_search_context, search_web
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.195")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.196")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -1056,9 +1056,9 @@ def ollama_stream(path: str, payload: dict, timeout: int = 600, base_url: str | 
     return urllib.request.urlopen(request, timeout=timeout)
 
 
-def installed_ollama_models() -> set[str]:
+def installed_ollama_models(force_refresh: bool = False) -> set[str]:
     now = time.time()
-    if now - float(_OLLAMA_MODELS_CACHE["at"]) < 60:
+    if not force_refresh and now - float(_OLLAMA_MODELS_CACHE["at"]) < 60:
         return set(_OLLAMA_MODELS_CACHE["models"])
     tags = ollama_json("/api/tags", timeout=3).get("models", [])
     models = {str(item.get("name", "")) for item in tags if item.get("name")}
@@ -2876,10 +2876,32 @@ def health_payload() -> dict:
         }
 
 
+def reconcile_model_pull_jobs() -> set[str] | None:
+    try:
+        models = installed_ollama_models(force_refresh=True)
+    except Exception:
+        return None
+    now = time.time()
+    with MODEL_PULL_LOCK:
+        for model, job in list(MODEL_PULL_JOBS.items()):
+            if model in models and job.get("status") in {"queued", "running"}:
+                job.update({
+                    "status": "done",
+                    "message": "ダウンロードが完了しました。",
+                    "finishedAt": job.get("finishedAt") or now,
+                })
+                MODEL_PULL_JOBS[model] = job
+    return models
+
+
 def model_pull_status() -> dict:
+    models = reconcile_model_pull_jobs()
     with MODEL_PULL_LOCK:
         jobs = {model: dict(job) for model, job in MODEL_PULL_JOBS.items()}
-    return {"ok": True, "jobs": jobs}
+    response = {"ok": True, "jobs": jobs}
+    if models is not None:
+        response["availableModels"] = sorted(models)
+    return response
 
 
 def run_model_pull(model: str) -> None:
@@ -2906,6 +2928,11 @@ def run_model_pull(model: str) -> None:
                     job.update({"message": last_line})
                     MODEL_PULL_JOBS[model] = job
         code = process.wait()
+        if code == 0:
+            try:
+                installed_ollama_models(force_refresh=True)
+            except Exception:
+                pass
         with MODEL_PULL_LOCK:
             job = MODEL_PULL_JOBS.get(model, {})
             job.update({
