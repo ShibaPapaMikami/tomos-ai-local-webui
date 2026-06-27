@@ -43,7 +43,7 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.196")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.197")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
