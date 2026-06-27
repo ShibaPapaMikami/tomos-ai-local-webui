@@ -131,4 +131,15 @@ const mobileSyncScript = fs.readFileSync("scripts/start-mobile-sync.sh", "utf8")
 assert.match(mobileSyncScript, /--host 0\.0\.0\.0/);
 assert.match(mobileSyncScript, /--mobile-sync-only/);
 
+[
+  "Gemma4_12B_Web.command",
+  "Gemma4_12B_全部起動.command",
+  "Gemma4_12B_Web.bat",
+  "Gemma4_12B_All_Start.bat",
+].forEach((path) => {
+  const launcher = fs.readFileSync(path, "utf8");
+  assert.match(launcher, /0\.8\.197/, `${path} should use the current app version`);
+  assert.doesNotMatch(launcher, /0\.8\.196/, `${path} should not pin the old app version`);
+});
+
 console.log("pwa asset tests passed");
