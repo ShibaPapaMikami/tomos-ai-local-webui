@@ -16,6 +16,10 @@ fi
 
 echo "Python: $(python3 --version)"
 
+python3 - <<'PY' >/dev/null 2>&1 || python3 -m pip install --user segno
+import segno
+PY
+
 if ! command -v ollama >/dev/null 2>&1; then
   echo "Ollama が見つかりません。"
   echo "https://ollama.com/download から Ollama をインストールしてから、もう一度このスクリプトを実行してください。"

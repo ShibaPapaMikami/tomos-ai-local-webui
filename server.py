@@ -5,6 +5,7 @@ import argparse
 import base64
 import binascii
 import importlib.util
+import io
 import json
 import locale
 import mimetypes
@@ -34,6 +35,11 @@ import xml.etree.ElementTree as ET
 
 from search_tools import build_search_context, search_web
 
+try:
+    import segno
+except ImportError:
+    segno = None
+
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
@@ -51,6 +57,10 @@ CODING_MODEL_CANDIDATES = [
 ]
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
+MOBILE_PAIRING_TTL_SECONDS = 600
+MOBILE_PAIRING_STATE: dict[str, object] = {}
+MOBILE_PENDING_IMPORTS: list[dict[str, object]] = []
+MOBILE_IMPORT_LOCK = threading.Lock()
 
 SUBPROCESS_OUTPUT_ENCODINGS = tuple(dict.fromkeys(
     encoding
@@ -349,6 +359,16 @@ def json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -
     handler.wfile.write(body)
 
 
+def svg_response(handler: BaseHTTPRequestHandler, status: int, body: str) -> None:
+    payload = body.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
 def stream_json_event(handler: BaseHTTPRequestHandler, payload: dict) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
     handler.wfile.write(body)
@@ -376,14 +396,94 @@ def local_lan_ipv4_addresses() -> list[str]:
     return sorted(addresses)
 
 
-def mobile_connect_info(host: str, port: int, lan_addresses: list[str] | None = None) -> dict:
+def set_mobile_pairing_code(pairing_code: str, expires_at_epoch: float) -> None:
+    MOBILE_PAIRING_STATE.clear()
+    MOBILE_PAIRING_STATE.update({
+        "pairingCode": pairing_code,
+        "expiresAtEpoch": expires_at_epoch,
+    })
+
+
+def mobile_pairing_code_is_valid(pairing_code: str, now: float | None = None) -> bool:
+    current_time = time.time() if now is None else now
+    expected = str(MOBILE_PAIRING_STATE.get("pairingCode") or "")
+    expires_at = float(MOBILE_PAIRING_STATE.get("expiresAtEpoch") or 0)
+    return bool(pairing_code and pairing_code == expected and current_time <= expires_at)
+
+
+def mobile_chat_import_summary(payload: dict) -> dict:
+    if not isinstance(payload, dict) or payload.get("type") != "gemma4-mobile-chat":
+        return {"ok": False, "error": "invalid_payload", "total": 0, "user": 0, "assistant": 0}
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return {"ok": False, "error": "invalid_payload", "total": 0, "user": 0, "assistant": 0}
+    valid_messages = [
+        message for message in messages
+        if isinstance(message, dict)
+        and str(message.get("role") or "") in {"user", "assistant"}
+        and str(message.get("text") or "").strip()
+    ]
+    return {
+        "ok": True,
+        "total": len(valid_messages),
+        "user": sum(1 for message in valid_messages if message.get("role") == "user"),
+        "assistant": sum(1 for message in valid_messages if message.get("role") == "assistant"),
+    }
+
+
+def queue_mobile_chat_import(body: dict, now: float | None = None) -> dict:
+    pairing_code = str(body.get("pairingCode") or "")
+    if not mobile_pairing_code_is_valid(pairing_code, now=now):
+        return {"ok": False, "error": "invalid_pairing_code"}
+    payload = body.get("payload")
+    summary = mobile_chat_import_summary(payload if isinstance(payload, dict) else {})
+    if not summary.get("ok") or int(summary.get("total") or 0) <= 0:
+        return {"ok": False, "error": summary.get("error") or "empty_payload", "summary": summary}
+    received_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() if now is None else now))
+    item = {
+        "id": uuid.uuid4().hex,
+        "receivedAt": received_at,
+        "summary": summary,
+        "payload": payload,
+    }
+    with MOBILE_IMPORT_LOCK:
+        MOBILE_PENDING_IMPORTS.append(item)
+    return {"ok": True, "importId": item["id"], "receivedAt": received_at, "summary": summary}
+
+
+def mobile_pending_imports() -> list[dict[str, object]]:
+    with MOBILE_IMPORT_LOCK:
+        return [dict(item) for item in MOBILE_PENDING_IMPORTS]
+
+
+def clear_mobile_pending_imports(ids: list[str] | None = None) -> dict:
+    with MOBILE_IMPORT_LOCK:
+        if ids is None:
+            cleared = len(MOBILE_PENDING_IMPORTS)
+            MOBILE_PENDING_IMPORTS.clear()
+            return {"ok": True, "cleared": cleared}
+        wanted = set(ids)
+        before = len(MOBILE_PENDING_IMPORTS)
+        MOBILE_PENDING_IMPORTS[:] = [item for item in MOBILE_PENDING_IMPORTS if str(item.get("id")) not in wanted]
+        return {"ok": True, "cleared": before - len(MOBILE_PENDING_IMPORTS)}
+
+
+def mobile_connect_info(
+    host: str,
+    port: int,
+    lan_addresses: list[str] | None = None,
+    now: float | None = None,
+) -> dict:
     bind_host = str(host or "127.0.0.1")
     normalized_host = bind_host.lower()
     lan_enabled = normalized_host not in {"127.0.0.1", "localhost", "::1"}
     addresses = lan_addresses if lan_addresses is not None else local_lan_ipv4_addresses()
     host_candidates = [f"http://{address}:{port}" for address in addresses] if lan_enabled else []
     pairing_code = f"{random.SystemRandom().randint(0, 999999):06d}"
-    expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 600))
+    current_time = time.time() if now is None else now
+    expires_at_epoch = current_time + MOBILE_PAIRING_TTL_SECONDS
+    set_mobile_pairing_code(pairing_code, expires_at_epoch)
+    expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at_epoch))
     qr_payload = {
         "host": host_candidates[0],
         "pairingCode": pairing_code,
@@ -394,12 +494,48 @@ def mobile_connect_info(host: str, port: int, lan_addresses: list[str] | None = 
         "bindHost": bind_host,
         "port": port,
         "lanAccessEnabled": lan_enabled,
-        "pairingEnabled": False,
+        "pairingEnabled": bool(host_candidates),
         "pairingCode": pairing_code,
         "expiresAt": expires_at,
         "hostCandidates": host_candidates,
         "qrPayload": qr_payload,
     }
+
+
+def mobile_preview_urls(port: int, lan_addresses: list[str] | None = None) -> list[str]:
+    addresses = lan_addresses if lan_addresses is not None else local_lan_ipv4_addresses()
+    return [f"http://{address}:{port}" for address in sorted(set(addresses))]
+
+
+def static_preview_get_api_allowed(path: str, allow_mobile_sync: bool = False) -> bool:
+    if not path.startswith("/api/"):
+        return True
+    if path == "/api/health":
+        return True
+    return allow_mobile_sync and path.startswith("/api/mobile/")
+
+
+def is_loopback_client(host: str) -> bool:
+    normalized = str(host or "").lower()
+    return normalized == "localhost" or normalized == "::1" or normalized.startswith("127.")
+
+
+def mobile_api_access_allowed(method: str, path: str, client_host: str) -> bool:
+    normalized_method = str(method or "").upper()
+    if normalized_method == "POST" and path == "/api/mobile/import-chat":
+        return True
+    if path in {"/api/mobile/connect-info", "/api/mobile/imports", "/api/mobile/imports/clear", "/api/mobile/qr.svg"}:
+        return is_loopback_client(client_host)
+    return False
+
+
+def mobile_qr_svg(text: str, scale: int = 8, border: int = 4) -> str:
+    if segno is None:
+        raise RuntimeError("segno is not installed")
+    buffer = io.BytesIO()
+    qr = segno.make(text, error="m")
+    qr.save(buffer, kind="svg", scale=scale, border=border, xmldecl=False)
+    return buffer.getvalue().decode("utf-8")
 
 
 def python_module_available(module_name: str) -> bool:
@@ -3178,19 +3314,59 @@ def start_ocr_setup() -> dict:
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "GemmaWebUI/1.0"
+    static_only = False
+    mobile_sync_only = False
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"{self.address_string()} - {fmt % args}")
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/api/mobile/") and not mobile_api_access_allowed(
+            "GET",
+            parsed.path,
+            str(self.client_address[0]),
+        ):
+            json_response(self, 403, {"ok": False, "error": "mobile api is restricted to this PC"})
+            return
+        if (self.static_only or self.mobile_sync_only) and not static_preview_get_api_allowed(
+            parsed.path,
+            allow_mobile_sync=self.mobile_sync_only,
+        ):
+            json_response(self, 403, {"ok": False, "error": "mobile static preview blocks API reads"})
+            return
         if parsed.path == "/api/health":
             payload = health_payload()
+            if self.static_only:
+                payload = {
+                    **payload,
+                    "ok": True,
+                    "mobilePreview": True,
+                    "modelInstalled": False,
+                    "codingModelInstalled": False,
+                    "translationModelInstalled": False,
+                }
             json_response(self, 200 if payload["ok"] else 503, payload)
             return
         if parsed.path == "/api/mobile/connect-info":
             host, port = self.server.server_address[:2]
             json_response(self, 200, mobile_connect_info(str(host), int(port)))
+            return
+        if parsed.path == "/api/mobile/qr.svg":
+            query = urllib.parse.parse_qs(parsed.query)
+            text = query.get("text", [""])[0]
+            if not text:
+                self.send_error(400)
+                return
+            try:
+                svg_response(self, 200, mobile_qr_svg(text))
+            except ValueError:
+                self.send_error(400)
+            except RuntimeError as exc:
+                json_response(self, 503, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/mobile/imports":
+            json_response(self, 200, {"ok": True, "imports": mobile_pending_imports()})
             return
         if parsed.path == "/api/asr/status":
             json_response(self, 200, asr_status_payload())
@@ -3217,7 +3393,9 @@ class Handler(BaseHTTPRequestHandler):
 
         path = parsed.path
         if path == "/":
-            file_path = WEB_ROOT / "index.html"
+            file_path = WEB_ROOT / ("mobile.html" if self.static_only else "index.html")
+        elif path == "/m":
+            file_path = WEB_ROOT / "mobile.html"
         else:
             file_path = (WEB_ROOT / path.lstrip("/")).resolve()
             if not str(file_path).startswith(str(WEB_ROOT.resolve())):
@@ -3238,6 +3416,16 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        if self.path.startswith("/api/mobile/") and not mobile_api_access_allowed(
+            "POST",
+            self.path,
+            str(self.client_address[0]),
+        ):
+            json_response(self, 403, {"ok": False, "error": "mobile api is restricted to this PC"})
+            return
+        if self.static_only or (self.mobile_sync_only and not self.path.startswith("/api/mobile/")):
+            json_response(self, 403, {"ok": False, "error": "mobile static preview blocks API writes"})
+            return
         if self.path == "/api/search":
             self.handle_search()
             return
@@ -3264,6 +3452,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/attachment/read":
             self.handle_attachment_read()
+            return
+        if self.path == "/api/mobile/import-chat":
+            try:
+                json_response(self, 200, queue_mobile_chat_import(read_json_body(self)))
+            except Exception as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/mobile/imports/clear":
+            try:
+                body = read_json_body(self)
+                ids = body.get("ids")
+                json_response(self, 200, clear_mobile_pending_imports(ids if isinstance(ids, list) else None))
+            except Exception as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
             return
         if self.path.startswith("/api/workspace/"):
             self.handle_workspace()
@@ -3617,12 +3819,20 @@ def main() -> None:
     parser.add_argument("--host", default=os.environ.get("GEMMA_WEB_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GEMMA_WEB_PORT", "54876")))
     parser.add_argument("--open", action="store_true", help="Open the Web UI in the default browser")
+    parser.add_argument("--static-only", action="store_true", help="Serve PWA/static assets only and block write APIs")
+    parser.add_argument("--mobile-sync-only", action="store_true", help="Serve static assets and only mobile sync APIs")
     args = parser.parse_args()
 
+    Handler.static_only = args.static_only
+    Handler.mobile_sync_only = args.mobile_sync_only
     address = (args.host, args.port)
     httpd = ThreadingHTTPServer(address, Handler)
     url = f"http://{args.host}:{args.port}"
     print(f"Gemma 4 12B Web UI: {url}")
+    if args.static_only or args.mobile_sync_only:
+        print("Mode: mobile sync only" if args.mobile_sync_only else "Mode: mobile static preview (write APIs blocked)")
+        for preview_url in mobile_preview_urls(args.port):
+            print(f"Mobile preview URL: {preview_url}")
     print(f"App version: {APP_VERSION} ({app_commit() or 'no-git'})")
     print(f"Ollama: {OLLAMA_URL}")
     print(f"ComfyUI: {COMFYUI_URL}")

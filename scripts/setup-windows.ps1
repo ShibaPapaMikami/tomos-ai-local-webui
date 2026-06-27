@@ -18,6 +18,11 @@ if (-not (Test-Command "python")) {
 
 python --version
 
+python -c "import segno" 2>$null
+if ($LASTEXITCODE -ne 0) {
+  python -m pip install --user segno
+}
+
 if (-not (Test-Command "ollama")) {
   Write-Host "Ollama が見つかりません。"
   Write-Host "https://ollama.com/download から Ollama をインストールしてから、もう一度このスクリプトを実行してください。"

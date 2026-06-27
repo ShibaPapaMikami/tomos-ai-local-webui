@@ -244,8 +244,15 @@ const els = {
   mobileConnectCode: document.querySelector("#mobile-connect-code"),
   mobileConnectExpires: document.querySelector("#mobile-connect-expires"),
   mobileConnectHosts: document.querySelector("#mobile-connect-hosts"),
+  mobileConnectQrImage: document.querySelector("#mobile-connect-qr-image"),
+  mobileConnectQrText: document.querySelector("#mobile-connect-qr-text"),
   mobileConnectStatus: document.querySelector("#mobile-connect-status"),
   mobileConnectRefresh: document.querySelector("#mobile-connect-refresh"),
+  mobileImportJson: document.querySelector("#mobile-import-json"),
+  mobileImportPreview: document.querySelector("#mobile-import-preview"),
+  mobileImportPreviewButton: document.querySelector("#mobile-import-preview-button"),
+  mobileImportApplyButton: document.querySelector("#mobile-import-apply-button"),
+  mobileImportPendingButton: document.querySelector("#mobile-import-pending-button"),
   asrToggle: document.querySelector("#asr-toggle"),
   asrPanel: document.querySelector("#asr-panel"),
   asrClose: document.querySelector("#asr-close"),
@@ -2675,6 +2682,102 @@ function newSession(folderId = state.activeFolderId) {
   saveSessions();
   saveFolders();
   render();
+}
+
+function importMobileChatJson() {
+  let payload = null;
+  try {
+    payload = JSON.parse(els.mobileImportJson?.value || "{}");
+  } catch {
+    if (els.mobileImportPreview) els.mobileImportPreview.textContent = t("management.mobileImportInvalidJson");
+    return;
+  }
+  if (!state.activeFolderId && state.folders.length === 0) {
+    createFolder(t("folder.default"));
+  }
+  if (!state.activeFolderId && state.folders.length > 0) {
+    state.activeFolderId = state.folders[0].id;
+    saveFolders();
+  }
+  const result = window.GEMMA_MANAGEMENT?.mobileImportPayloadToSession?.({
+    payload,
+    folderId: state.activeFolderId,
+    createId: () => crypto.randomUUID(),
+    now: () => Date.now(),
+  });
+  if (!result?.ok || !result.session) {
+    if (els.mobileImportPreview) els.mobileImportPreview.textContent = t("management.mobileImportInvalid");
+    return;
+  }
+  state.sessions = [result.session, ...state.sessions];
+  state.activeId = result.session.id;
+  saveSessions();
+  render();
+  if (els.mobileImportPreview) {
+    els.mobileImportPreview.textContent = t("management.mobileImportApplied", {
+      count: result.summary?.total || result.session.messages.length,
+    });
+  }
+}
+
+async function importPendingMobileChats() {
+  if (els.mobileImportPreview) els.mobileImportPreview.textContent = t("management.mobileImportPendingLoading");
+  try {
+    const response = await fetch("/api/mobile/imports");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const imports = Array.isArray(data.imports) ? data.imports : [];
+    if (imports.length === 0) {
+      if (els.mobileImportPreview) els.mobileImportPreview.textContent = t("management.mobileImportPendingEmpty");
+      return;
+    }
+    if (!state.activeFolderId && state.folders.length === 0) {
+      createFolder(t("folder.default"));
+    }
+    if (!state.activeFolderId && state.folders.length > 0) {
+      state.activeFolderId = state.folders[0].id;
+      saveFolders();
+    }
+    const importedSessions = [];
+    const importedIds = [];
+    for (const item of imports) {
+      const result = window.GEMMA_MANAGEMENT?.mobileImportPayloadToSession?.({
+        payload: item.payload,
+        folderId: state.activeFolderId,
+        createId: () => crypto.randomUUID(),
+        now: () => Date.now(),
+      });
+      if (result?.ok && result.session) {
+        importedSessions.push(result.session);
+        importedIds.push(item.id);
+      }
+    }
+    if (importedSessions.length === 0) {
+      if (els.mobileImportPreview) els.mobileImportPreview.textContent = t("management.mobileImportInvalid");
+      return;
+    }
+    state.sessions = [...importedSessions, ...state.sessions];
+    state.activeId = importedSessions[0].id;
+    saveSessions();
+    render();
+    await fetch("/api/mobile/imports/clear", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: importedIds }),
+    });
+    if (els.mobileImportPreview) {
+      const count = importedSessions.reduce((total, session) => total + session.messages.length, 0);
+      els.mobileImportPreview.textContent = t("management.mobileImportPendingApplied", {
+        count,
+      });
+    }
+  } catch (error) {
+    if (els.mobileImportPreview) {
+      els.mobileImportPreview.textContent = t("management.mobileImportPendingError", {
+        error: error.message,
+      });
+    }
+  }
 }
 
 function activeSession() {
@@ -5380,6 +5483,8 @@ window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
     }
   },
   onOpenWorkspace: openWorkspaceForPlugin,
+  onMobileImport: importMobileChatJson,
+  onMobilePendingImport: importPendingMobileChats,
   onPluginsChanged: render,
 });
 

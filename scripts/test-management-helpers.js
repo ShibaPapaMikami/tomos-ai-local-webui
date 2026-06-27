@@ -27,6 +27,8 @@ const {
   studyPackMenuGroups,
   openManagementPanel,
   renderMobileConnectInfo,
+  summarizeMobileImportPayload,
+  mobileImportPayloadToSession,
   renderPluginsPanel,
   studyPackById,
 } = context.window.GEMMA_MANAGEMENT;
@@ -76,7 +78,18 @@ const labels = {
   "management.mobileConnectExpires": "有効期限: {time}",
   "management.mobileConnectNoLan": "今はPC内だけで待ち受けています。",
   "management.mobileConnectPairingPending": "コード表示のみです。",
+  "management.mobileConnectQrAlt": "スマホで開くQRコード",
+  "management.mobileConnectQrPending": "QRはペアリングコード実装時にここへ表示します",
   "management.mobileConnectReady": "ペアリングコードを発行しました。",
+  "management.mobileImportInvalid": "スマホチャットJSONではありません。",
+  "management.mobileImportInvalidJson": "JSONの形式が正しくありません。",
+  "management.mobileImportApply": "PCへ取り込み",
+  "management.mobileImportApplied": "{count}件をPCのチャット履歴に取り込みました。",
+  "management.mobileImportPending": "スマホ受信を確認",
+  "management.mobileImportPendingLoading": "スマホから届いたチャットを確認中...",
+  "management.mobileImportPendingEmpty": "スマホから届いた未取り込みチャットはありません。",
+  "management.mobileImportPendingApplied": "スマホから届いた{count}件をPCのチャット履歴に取り込みました。",
+  "management.mobileImportPendingError": "スマホ受信の確認に失敗しました: {error}",
   "management.reportWritingPack": "日本語レポート添削",
   "management.candidateSaved": "検討リスト入り（まだ使えません）",
   "management.notAdded": "未追加",
@@ -162,6 +175,13 @@ assert.ok(mobileConnectMenuIndex < basicSettingsMenuIndex, "mobile connection sh
 assert.match(indexHtml, /id="mobile-connect-panel"/);
 assert.match(indexHtml, /id="mobile-connect-code"/);
 assert.match(indexHtml, /id="mobile-connect-hosts"/);
+assert.match(indexHtml, /id="mobile-connect-qr-image"/);
+assert.match(indexHtml, /id="mobile-connect-qr-text"/);
+assert.match(indexHtml, /id="mobile-import-json"/);
+assert.match(indexHtml, /id="mobile-import-preview"/);
+assert.match(indexHtml, /id="mobile-import-preview-button"/);
+assert.match(indexHtml, /id="mobile-import-apply-button"/);
+assert.match(indexHtml, /id="mobile-import-pending-button"/);
 assert.match(indexHtml, /data-i18n="management\.mobileConnect"/);
 assert.match(indexHtml, /data-i18n="management\.mobileConnectLocalOnly"/);
 assert.match(indexHtml, /data-i18n="management\.mobileConnectQrPending"/);
@@ -175,6 +195,8 @@ const mobileConnectEls = {
   mobileConnectExpires: { textContent: "" },
   mobileConnectHosts: { textContent: "" },
   mobileConnectStatus: { textContent: "" },
+  mobileConnectQrImage: { src: "", hidden: true, alt: "" },
+  mobileConnectQrText: { textContent: "" },
 };
 renderMobileConnectInfo({
   els: mobileConnectEls,
@@ -190,7 +212,54 @@ renderMobileConnectInfo({
 assert.equal(mobileConnectEls.mobileConnectCode.textContent, "123456");
 assert.equal(mobileConnectEls.mobileConnectStatus.textContent, "コード表示のみです。");
 assert.equal(mobileConnectEls.mobileConnectHosts.textContent, "http://192.168.1.20:54876");
+assert.equal(mobileConnectEls.mobileConnectQrImage.hidden, false);
+assert.match(mobileConnectEls.mobileConnectQrImage.src, /\/api\/mobile\/qr\.svg\?text=/);
+assert.match(decodeURIComponent(mobileConnectEls.mobileConnectQrImage.src), /http:\/\/192\.168\.1\.20:54876\/m/);
+const qrTarget = new URL(mobileConnectEls.mobileConnectQrImage.src, "http://127.0.0.1").searchParams.get("text");
+assert.match(qrTarget, /http:\/\/192\.168\.1\.20:54876\/m/);
+assert.equal(new URL(qrTarget).searchParams.get("h"), "http://192.168.1.20:54876");
+assert.equal(new URL(qrTarget).searchParams.get("c"), "123456");
+assert.equal(new URL(mobileConnectEls.mobileConnectQrImage.src, "http://127.0.0.1").searchParams.get("v"), "123456");
+assert.match(mobileConnectEls.mobileConnectQrText.textContent, /mobile\.html/);
 assert.match(mobileConnectEls.mobileConnectExpires.textContent, /2026-06-27T10:00:00Z/);
+
+const mobileImportSummary = summarizeMobileImportPayload({
+  type: "gemma4-mobile-chat",
+  messages: [
+    { role: "user", text: "こんにちは", createdAt: "2026-06-27T10:00:00Z" },
+    { role: "assistant", text: "こんにちは。", createdAt: "2026-06-27T10:00:01Z" },
+    { role: "user", text: "学習メモ", createdAt: "2026-06-27T10:00:02Z" },
+  ],
+});
+assert.equal(mobileImportSummary.ok, true);
+assert.equal(mobileImportSummary.total, 3);
+assert.equal(mobileImportSummary.user, 2);
+assert.equal(mobileImportSummary.assistant, 1);
+assert.match(mobileImportSummary.label, /3件/);
+assert.equal(summarizeMobileImportPayload({ type: "wrong", messages: [] }).ok, false);
+
+const mobileImportSession = mobileImportPayloadToSession({
+  payload: {
+    type: "gemma4-mobile-chat",
+    messages: [
+      { role: "user", text: "こんにちは", createdAt: "2026-06-27T10:00:00Z" },
+      { role: "assistant", text: "こんにちは。", createdAt: "2026-06-27T10:00:01Z" },
+      { role: "system", text: "無視", createdAt: "2026-06-27T10:00:02Z" },
+    ],
+  },
+  folderId: "folder-1",
+  createId: () => "mobile-session-1",
+  now: () => 1234567890,
+});
+assert.equal(mobileImportSession.ok, true);
+assert.equal(mobileImportSession.session.id, "mobile-session-1");
+assert.equal(mobileImportSession.session.folderId, "folder-1");
+assert.match(mobileImportSession.session.title, /スマホチャット/);
+assert.deepEqual(JSON.parse(JSON.stringify(mobileImportSession.session.messages)), [
+  { role: "user", content: "こんにちは" },
+  { role: "assistant", content: "こんにちは。" },
+]);
+assert.equal(mobileImportPayloadToSession({ payload: { type: "wrong", messages: [] } }).ok, false);
 
 async function runImportTests() {
   const makeFile = (name, content) => ({

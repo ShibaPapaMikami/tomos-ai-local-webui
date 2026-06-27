@@ -643,6 +643,106 @@ window.GEMMA_MANAGEMENT = (() => {
         ? hosts.join("\n")
         : t("management.mobileConnectNoLan");
     }
+    const hosts = Array.isArray(info.hostCandidates) ? info.hostCandidates : [];
+    const pcHost = info.qrPayload?.host
+      ? String(info.qrPayload.host).replace(/\/+$/, "")
+      : hosts.length > 0
+        ? String(hosts[0]).replace(/\/+$/, "")
+        : "";
+    const mobileUrl = pcHost
+      ? `${pcHost}/m?h=${encodeURIComponent(pcHost)}&c=${encodeURIComponent(info.pairingCode || "")}`
+      : "";
+    const qrText = info.qrPayload?.host
+      ? `${String(info.qrPayload.host).replace(/\/+$/, "")}/mobile.html`
+      : hosts.length > 0
+        ? `${String(hosts[0]).replace(/\/+$/, "")}/mobile.html`
+        : "";
+    if (els.mobileConnectQrImage) {
+      if (mobileUrl) {
+        els.mobileConnectQrImage.hidden = false;
+        els.mobileConnectQrImage.src = `/api/mobile/qr.svg?text=${encodeURIComponent(mobileUrl)}&v=${encodeURIComponent(info.pairingCode || Date.now())}`;
+        els.mobileConnectQrImage.alt = t("management.mobileConnectQrAlt");
+      } else {
+        els.mobileConnectQrImage.hidden = true;
+        els.mobileConnectQrImage.removeAttribute?.("src");
+      }
+    }
+    if (els.mobileConnectQrText) {
+      els.mobileConnectQrText.textContent = qrText || t("management.mobileConnectQrPending");
+    }
+  }
+
+  function summarizeMobileImportPayload(payload) {
+    if (!payload || payload.type !== "gemma4-mobile-chat" || !Array.isArray(payload.messages)) {
+      return {
+        ok: false,
+        total: 0,
+        user: 0,
+        assistant: 0,
+        label: "スマホチャットJSONではありません。",
+      };
+    }
+    const validMessages = payload.messages.filter((message) => {
+      const role = String(message?.role || "");
+      const text = String(message?.text || "").trim();
+      return (role === "user" || role === "assistant") && Boolean(text);
+    });
+    const user = validMessages.filter((message) => message.role === "user").length;
+    const assistant = validMessages.filter((message) => message.role === "assistant").length;
+    return {
+      ok: true,
+      total: validMessages.length,
+      user,
+      assistant,
+      label: `取り込み候補: ${validMessages.length}件（あなた ${user}件 / Gemma ${assistant}件）`,
+    };
+  }
+
+  function mobileImportPayloadToSession({
+    payload,
+    folderId = "",
+    createId = () => crypto.randomUUID(),
+    now = () => Date.now(),
+  } = {}) {
+    const summary = summarizeMobileImportPayload(payload);
+    if (!summary.ok || summary.total === 0) {
+      return { ok: false, summary, session: null };
+    }
+    const createdAt = now();
+    const messages = payload.messages
+      .map((message) => ({
+        role: String(message?.role || ""),
+        content: String(message?.text || "").trim(),
+      }))
+      .filter((message) => (message.role === "user" || message.role === "assistant") && Boolean(message.content));
+    const firstUserMessage = messages.find((message) => message.role === "user")?.content || "";
+    const titleSuffix = firstUserMessage ? `: ${firstUserMessage.slice(0, 24)}` : "";
+    return {
+      ok: true,
+      summary,
+      session: {
+        id: createId(),
+        title: `スマホチャット${titleSuffix}`,
+        folderId,
+        messages,
+        createdAt,
+      },
+    };
+  }
+
+  function previewMobileImportJson({ els, t }) {
+    if (!els.mobileImportPreview) return null;
+    try {
+      const payload = JSON.parse(els.mobileImportJson?.value || "{}");
+      const summary = summarizeMobileImportPayload(payload);
+      els.mobileImportPreview.textContent = summary.ok
+        ? summary.label
+        : t("management.mobileImportInvalid");
+      return summary;
+    } catch {
+      els.mobileImportPreview.textContent = t("management.mobileImportInvalidJson");
+      return null;
+    }
   }
 
   async function refreshMobileConnectInfo({ els, t }) {
@@ -830,7 +930,17 @@ window.GEMMA_MANAGEMENT = (() => {
     renderPluginsPanel({ state, els, t });
   }
 
-  function bindManagementEvents({ els, state, t, onOpenSettings, onOpenCharacter, onOpenWorkspace, onPluginsChanged }) {
+  function bindManagementEvents({
+    els,
+    state,
+    t,
+    onOpenSettings,
+    onOpenCharacter,
+    onOpenWorkspace,
+    onMobileImport,
+    onMobilePendingImport,
+    onPluginsChanged,
+  }) {
     els.settingsMenuToggle?.addEventListener("click", () => {
       setSidebarSettingsMode({ els, open: true });
     });
@@ -856,6 +966,15 @@ window.GEMMA_MANAGEMENT = (() => {
     });
     els.mobileConnectRefresh?.addEventListener("click", () => {
       refreshMobileConnectInfo({ els, t });
+    });
+    els.mobileImportPreviewButton?.addEventListener("click", () => {
+      previewMobileImportJson({ els, t });
+    });
+    els.mobileImportApplyButton?.addEventListener("click", () => {
+      onMobileImport?.();
+    });
+    els.mobileImportPendingButton?.addEventListener("click", () => {
+      onMobilePendingImport?.();
     });
     els.responseSettingsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.responseSettingsPanel });
@@ -979,6 +1098,9 @@ window.GEMMA_MANAGEMENT = (() => {
     openManagementPanel,
     setupManagementPanels,
     renderMobileConnectInfo,
+    summarizeMobileImportPayload,
+    mobileImportPayloadToSession,
+    previewMobileImportJson,
     refreshMobileConnectInfo,
     renderStudyPacksPanel,
     toggleSampleStudyPack,

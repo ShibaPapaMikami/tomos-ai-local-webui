@@ -3,12 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f1e8" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Gemma 4" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Gemma 4 12B</title>
     <script>
       if (window.location.protocol === "file:") {
         window.location.replace("http://127.0.0.1:54876/");
       }
     </script>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="stylesheet" href="/styles.css?v=0.8.196" />
   </head>
   <body>
@@ -374,7 +381,8 @@
           <div class="management-note" data-i18n="management.mobileConnectLocalOnly">外部公開やクラウド同期は使いません。スマホから接続する時は、このPCと同じLAN内だけに限定します。</div>
           <div class="management-panel-body mobile-connect-body">
             <div class="mobile-connect-qr" aria-label="スマホ接続QRコード準備中" data-i18n-aria-label="management.mobileConnectQrLabel">
-              <span data-i18n="management.mobileConnectQrPending">QRはペアリングコード実装時にここへ表示します</span>
+              <img id="mobile-connect-qr-image" alt="スマホで開くQRコード" data-i18n-alt="management.mobileConnectQrAlt" hidden />
+              <span id="mobile-connect-qr-text" data-i18n="management.mobileConnectQrPending">スマホ接続用QRを準備中です</span>
             </div>
             <div class="mobile-connect-steps">
               <div class="management-card mobile-connect-code-card">
@@ -395,19 +403,32 @@
               <div class="management-card">
                 <div>
                   <strong data-i18n="management.mobileConnectSameLan">同じWi-Fiで接続</strong>
-                  <span data-i18n="management.mobileConnectSameLanHelp">今は安全のためPC内だけで待ち受けます。ペアリング実装後、同じLAN内のPCアドレスへ接続します。</span>
+                  <span data-i18n="management.mobileConnectSameLanHelp">スマホでQRを読み取ると、同じLAN内のPCアドレスを開きます。</span>
                 </div>
               </div>
               <div class="management-card">
                 <div>
                   <strong data-i18n="management.mobileConnectPairing">QR / 6桁コードでペアリング</strong>
-                  <span data-i18n="management.mobileConnectPairingHelp">次の実装で、有効期限つきワンタイムコードと接続済み端末の解除を追加します。</span>
+                  <span data-i18n="management.mobileConnectPairingHelp">QRはスマホ画面を開きます。接続時は下の6桁コードをスマホ側に入力します。</span>
                 </div>
               </div>
               <div class="management-card">
                 <div>
                   <strong data-i18n="management.mobileConnectMemoryHome">記憶はPC側に保存</strong>
                   <span data-i18n="management.mobileConnectMemoryHomeHelp">スマホは軽いリモートUIとして扱い、チャット履歴・キャラ記憶・学習セットはPC側に保存します。</span>
+                </div>
+              </div>
+              <div class="management-card mobile-import-card">
+                <div>
+                  <strong data-i18n="management.mobileImportJson">スマホJSONを確認</strong>
+                  <span data-i18n="management.mobileImportJsonHelp">スマホの「PC取り込み用JSON」を貼り付けると、PCへ取り込む前に件数を確認できます。</span>
+                  <textarea id="mobile-import-json" rows="5" placeholder="gemma4-mobile-chat のJSONを貼り付け" data-i18n-placeholder="management.mobileImportJsonPlaceholder"></textarea>
+                  <small id="mobile-import-preview" data-i18n="management.mobileImportIdle">未確認</small>
+                </div>
+                <div class="mobile-import-actions">
+                  <button class="ghost-button" id="mobile-import-preview-button" type="button" data-i18n="management.mobileImportPreview">確認</button>
+                  <button class="primary-button" id="mobile-import-apply-button" type="button" data-i18n="management.mobileImportApply">PCへ取り込み</button>
+                  <button class="ghost-button" id="mobile-import-pending-button" type="button" data-i18n="management.mobileImportPending">スマホ受信を確認</button>
                 </div>
               </div>
             </div>
@@ -927,6 +948,7 @@
   <script src="/management.js?v=0.8.196"></script>
   <script src="/router.js?v=0.8.196"></script>
   <script src="/search.js?v=0.8.196"></script>
+  <script src="/pwa.js?v=0.8.196"></script>
   <script src="/app.js?v=0.8.196"></script>
-  </body>
+</body>
 </html>

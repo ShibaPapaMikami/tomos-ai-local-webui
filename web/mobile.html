@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f1e8" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Gemma 4" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>Gemma 4 スマホチャット</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f1e8;
+        --panel: #fffaf1;
+        --text: #202124;
+        --muted: #64605a;
+        --line: #d8d1c5;
+        --accent: #0b57d0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .mobile-shell {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        min-height: 100dvh;
+      }
+
+      header,
+      main,
+      footer {
+        padding: 14px;
+      }
+
+      header {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .mark {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        flex: 0 0 auto;
+        place-items: center;
+        border-radius: 10px;
+        background: var(--text);
+        color: var(--panel);
+        font-weight: 800;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 17px;
+        letter-spacing: 0;
+      }
+
+      .subtitle,
+      .empty,
+      .ai-status,
+      .import-summary {
+        margin: 2px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      main {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+        overflow: auto;
+      }
+
+      .chat-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .message-row {
+        display: flex;
+      }
+
+      .message-row.user {
+        justify-content: flex-end;
+      }
+
+      .message-row.assistant {
+        justify-content: flex-start;
+      }
+
+      .message-bubble {
+        display: grid;
+        gap: 8px;
+        max-width: min(86%, 420px);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 12px;
+      }
+
+      .message-row.user .message-bubble {
+        border-color: var(--accent);
+        background: #e9f1ff;
+      }
+
+      .message-bubble p {
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .message-bubble small {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .pc-connect {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 12px;
+      }
+
+      .pc-connect h2 {
+        margin: 0;
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+
+      .pc-connect-fields {
+        display: grid;
+        grid-template-columns: 1fr 112px;
+        gap: 8px;
+      }
+
+      input {
+        min-height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        padding: 0 10px;
+        font: inherit;
+      }
+
+      footer {
+        display: grid;
+        gap: 10px;
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+        padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 86px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        padding: 12px;
+        font: inherit;
+        line-height: 1.5;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+      }
+
+      .secondary-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      button,
+      a.action-link {
+        min-height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        font: inherit;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+
+      a.action-link {
+        display: grid;
+        place-items: center;
+        padding: 0 12px;
+      }
+
+      .export-output {
+        width: 100%;
+        min-height: 92px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        padding: 10px;
+        font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mobile-shell">
+      <header>
+        <div class="mark">G4</div>
+        <div>
+          <h1>スマホチャット</h1>
+          <p class="subtitle">PCなしでチャット風に記録し、あとでPCへ取り込みます。</p>
+          <p class="ai-status" id="mobile-ai-status">AI: 確認中</p>
+        </div>
+      </header>
+      <main>
+        <section class="pc-connect" aria-label="PCに接続">
+          <h2>PCに接続</h2>
+          <p class="subtitle">PCのスマホ接続画面に出るURLと6桁コードを入れます。</p>
+          <div class="pc-connect-fields">
+            <input id="mobile-pc-host" type="url" inputmode="url" placeholder="http://192.168.x.x:54876" />
+            <input id="mobile-pc-code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" />
+          </div>
+          <button id="mobile-pc-save" type="button">接続先を保存</button>
+          <p class="import-summary" id="mobile-pc-status">PC未接続</p>
+        </section>
+        <section class="chat-list" id="mobile-chat-list" aria-label="スマホチャット"></section>
+      </main>
+      <footer>
+        <textarea id="mobile-chat-input" placeholder="スマホ単体チャットに送信。今はAIなしで、相手の返事はあとからPCへ取り込めます。"></textarea>
+        <div class="actions">
+          <button class="primary" id="mobile-chat-send" type="button">送信</button>
+          <a class="action-link" href="/mobile-check.html">接続チェック</a>
+        </div>
+        <div class="secondary-actions">
+          <button id="mobile-chat-export" type="button">PC取り込み用JSON</button>
+          <button id="mobile-chat-send-pc" type="button">PCへ送信</button>
+          <button id="mobile-chat-mark-imported" type="button">取り込み済みにする</button>
+          <button id="mobile-chat-clear" type="button">履歴削除</button>
+        </div>
+        <p class="import-summary" id="mobile-import-summary">未取り込み 0件</p>
+        <textarea class="export-output" id="mobile-chat-export-output" readonly hidden></textarea>
+      </footer>
+    </div>
+    <script src="/mobile-standalone.js?v=0.8.196"></script>
+  </body>
+</html>

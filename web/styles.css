@@ -791,13 +791,15 @@ h1 {
 }
 
 .mobile-connect-body {
-  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 328px) minmax(0, 1fr);
   align-items: start;
 }
 
 .mobile-connect-qr {
   display: grid;
-  min-height: 220px;
+  min-height: 320px;
+  min-width: 0;
+  overflow: hidden;
   place-items: center;
   border: 1px dashed var(--line);
   border-radius: 8px;
@@ -809,6 +811,16 @@ h1 {
   line-height: 1.5;
   padding: 18px;
   text-align: center;
+}
+
+.mobile-connect-qr img {
+  display: block;
+  inline-size: min(100%, 280px);
+  block-size: auto;
+}
+
+.mobile-connect-qr span {
+  overflow-wrap: anywhere;
 }
 
 .mobile-connect-steps {
@@ -1699,6 +1711,20 @@ h1 {
 @media (max-width: 760px) {
   .external-llm-guide {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1040px) {
+  .mobile-connect-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mobile-connect-qr {
+    min-height: 260px;
+  }
+
+  .mobile-connect-qr img {
+    inline-size: min(100%, 240px);
   }
 }
 
@@ -4148,7 +4174,12 @@ select:focus {
   }
 
   .mobile-connect-qr {
-    min-height: 180px;
+    min-height: 220px;
+    padding: 14px;
+  }
+
+  .mobile-connect-qr img {
+    inline-size: min(100%, 220px);
   }
 
   .plugin-facts div,
