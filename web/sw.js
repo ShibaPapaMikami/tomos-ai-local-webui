@@ -1,4 +1,4 @@
-const CACHE_NAME = "gemma4-pwa-0.8.196-mobile-chat-tools-1";
+const CACHE_NAME = "gemma4-pwa-0.8.196-mobile-chat-tools-8";
 const APP_SHELL = [
   "/",
   "/mobile.html",
@@ -24,9 +24,9 @@ const APP_SHELL = [
   "/management.js?v=0.8.196",
   "/router.js?v=0.8.196",
   "/search.js?v=0.8.196",
-  "/pwa.js?v=0.8.196",
-  "/mobile-standalone.js?v=0.8.196",
-  "/app.js?v=0.8.196",
+  "/pwa.js?v=0.8.196-pwa8",
+  "/mobile-standalone.js?v=0.8.196-mobile3",
+  "/app.js?v=0.8.196-pwa8",
   "/icons/icon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png"
@@ -58,10 +58,15 @@ self.addEventListener("fetch", (event) => {
       fetch(event.request)
         .then((response) => {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("/", copy));
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
           return response;
         })
-        .catch(() => caches.match("/") || caches.match("/offline.html"))
+        .catch(() => {
+          if (url.pathname === "/m" || url.pathname === "/mobile.html") {
+            return caches.match("/mobile.html") || caches.match("/offline.html");
+          }
+          return caches.match(event.request) || caches.match("/") || caches.match("/mobile.html") || caches.match("/offline.html");
+        })
     );
     return;
   }

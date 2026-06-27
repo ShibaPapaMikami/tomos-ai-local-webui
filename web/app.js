@@ -51,7 +51,7 @@ const state = {
   }) ?? localStorage.getItem("gemma4.sidebarHidden") === "true",
   sidebarWidth: Number(localStorage.getItem("gemma4.sidebarWidth")) || 268,
   language: localStorage.getItem("gemma4.language") || "ja",
-  theme: localStorage.getItem("gemma4.theme") || "dark",
+  theme: localStorage.getItem("gemma4.theme") || "light",
   responseMode: localStorage.getItem("gemma4.responseMode") || "auto",
   thinkingMode: localStorage.getItem("gemma4.thinkingMode") || "auto",
   modelOverrides: {
@@ -1322,10 +1322,21 @@ function selectFirstSessionInActiveFolder() {
 }
 
 function setTheme(theme) {
-  state.theme = ["dark", "light", "green"].includes(theme) ? theme : "dark";
+  state.theme = ["dark", "light", "green"].includes(theme) ? theme : "light";
   document.body.dataset.theme = state.theme;
   localStorage.setItem("gemma4.theme", state.theme);
   if (els.themeSelect) els.themeSelect.value = state.theme;
+}
+
+function openInitialManagementPanelFromUrl() {
+  const params = new URLSearchParams(window.location.search || "");
+  const panel = window.location.pathname === "/pc-mobile-connect"
+    ? "mobile-connect"
+    : params.get("panel") || window.location.hash.replace(/^#/, "");
+  if (panel !== "mobile-connect") return;
+  window.GEMMA_MANAGEMENT?.setSidebarSettingsMode?.({ els, open: true });
+  window.GEMMA_MANAGEMENT?.openManagementPanel?.({ els, panel: els.mobileConnectPanel });
+  window.GEMMA_MANAGEMENT?.refreshMobileConnectInfo?.({ els, t });
 }
 
 function setLanguageFromControl(language) {
@@ -5615,4 +5626,5 @@ if (state.folders.length > 0 && sessionsForActiveFolder().length === 0) {
 if (state.workspaceRoot) loadWorkspace();
 
 checkHealth();
+openInitialManagementPanelFromUrl();
 setInterval(checkHealth, 10000);

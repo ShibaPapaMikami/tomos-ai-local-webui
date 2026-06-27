@@ -411,6 +411,18 @@ def mobile_pairing_code_is_valid(pairing_code: str, now: float | None = None) ->
     return bool(pairing_code and pairing_code == expected and current_time <= expires_at)
 
 
+def current_or_new_mobile_pairing_code(now: float | None = None) -> tuple[str, float]:
+    current_time = time.time() if now is None else now
+    existing_code = str(MOBILE_PAIRING_STATE.get("pairingCode") or "")
+    existing_expires_at = float(MOBILE_PAIRING_STATE.get("expiresAtEpoch") or 0)
+    if existing_code and current_time <= existing_expires_at:
+        return existing_code, existing_expires_at
+    pairing_code = f"{random.SystemRandom().randint(0, 999999):06d}"
+    expires_at_epoch = current_time + MOBILE_PAIRING_TTL_SECONDS
+    set_mobile_pairing_code(pairing_code, expires_at_epoch)
+    return pairing_code, expires_at_epoch
+
+
 def mobile_chat_import_summary(payload: dict) -> dict:
     if not isinstance(payload, dict) or payload.get("type") != "gemma4-mobile-chat":
         return {"ok": False, "error": "invalid_payload", "total": 0, "user": 0, "assistant": 0}
@@ -479,10 +491,8 @@ def mobile_connect_info(
     lan_enabled = normalized_host not in {"127.0.0.1", "localhost", "::1"}
     addresses = lan_addresses if lan_addresses is not None else local_lan_ipv4_addresses()
     host_candidates = [f"http://{address}:{port}" for address in addresses] if lan_enabled else []
-    pairing_code = f"{random.SystemRandom().randint(0, 999999):06d}"
     current_time = time.time() if now is None else now
-    expires_at_epoch = current_time + MOBILE_PAIRING_TTL_SECONDS
-    set_mobile_pairing_code(pairing_code, expires_at_epoch)
+    pairing_code, expires_at_epoch = current_or_new_mobile_pairing_code(now=current_time)
     expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at_epoch))
     qr_payload = {
         "host": host_candidates[0],
@@ -520,12 +530,17 @@ def is_loopback_client(host: str) -> bool:
     return normalized == "localhost" or normalized == "::1" or normalized.startswith("127.")
 
 
+def is_local_pc_client(host: str) -> bool:
+    normalized = str(host or "").lower()
+    return is_loopback_client(normalized) or normalized in set(local_lan_ipv4_addresses())
+
+
 def mobile_api_access_allowed(method: str, path: str, client_host: str) -> bool:
     normalized_method = str(method or "").upper()
     if normalized_method == "POST" and path == "/api/mobile/import-chat":
         return True
     if path in {"/api/mobile/connect-info", "/api/mobile/imports", "/api/mobile/imports/clear", "/api/mobile/qr.svg"}:
-        return is_loopback_client(client_host)
+        return is_local_pc_client(client_host)
     return False
 
 
@@ -3396,6 +3411,8 @@ class Handler(BaseHTTPRequestHandler):
             file_path = WEB_ROOT / ("mobile.html" if self.static_only else "index.html")
         elif path == "/m":
             file_path = WEB_ROOT / "mobile.html"
+        elif path == "/pc-mobile-connect":
+            file_path = WEB_ROOT / "index.html"
         else:
             file_path = (WEB_ROOT / path.lstrip("/")).resolve()
             if not str(file_path).startswith(str(WEB_ROOT.resolve())):

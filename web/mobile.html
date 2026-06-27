@@ -80,6 +80,34 @@
         line-height: 1.45;
       }
 
+      .connection-state {
+        display: grid;
+        gap: 4px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 10px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .connection-state strong {
+        color: var(--text);
+        font-size: 13px;
+      }
+
+      .connection-state.saved,
+      .connection-state.sent {
+        border-color: #1f8f5f;
+        background: #eefaf3;
+      }
+
+      .connection-state.error {
+        border-color: #b3261e;
+        background: #fff2f0;
+      }
+
       main {
         display: grid;
         align-content: start;
@@ -139,6 +167,91 @@
         border-radius: 8px;
         background: var(--panel);
         padding: 12px;
+      }
+
+      .desktop-notice {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 12px;
+      }
+
+      .desktop-notice[hidden] {
+        display: none;
+      }
+
+      .desktop-notice h2 {
+        margin: 0;
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+
+      .ai-panel {
+        display: grid;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        padding: 12px;
+      }
+
+      .ai-panel h2 {
+        margin: 0;
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+
+      .ai-diagnostics {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .ai-diagnostics li {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .ai-diagnostics strong {
+        color: var(--text);
+      }
+
+      .ai-candidates {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .ai-candidates li {
+        display: grid;
+        gap: 4px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .ai-candidates strong {
+        color: var(--text);
+      }
+
+      .ai-candidates .recommended {
+        border-color: var(--accent);
+        background: #e9f1ff;
       }
 
       .pc-connect h2 {
@@ -240,10 +353,16 @@
         <div>
           <h1>スマホチャット</h1>
           <p class="subtitle">PCなしでチャット風に記録し、あとでPCへ取り込みます。</p>
+          <p class="subtitle" id="mobile-app-version">アプリ版 0.8.196</p>
           <p class="ai-status" id="mobile-ai-status">AI: 確認中</p>
         </div>
       </header>
       <main>
+        <section class="desktop-notice" id="mobile-desktop-notice" hidden>
+          <h2>PCでスマホ画面を開いています</h2>
+          <p class="subtitle">この `/m` はスマホ用の短縮URLです。PC本体画面を使う場合は下のリンクで戻れます。</p>
+          <a class="action-link" href="/pc-mobile-connect">PC版のスマホ接続を開く</a>
+        </section>
         <section class="pc-connect" aria-label="PCに接続">
           <h2>PCに接続</h2>
           <p class="subtitle">PCのスマホ接続画面に出るURLと6桁コードを入れます。</p>
@@ -252,7 +371,17 @@
             <input id="mobile-pc-code" type="text" inputmode="numeric" maxlength="6" placeholder="123456" />
           </div>
           <button id="mobile-pc-save" type="button">接続先を保存</button>
-          <p class="import-summary" id="mobile-pc-status">PC未接続</p>
+          <div class="connection-state" id="mobile-pc-status" role="status" aria-live="polite">
+            <strong>PC未接続</strong>
+            <span>QRを読み取るか、PC URLと6桁コードを保存してください。</span>
+          </div>
+        </section>
+        <section class="ai-panel" aria-label="スマホ単体AI">
+          <h2>スマホ単体AI</h2>
+          <p class="subtitle" id="mobile-ai-plan">端末のAI実行候補を確認中です。</p>
+          <ul class="ai-diagnostics" id="mobile-ai-diagnostics"></ul>
+          <h2>実験候補</h2>
+          <ul class="ai-candidates" id="mobile-ai-candidates"></ul>
         </section>
         <section class="chat-list" id="mobile-chat-list" aria-label="スマホチャット"></section>
       </main>
@@ -272,6 +401,7 @@
         <textarea class="export-output" id="mobile-chat-export-output" readonly hidden></textarea>
       </footer>
     </div>
-    <script src="/mobile-standalone.js?v=0.8.196"></script>
+    <script src="/pwa.js?v=0.8.196-pwa8"></script>
+    <script src="/mobile-standalone.js?v=0.8.196-mobile3"></script>
   </body>
 </html>

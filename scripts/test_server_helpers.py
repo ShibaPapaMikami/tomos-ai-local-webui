@@ -310,6 +310,28 @@ def test_mobile_connect_info_lan_host_builds_pairing_payload() -> None:
     assert payload["qrPayload"]["expiresAt"] == payload["expiresAt"]
 
 
+def test_mobile_connect_info_reuses_active_pairing_code() -> None:
+    previous_state = server.MOBILE_PAIRING_STATE.copy()
+    try:
+        server.MOBILE_PAIRING_STATE.clear()
+        first = server.mobile_connect_info("0.0.0.0", 54876, lan_addresses=["192.168.1.20"], now=1000)
+        second = server.mobile_connect_info("0.0.0.0", 54876, lan_addresses=["192.168.1.20"], now=1005)
+        assert second["pairingCode"] == first["pairingCode"]
+        assert second["expiresAt"] == first["expiresAt"]
+
+        expired = server.mobile_connect_info(
+            "0.0.0.0",
+            54876,
+            lan_addresses=["192.168.1.20"],
+            now=1000 + server.MOBILE_PAIRING_TTL_SECONDS + 1,
+        )
+        assert expired["pairingCode"] != first["pairingCode"]
+        assert expired["expiresAt"] != first["expiresAt"]
+    finally:
+        server.MOBILE_PAIRING_STATE.clear()
+        server.MOBILE_PAIRING_STATE.update(previous_state)
+
+
 def test_mobile_chat_import_requires_current_pairing_code() -> None:
     previous_state = server.MOBILE_PAIRING_STATE.copy()
     previous_imports = list(server.MOBILE_PENDING_IMPORTS)
@@ -344,6 +366,10 @@ def test_mobile_preview_urls_use_lan_addresses() -> None:
     assert urls == ["http://10.0.0.5:54876", "http://192.168.1.20:54876"]
 
 
+def test_mobile_static_routes_include_pc_mobile_connect_alias() -> None:
+    assert server.static_preview_get_api_allowed("/pc-mobile-connect") is True
+
+
 def test_static_preview_blocks_non_health_get_api() -> None:
     assert server.static_preview_get_api_allowed("/api/health") is True
     assert server.static_preview_get_api_allowed("/api/mobile/connect-info") is False
@@ -371,6 +397,17 @@ def test_mobile_api_access_limits_pairing_and_imports_to_local_pc() -> None:
     assert server.mobile_api_access_allowed("GET", "/api/mobile/qr.svg", "192.168.1.40") is False
     assert server.mobile_api_access_allowed("GET", "/api/mobile/imports", "192.168.1.40") is False
     assert server.mobile_api_access_allowed("POST", "/api/mobile/imports/clear", "192.168.1.40") is False
+
+
+def test_mobile_api_access_allows_pc_lan_address_for_management_apis() -> None:
+    original = server.local_lan_ipv4_addresses
+    try:
+        server.local_lan_ipv4_addresses = lambda: ["192.168.1.20"]
+        assert server.mobile_api_access_allowed("GET", "/api/mobile/connect-info", "192.168.1.20") is True
+        assert server.mobile_api_access_allowed("GET", "/api/mobile/qr.svg", "192.168.1.20") is True
+        assert server.mobile_api_access_allowed("GET", "/api/mobile/imports", "192.168.1.40") is False
+    finally:
+        server.local_lan_ipv4_addresses = original
 
 
 def test_mobile_qr_svg_contains_svg_modules() -> None:
@@ -414,11 +451,14 @@ if __name__ == "__main__":
     test_external_llm_url_allows_only_localhost()
     test_mobile_connect_info_localhost_is_not_lan_enabled()
     test_mobile_connect_info_lan_host_builds_pairing_payload()
+    test_mobile_connect_info_reuses_active_pairing_code()
     test_mobile_chat_import_requires_current_pairing_code()
     test_mobile_preview_urls_use_lan_addresses()
+    test_mobile_static_routes_include_pc_mobile_connect_alias()
     test_static_preview_blocks_non_health_get_api()
     test_mobile_sync_allows_only_mobile_api()
     test_mobile_api_access_limits_pairing_and_imports_to_local_pc()
+    test_mobile_api_access_allows_pc_lan_address_for_management_apis()
     test_mobile_qr_svg_contains_svg_modules()
     test_decode_subprocess_output_handles_invalid_locale_bytes()
     test_iter_subprocess_output_lines_handles_binary_lines()
