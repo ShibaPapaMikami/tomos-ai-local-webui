@@ -3,7 +3,7 @@ setlocal
 
 cd /d "%~dp0"
 
-set GEMMA_APP_VERSION=0.8.200
+set GEMMA_APP_VERSION=0.8.201
 if "%GEMMA_MODEL%"=="" set GEMMA_MODEL=gemma4:12b
 if "%GEMMA_CODING_MODEL%"=="" set GEMMA_CODING_MODEL=%GEMMA_MODEL%
 if "%GEMMA_TRANSLATION_MODEL%"=="" set GEMMA_TRANSLATION_MODEL=auto
@@ -35,14 +35,13 @@ if "%OLLAMA_EXE%"=="" if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "
 if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles%\Ollama\ollama.exe"
 if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles(x86)%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles(x86)%\Ollama\ollama.exe"
 if "%OLLAMA_EXE%"=="" (
-  echo Ollama is not installed or could not be found.
-  echo Install Ollama from https://ollama.com/download, then open Ollama once.
-  pause
-  exit /b 1
+  echo Ollama was not found. Gemma4_12B can still open without Ollama.
+  echo Local chat and model download features need Ollama when you use them.
+  echo Install later from https://ollama.com/download if needed.
 )
 
-curl -s http://127.0.0.1:11434/api/version >nul 2>nul
-if errorlevel 1 (
+if not "%OLLAMA_EXE%"=="" curl -s http://127.0.0.1:11434/api/version >nul 2>nul
+if not "%OLLAMA_EXE%"=="" if errorlevel 1 (
   echo Starting Ollama server...
   start "Ollama" /min "%OLLAMA_EXE%" serve
   timeout /t 3 >nul
