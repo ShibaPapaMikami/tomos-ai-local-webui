@@ -32,9 +32,14 @@ if errorlevel 1 (
   exit /b 1
 )
 
-where ollama >nul 2>nul
-if errorlevel 1 (
-  echo Ollama is not installed or not available in PATH.
+set OLLAMA_EXE=
+for %%I in (ollama.exe) do set "OLLAMA_EXE=%%~$PATH:I"
+if "%OLLAMA_EXE%"=="" if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "OLLAMA_EXE=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
+if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles%\Ollama\ollama.exe"
+if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles(x86)%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles(x86)%\Ollama\ollama.exe"
+if "%OLLAMA_EXE%"=="" (
+  echo Ollama is not installed or could not be found.
+  echo Install Ollama from https://ollama.com/download, then open Ollama once.
   pause
   exit /b 1
 )
@@ -42,7 +47,7 @@ if errorlevel 1 (
 curl -s http://127.0.0.1:11434/api/version >nul 2>nul
 if errorlevel 1 (
   echo Starting Ollama...
-  start "Ollama" /min ollama serve
+  start "Ollama" /min "%OLLAMA_EXE%" serve
   timeout /t 3 >nul
 )
 

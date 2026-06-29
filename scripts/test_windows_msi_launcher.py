@@ -11,6 +11,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WXS_PATH = ROOT / "dist" / "msi" / "Gemma4_12B.wxs"
+WEB_BAT_PATH = ROOT / "Gemma4_12B_Web.bat"
+ALL_START_BAT_PATH = ROOT / "Gemma4_12B_All_Start.bat"
+WINDOWS_LAUNCHER_SOURCE = ROOT / "tools" / "windows-launcher" / "Gemma4Launcher.cs"
 
 
 class WindowsMsiLauncherTest(unittest.TestCase):
@@ -39,6 +42,25 @@ class WindowsMsiLauncherTest(unittest.TestCase):
         self.assertNotIn('Target="[INSTALLFOLDER]Gemma4_12B_Web.bat"', self.wxs)
         self.assertNotIn('Target="[INSTALLFOLDER]Gemma4_12B_All_Start.bat"', self.wxs)
         self.assertNotIn('Target="[INSTALLFOLDER]Gemma4_12B_Stop_Heavy.bat"', self.wxs)
+
+    def test_windows_batch_launchers_find_standard_ollama_install_paths(self) -> None:
+        for bat_path in (WEB_BAT_PATH, ALL_START_BAT_PATH):
+            with self.subTest(bat=bat_path.name):
+                text = bat_path.read_text(encoding="utf-8")
+                self.assertIn(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe", text)
+                self.assertIn(r"%ProgramFiles%\Ollama\ollama.exe", text)
+                self.assertIn("set OLLAMA_EXE=", text)
+                self.assertIn('start "Ollama" /min "%OLLAMA_EXE%" serve', text)
+
+    def test_windows_launcher_prompts_for_ollama_install_when_missing(self) -> None:
+        text = WINDOWS_LAUNCHER_SOURCE.read_text(encoding="utf-8")
+        self.assertIn("FindOllamaExecutable", text)
+        self.assertIn("ShowOllamaInstallPrompt", text)
+        self.assertIn("https://ollama.com/download", text)
+        self.assertIn('"LOCALAPPDATA"', text)
+        self.assertIn('"ProgramFiles"', text)
+        self.assertIn('"Ollama"', text)
+        self.assertIn('"ollama.exe"', text)
 
 
 if __name__ == "__main__":
