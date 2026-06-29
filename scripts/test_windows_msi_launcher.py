@@ -43,23 +43,26 @@ class WindowsMsiLauncherTest(unittest.TestCase):
         self.assertNotIn('Target="[INSTALLFOLDER]Gemma4_12B_All_Start.bat"', self.wxs)
         self.assertNotIn('Target="[INSTALLFOLDER]Gemma4_12B_Stop_Heavy.bat"', self.wxs)
 
-    def test_windows_batch_launchers_start_web_ui_without_ollama(self) -> None:
+    def test_windows_batch_launchers_stop_with_clear_ollama_requirement(self) -> None:
         for bat_path in (WEB_BAT_PATH, ALL_START_BAT_PATH):
             with self.subTest(bat=bat_path.name):
                 text = bat_path.read_text(encoding="utf-8")
                 self.assertIn(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe", text)
                 self.assertIn(r"%ProgramFiles%\Ollama\ollama.exe", text)
                 self.assertIn("set OLLAMA_EXE=", text)
-                self.assertIn("Gemma4_12B can still open without Ollama.", text)
-                self.assertIn("if not \"%OLLAMA_EXE%\"==\"\"", text)
-                self.assertNotIn("Ollama is not installed or could not be found.", text)
+                self.assertIn("Gemma4_12B cannot start without Ollama.", text)
+                self.assertIn("Install Ollama first:", text)
+                self.assertIn("https://ollama.com/download", text)
+                self.assertIn("exit /b 1", text)
 
-    def test_windows_launcher_does_not_block_web_ui_when_ollama_is_missing(self) -> None:
+    def test_windows_launcher_blocks_with_single_ollama_requirement_message(self) -> None:
         text = WINDOWS_LAUNCHER_SOURCE.read_text(encoding="utf-8")
-        self.assertNotIn("FindOllamaExecutable", text)
-        self.assertNotIn("ShowOllamaInstallPrompt", text)
-        self.assertNotIn("Ollama が見つかりません。", text)
-        self.assertNotIn("https://ollama.com/download", text)
+        self.assertIn("FindOllamaExecutable", text)
+        self.assertIn("ShowOllamaRequiredMessage", text)
+        self.assertIn("Ollama がインストールされていないため、Gemma4_12B は起動できません。", text)
+        self.assertIn("https://ollama.com/download", text)
+        self.assertIn("MessageBoxButtons.OK", text)
+        self.assertNotIn("MessageBoxButtons.YesNo", text)
 
     def test_msi_launches_web_ui_after_initial_install(self) -> None:
         self.assertIn("<CustomAction", self.wxs)

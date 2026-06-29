@@ -27,6 +27,12 @@ namespace Gemma4Launcher
                     break;
             }
 
+            if (mode != "stop-heavy" && string.IsNullOrEmpty(FindOllamaExecutable()))
+            {
+                ShowOllamaRequiredMessage();
+                return 1;
+            }
+
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             string batchPath = Path.Combine(baseDir, batchFile);
             if (!File.Exists(batchPath))
@@ -63,6 +69,75 @@ namespace Gemma4Launcher
                 );
                 return 1;
             }
+        }
+
+        private static string FindOllamaExecutable()
+        {
+            string pathResult = FindOnPath("ollama.exe");
+            if (!string.IsNullOrEmpty(pathResult))
+            {
+                return pathResult;
+            }
+
+            string localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA") ?? "%LOCALAPPDATA%";
+            string programFiles = Environment.GetEnvironmentVariable("ProgramFiles") ?? "%ProgramFiles%";
+            string programFilesX86 = Environment.GetEnvironmentVariable("ProgramFiles(x86)") ?? "%ProgramFiles(x86)%";
+            string[] candidates =
+            {
+                Path.Combine(localAppData, "Programs", "Ollama", "ollama.exe"),
+                Path.Combine(programFiles, "Ollama", "ollama.exe"),
+                Path.Combine(programFilesX86, "Ollama", "ollama.exe")
+            };
+
+            foreach (string candidate in candidates)
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string FindOnPath(string executableName)
+        {
+            string pathValue = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+            foreach (string rawDir in pathValue.Split(Path.PathSeparator))
+            {
+                string dir = rawDir.Trim();
+                if (dir.Length == 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    string candidate = Path.Combine(dir, executableName);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+                catch (ArgumentException)
+                {
+                }
+                catch (NotSupportedException)
+                {
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static void ShowOllamaRequiredMessage()
+        {
+            MessageBox.Show(
+                "Ollama がインストールされていないため、Gemma4_12B は起動できません。\n\n先に Ollama をインストールし、Ollama を一度起動してから、Gemma4_12B をもう一度起動してください。\n\nダウンロード: https://ollama.com/download",
+                "Gemma4 12B",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
         }
     }
 }
