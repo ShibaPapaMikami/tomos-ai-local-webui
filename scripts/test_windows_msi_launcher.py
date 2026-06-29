@@ -65,7 +65,7 @@ class WindowsMsiLauncherTest(unittest.TestCase):
     def test_msi_launches_web_ui_after_initial_install(self) -> None:
         self.assertIn("<CustomAction", self.wxs)
         self.assertIn('Id="LaunchGemma4AfterInstall"', self.wxs)
-        self.assertIn('FileKey="File_Gemma4_12B_Launcher_exe"', self.wxs)
+        self.assertIn('FileRef="File_Gemma4_12B_Launcher_exe"', self.wxs)
         self.assertIn('ExeCommand="web"', self.wxs)
         self.assertIn('Return="asyncNoWait"', self.wxs)
         self.assertIn("<InstallExecuteSequence>", self.wxs)
