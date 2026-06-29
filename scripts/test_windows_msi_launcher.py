@@ -62,6 +62,17 @@ class WindowsMsiLauncherTest(unittest.TestCase):
         self.assertIn('"Ollama"', text)
         self.assertIn('"ollama.exe"', text)
 
+    def test_msi_launches_web_ui_after_initial_install(self) -> None:
+        self.assertIn("<CustomAction", self.wxs)
+        self.assertIn('Id="LaunchGemma4AfterInstall"', self.wxs)
+        self.assertIn('FileKey="File_Gemma4_12B_Launcher_exe"', self.wxs)
+        self.assertIn('ExeCommand="web"', self.wxs)
+        self.assertIn('Return="asyncNoWait"', self.wxs)
+        self.assertIn("<InstallExecuteSequence>", self.wxs)
+        self.assertIn("<Custom", self.wxs)
+        self.assertIn('Action="LaunchGemma4AfterInstall"', self.wxs)
+        self.assertIn('Condition="NOT Installed AND NOT REMOVE"', self.wxs)
+
 
 if __name__ == "__main__":
     unittest.main()

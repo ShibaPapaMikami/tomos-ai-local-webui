@@ -279,6 +279,18 @@ def generate_wxs(version: str) -> None:
       <Directory Id="ApplicationProgramsFolder" Name="Gemma4 12B" />
     </StandardDirectory>
     <StandardDirectory Id="DesktopFolder" />
+    <CustomAction
+      Id="LaunchGemma4AfterInstall"
+      FileKey="File_Gemma4_12B_Launcher_exe"
+      ExeCommand="web"
+      Execute="immediate"
+      Return="asyncNoWait" />
+    <InstallExecuteSequence>
+      <Custom
+        Action="LaunchGemma4AfterInstall"
+        After="InstallFinalize"
+        Condition="NOT Installed AND NOT REMOVE" />
+    </InstallExecuteSequence>
     <Feature Id="MainFeature" Title="Gemma4_12B" Level="1">
 {refs}
     </Feature>
