@@ -11,8 +11,10 @@ const { composerModelCandidates, installedOrCurrentModels } = context.window.GEM
 const agenticCoder = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-GGUF:Q4_K_M";
 const legacyCoder = "hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M";
 const hauhauBalanced = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
+const huihuiAbliterated = "hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M";
 const state = {
   composerModel: "qwen2.5:3b",
+  showExperimentalModels: false,
   modelOverrides: {
     chat: "",
     coding: "missing-coder:latest",
@@ -24,6 +26,7 @@ const state = {
       "qwen2.5:3b",
       agenticCoder,
       hauhauBalanced,
+      huihuiAbliterated,
       legacyCoder,
       "llama3:latest",
       "phi3:latest",
@@ -33,6 +36,12 @@ const state = {
     coding: agenticCoder,
     translation: "qwen2.5:3b",
     recommendedCoding: [agenticCoder],
+    pullable: [{
+      model: huihuiAbliterated,
+      experimental: true,
+      allowAutoSelect: false,
+      role: "coding-experimental",
+    }],
   },
 };
 const modelIsInstalled = (model) => state.serverModels.available.includes(model);
@@ -85,6 +94,20 @@ assert.equal(
   composerCandidates.includes("qwen3:4b"),
   false,
   "qwen3 should stay out of the composer model menu",
+);
+assert.equal(
+  composerCandidates.includes(huihuiAbliterated),
+  false,
+  "experimental models should stay hidden when the experimental toggle is off",
+);
+
+const experimentalComposerCandidates = composerModelCandidates({
+  state: { ...state, showExperimentalModels: true },
+  modelIsInstalled,
+});
+assert.ok(
+  experimentalComposerCandidates.includes(huihuiAbliterated),
+  "downloaded experimental models should be shown in the composer model menu only when enabled",
 );
 
 console.log("settings helper tests passed");

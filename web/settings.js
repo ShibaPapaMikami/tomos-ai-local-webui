@@ -77,6 +77,7 @@ function renderModelInstaller(deps) {
     return;
   }
   els.modelInstaller.innerHTML = "";
+  const language = state.language === "en" ? "en" : "ja";
   const title = document.createElement("div");
   title.className = "model-installer-title";
   const titleStrong = document.createElement("strong");
@@ -87,9 +88,26 @@ function renderModelInstaller(deps) {
     : "ターミナルを使わずにOllamaモデルを取得します。初回は数GBの通信が発生します。";
   title.append(titleStrong, titleHelp);
   els.modelInstaller.append(title);
+  const visiblePullable = pullable.filter((item) => item?.defaultVisible !== false || state.showExperimentalModels);
+  const hasExperimental = pullable.some((item) => item?.experimental);
+  if (hasExperimental) {
+    const toggleLabel = document.createElement("label");
+    toggleLabel.className = "model-experimental-toggle";
+    const toggleInline = document.createElement("span");
+    toggleInline.className = "model-experimental-toggle-inline";
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.dataset.experimentalModelsToggle = "true";
+    toggle.checked = Boolean(state.showExperimentalModels);
+    const toggleText = document.createElement("span");
+    toggleText.textContent = language === "en" ? "Show experimental models" : "実験モデルを表示";
+    toggleInline.append(toggle, toggleText);
+    toggleLabel.append(toggleInline);
+    els.modelInstaller.append(toggleLabel);
+  }
   let lastFamily = "";
   let firstInFamily = false;
-  for (const item of pullable) {
+  for (const item of visiblePullable) {
     const model = item.model;
     const installed = modelIsInstalled(model);
     const job = state.modelPullJobs[model] || null;
@@ -103,12 +121,18 @@ function renderModelInstaller(deps) {
       firstInFamily = true;
     }
     const row = document.createElement("div");
-    row.className = `model-install-row${firstInFamily ? " first-in-family" : ""}`;
+    row.className = `model-install-row${firstInFamily ? " first-in-family" : ""}${item.experimental ? " experimental" : ""}`;
     firstInFamily = false;
     const info = document.createElement("div");
     info.className = "model-install-info";
     const name = document.createElement("strong");
     name.textContent = item.label || composerModelLabel(model);
+    if (item.experimental) {
+      const badge = document.createElement("span");
+      badge.className = "model-experimental-badge";
+      badge.textContent = language === "en" ? "Experimental" : "実験";
+      name.append(" ", badge);
+    }
     const detail = document.createElement("span");
     detail.textContent = installed
       ? `${t("model.installed")} ・ ${item.purpose || model}`
@@ -118,10 +142,19 @@ function renderModelInstaller(deps) {
           ? `${t("error.prefix")} ・ ${job.message || ""}`
           : item.purpose || model;
     info.append(name, detail);
+    if (item.experimental) {
+      const warning = document.createElement("small");
+      warning.className = "model-experimental-warning";
+      warning.textContent = item.warning || (language === "en"
+        ? "This model may have weaker safety tuning. Do not use it for student defaults, company documents, or external-send checks."
+        : "このモデルは通常の安全調整が弱い可能性があります。学生向け標準、社内文書、外部送信前チェックには推奨しません。");
+      info.append(warning);
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "ghost-button model-install-button";
     button.dataset.modelPull = model;
+    if (item.experimental) button.dataset.experimentalModel = "true";
     button.disabled = installed || job?.status === "running" || job?.status === "queued";
     button.textContent = installed ? t("model.installed") : job?.status === "running" || job?.status === "queued" ? t("model.downloading") : t("model.download");
     row.append(info, button);
@@ -245,6 +278,15 @@ function isComposerModelCandidate(model) {
   );
 }
 
+function experimentalComposerModelCandidates({ state }) {
+  if (!state.showExperimentalModels) return [];
+  const pullable = state.serverModels?.pullable || [];
+  return pullable
+    .filter((item) => item?.experimental && item?.allowAutoSelect === false && item?.role === "coding-experimental")
+    .map((item) => item.model)
+    .filter(Boolean);
+}
+
 function composerModelCandidates({ state, modelIsInstalled }) {
   const installed = (models, task) => installedOrCurrentModels({
     models,
@@ -258,10 +300,11 @@ function composerModelCandidates({ state, modelIsInstalled }) {
     state.serverModels.translation,
     ...state.serverModels.recommendedCoding,
     ...COMPOSER_OPTIONAL_MODEL_IDS,
+    ...experimentalComposerModelCandidates({ state }),
     "gemma4:12b",
     "qwen2.5:3b",
     isComposerModelCandidate(state.composerModel) ? state.composerModel : "",
-  ].filter(isComposerModelCandidate), "chat");
+  ].filter((model) => isComposerModelCandidate(model) || experimentalComposerModelCandidates({ state }).includes(model)), "chat");
 }
 
 function renderModelSettingsSelects({

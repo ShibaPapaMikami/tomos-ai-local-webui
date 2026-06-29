@@ -3,6 +3,13 @@ const assert = require("node:assert/strict");
 const vm = require("node:vm");
 
 const storage = new Map();
+storage.set("gemma4.character", JSON.stringify({
+  name: "しばぱぱ",
+  userName: "まさふみ",
+  selfName: "ぼく",
+  tonePreset: "calm",
+  personality: "やさしく短く返す",
+}));
 const context = {
   window: {},
   document: {
@@ -97,7 +104,7 @@ const labels = {
   "management.openFolderSettings": "フォルダー設定へ",
   "management.remove": "削除",
   "management.removeCandidate": "検討リストから外す",
-  "management.needsFolderSetup": "フォルダー設定が必要",
+  "management.needsFolderSetup": "フォルダー編集で有効にしてください",
   "management.ready": "利用可能",
   "management.pluginSearchChecking": "検索対象を確認中",
   "management.pluginSearchCurrent": "現在の検索対象: {targets}",
@@ -140,7 +147,9 @@ context.document.querySelector = (selector) => {
   if (selector === '[data-plugin-candidate-toggle="ocr"]') return ocrCandidateToggle;
   return null;
 };
-context.document.querySelectorAll = () => [];
+context.document.querySelectorAll = (selector) => {
+  return [];
+};
 const pluginEls = {
   codegraphPluginStatus: { textContent: "", dataset: {} },
   codegraphPluginToggle: { textContent: "", setAttribute(name, value) { this[name] = value; } },
@@ -153,7 +162,7 @@ renderPluginsPanel({
   },
   t,
 });
-assert.equal(pluginEls.codegraphPluginStatus.textContent, "フォルダー設定が必要");
+assert.equal(pluginEls.codegraphPluginStatus.textContent, "フォルダー編集で有効にしてください");
 assert.match(searchCapabilitiesElement.textContent, /PDF本文/);
 assert.equal(ocrCandidateStatus.textContent, "検討リスト入り（まだ使えません）");
 assert.equal(ocrCandidateToggle.textContent, "検討リストから外す");
@@ -167,11 +176,27 @@ assert.equal(
   "コードレビュー",
 );
 const indexHtml = fs.readFileSync("web/index.html", "utf8");
+const i18nJs = fs.readFileSync("web/i18n.js", "utf8");
+const stylesCss = fs.readFileSync("web/styles.css", "utf8");
+const appJs = fs.readFileSync("web/app.js", "utf8");
+assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
+assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.197-huihui-composer1"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.197-experimental-toggle4"/);
+const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
+const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
+assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);
 const mobileConnectMenuIndex = indexHtml.indexOf('id="mobile-connect-toggle"');
 const basicSettingsMenuIndex = indexHtml.indexOf('id="settings-toggle"');
 assert.notEqual(mobileConnectMenuIndex, -1);
 assert.notEqual(basicSettingsMenuIndex, -1);
 assert.ok(mobileConnectMenuIndex < basicSettingsMenuIndex, "mobile connection should be the first settings item");
+assert.match(indexHtml, /id="mobile-connect-toggle"[^>]*disabled/);
+assert.match(indexHtml, /class="ghost-button is-testing" id="mobile-connect-toggle"/);
+assert.match(indexHtml, /data-i18n="management\.mobileConnectTesting"/);
+assert.match(i18nJs, /"management\.mobileConnectTesting": "スマホ接続（テスト中）"/);
+assert.match(stylesCss, /\.sidebar-settings-menu \.ghost-button:disabled/);
+assert.match(stylesCss, /\.sidebar-settings-menu \.ghost-button\.is-testing:disabled/);
 assert.match(indexHtml, /id="mobile-connect-panel"/);
 assert.match(indexHtml, /id="mobile-connect-code"/);
 assert.match(indexHtml, /id="mobile-connect-hosts"/);
@@ -219,6 +244,12 @@ const qrTarget = new URL(mobileConnectEls.mobileConnectQrImage.src, "http://127.
 assert.match(qrTarget, /http:\/\/192\.168\.1\.20:54876\/m/);
 assert.equal(new URL(qrTarget).searchParams.get("h"), "http://192.168.1.20:54876");
 assert.equal(new URL(qrTarget).searchParams.get("c"), "123456");
+const qrProfile = JSON.parse(new URL(qrTarget).searchParams.get("p"));
+assert.equal(qrProfile.name, "しばぱぱ");
+assert.equal(qrProfile.userName, "まさふみ");
+assert.equal(qrProfile.selfName, "ぼく");
+assert.equal(qrProfile.tonePreset, "calm");
+assert.equal(qrProfile.personality, "やさしく短く返す");
 assert.equal(new URL(mobileConnectEls.mobileConnectQrImage.src, "http://127.0.0.1").searchParams.get("v"), "123456");
 assert.match(mobileConnectEls.mobileConnectQrText.textContent, /mobile\.html/);
 assert.match(mobileConnectEls.mobileConnectExpires.textContent, /2026-06-27T10:00:00Z/);
@@ -338,11 +369,14 @@ async function runImportTests() {
     t,
   });
   assert.equal(multiSelectionModel.selectedCount, 2);
-  assert.equal(multiSelectionModel.summaryLabel, "教材パック 2件");
+  assert.equal(multiSelectionModel.summaryLabel, "教材パックを選択（2）");
   assert.equal(multiSelectionModel.groups[0].modes[0].checked, true);
   assert.equal(multiSelectionModel.groups[1].modes[0].checked, true);
   assert.deepEqual(Array.from(toggleStudyPackModeValue(["a:one"], "b:two", true)), ["a:one", "b:two"]);
   assert.deepEqual(Array.from(toggleStudyPackModeValue(["a:one", "b:two"], "a:one", false)), ["b:two"]);
+  assert.match(appJs, /localStorage\.getItem\("gemma4\.selectedStudyPackModes"\)/);
+  assert.match(appJs, /localStorage\.setItem\("gemma4\.selectedStudyPackModes"/);
+  assert.doesNotMatch(appJs, /appliedStudyPackModes\.length > 0/);
 }
 
 runImportTests().then(() => {

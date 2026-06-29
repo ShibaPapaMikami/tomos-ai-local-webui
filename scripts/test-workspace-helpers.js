@@ -13,6 +13,7 @@ const {
   inferSimpleTextSave,
   normalizeWorkspacePlan,
   parseWorkspaceGeneration,
+  renderWorkspacePanel,
 } = context.window.GEMMA_WORKSPACE;
 
 function plain(value) {
@@ -138,5 +139,52 @@ assert.match(searchHtml, /PDF/);
 assert.match(searchHtml, /本文/);
 assert.match(searchHtml, /ファイル名/);
 assert.match(searchHtml, /PDFは本文を読み取れませんでした/);
+
+const codegraphStatusT = (key, values = {}) => ({
+  "workspace.noFolder": "フォルダーなし",
+  "workspace.codeUnderstandingOff": "OFFです。使う場合はチェックしてから準備してください。",
+  "workspace.codeUnderstandingNotReady": "有効です。準備すると使えます。",
+  "workspace.codeUnderstandingPreparing": "コード理解を準備中...",
+  "workspace.codeUnderstandingReady": "使用できます: {files}件のコードを解析しました。",
+  "workspace.codeUnderstandingError": "準備できませんでした。もう一度準備してください: {error}",
+  "workspace.notConfigured": "{name}のフォルダーを設定してください。",
+  "workspace.loaded": "{name}を読み込みました。",
+}[key] || key)
+  .replace("{files}", values.files ?? "")
+  .replace("{error}", values.error ?? "")
+  .replace("{name}", values.name ?? "");
+
+const workspaceEls = {
+  workspacePanel: { hidden: false },
+  workspaceFolderName: { textContent: "" },
+  workspaceFolderTitle: { value: "" },
+  workspaceRoot: { value: "" },
+  workspaceCodegraphRow: { hidden: true },
+  workspaceCodegraphEnabled: { checked: false },
+  workspaceCodegraphPrepare: { disabled: false },
+  workspaceCodegraphStatus: { textContent: "" },
+  workspaceCodegraphFiles: { hidden: false, innerHTML: "" },
+  workspaceSearchRow: { hidden: true },
+  workspaceSearchStatus: { textContent: "", dataset: {} },
+  workspaceStatus: { textContent: "" },
+  workspaceFiles: { innerHTML: "", append() {} },
+};
+
+renderWorkspacePanel({
+  activeFolder: {
+    name: "テスト",
+    plugins: { codegraph: { enabled: true, status: "not-ready" } },
+  },
+  els: workspaceEls,
+  state: {
+    plugins: { codegraph: { installed: true } },
+    workspaceOpen: true,
+    workspaceRoot: "/tmp/project",
+    selectedFiles: new Set(),
+    workspaceFiles: [],
+  },
+  t: codegraphStatusT,
+});
+assert.equal(workspaceEls.workspaceCodegraphStatus.textContent, "有効です。準備すると使えます。");
 
 console.log("workspace helper tests passed");

@@ -2,6 +2,10 @@
   const CHAT_STORAGE_KEY = "gemma4.mobileChat";
   const LEGACY_NOTES_KEY = "gemma4.mobileNotes";
   const AI_MODE_KEY = "gemma4.mobileAiMode";
+  const AI_MODEL_KEY = "gemma4.mobileAiModel";
+  const AI_LAST_ERROR_KEY = "gemma4.mobileAiLastError";
+  const AI_LAST_LOADED_KEY = "gemma4.mobileAiLastLoaded";
+  const MOBILE_CHARACTER_PROFILE_KEY = "gemma4.mobileCharacterProfile";
   const PC_CONNECTION_KEY = "gemma4.mobilePcConnection";
   const pcHostInput = document.querySelector("#mobile-pc-host");
   const pcCodeInput = document.querySelector("#mobile-pc-code");
@@ -18,9 +22,112 @@
   const list = document.querySelector("#mobile-chat-list");
   const aiStatus = document.querySelector("#mobile-ai-status");
   const aiPlan = document.querySelector("#mobile-ai-plan");
+  const aiModeSelect = document.querySelector("#mobile-ai-mode");
+  const aiModelSelect = document.querySelector("#mobile-ai-model");
+  const aiLoadButton = document.querySelector("#mobile-ai-load");
+  const aiErrorCopyButton = document.querySelector("#mobile-ai-error-copy");
+  const aiLoadStatus = document.querySelector("#mobile-ai-load-status");
+  const aiErrorOutput = document.querySelector("#mobile-ai-error-output");
+  const aiEnginePlan = document.querySelector("#mobile-ai-engine-plan");
   const aiDiagnostics = document.querySelector("#mobile-ai-diagnostics");
   const aiCandidates = document.querySelector("#mobile-ai-candidates");
   const importSummary = document.querySelector("#mobile-import-summary");
+  const TRANSFORMERS_CDN_URL = "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+  const TRANSFORMERS_WASM_PATH = "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/";
+  const TRANSFORMERS_V4_CDN_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/+esm";
+  const TRANSFORMERS_V4_WASM_PATH = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/dist/";
+  const MOBILE_BUILD_LABEL = "mobile30";
+  const DEFAULT_WASM_EXPERIMENT_MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct";
+  const WASM_MODEL_CONFIGS = {
+    "Xenova/distilgpt2": {
+      task: "text-generation",
+      label: "distilgpt2",
+      prompt: (text) => `User: ${text}\nAssistant:`,
+      options: {
+        max_new_tokens: 48,
+        do_sample: true,
+        temperature: 0.7,
+        repetition_penalty: 1.15,
+        return_full_text: false,
+      },
+    },
+    "Xenova/LaMini-Flan-T5-77M": {
+      task: "text2text-generation",
+      label: "LaMini-Flan-T5 77M",
+      prompt: (text) => `短い日本語で返事してください。\n入力: ${text}\n返事:`,
+      options: {
+        max_new_tokens: 64,
+      },
+    },
+    "HuggingFaceTB/SmolLM2-135M-Instruct": {
+      task: "text-generation",
+      label: "SmolLM2 135M Instruct",
+      runtime: "huggingface-v4",
+      cdnUrl: TRANSFORMERS_V4_CDN_URL,
+      wasmPath: TRANSFORMERS_V4_WASM_PATH,
+      prompt: (text, context = "") => {
+        const character = loadMobileCharacterProfile();
+        const name = character.name || "Gemma";
+        const userName = character.userName || "ユーザー";
+        const selfName = character.selfName || name;
+        const personality = character.personality || "やさしく、短く、自然に答える";
+        return `### 指示\nあなたは「${name}」です。相手は「${userName}」。自分の呼び方は「${selfName}」。性格: ${personality}。\n直近の会話を踏まえて、必ず自然な日本語だけで1〜2文で短く返してください。中国語、英語、記号列は使わないでください。\n\n### 直近の会話\n${context || "なし"}\n\n### ユーザー\n${text}\n\n### 返事\n`;
+      },
+      options: {
+        max_new_tokens: 36,
+        do_sample: true,
+        temperature: 0.35,
+        repetition_penalty: 1.25,
+        return_full_text: false,
+      },
+      pipelineOptions: {
+        dtype: "q4",
+      },
+      loadTimeoutMs: 180000,
+      generationTimeoutMs: 45000,
+    },
+    "onnx-community/Qwen2.5-0.5B-Instruct": {
+      task: "text-generation",
+      label: "Qwen2.5 0.5B Instruct",
+      runtime: "huggingface-v4",
+      cdnUrl: TRANSFORMERS_V4_CDN_URL,
+      wasmPath: TRANSFORMERS_V4_WASM_PATH,
+      prompt: (text) => {
+        const character = loadMobileCharacterProfile();
+        const name = character.name || "Gemma";
+        const userName = character.userName || "ユーザー";
+        const selfName = character.selfName || name;
+        const personality = character.personality || "やさしく、短く、自然に答える";
+        return [
+          "<|im_start|>system",
+          `あなたは「${name}」です。自分の呼び方は「${selfName}」。相手は「${userName}」です。`,
+          `性格と口調: ${personality}`,
+          "日本語で、2文以内で、自然な会話として返してください。",
+          "<|im_end|>",
+          "<|im_start|>user",
+          text,
+          "<|im_end|>",
+          "<|im_start|>assistant",
+        ].join("\n");
+      },
+      options: {
+        max_new_tokens: 80,
+        do_sample: true,
+        temperature: 0.55,
+        repetition_penalty: 1.12,
+        return_full_text: false,
+      },
+      pipelineOptions: {
+        dtype: "q4",
+      },
+      loadTimeoutMs: 240000,
+      generationTimeoutMs: 90000,
+    },
+  };
+  const WASM_EXPERIMENT_MODELS = new Set(Object.keys(WASM_MODEL_CONFIGS));
+  let transformersGenerator = null;
+  let transformersLoadPromise = null;
+  let transformersLoadedModel = "";
 
   function readJson(key, fallback) {
     try {
@@ -62,6 +169,18 @@
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
   }
 
+  function recentConversationContext(messages = loadMessages(), limit = 4) {
+    return messages
+      .filter((message) => ["user", "assistant"].includes(message?.role) && String(message?.text || "").trim())
+      .slice(-limit)
+      .map((message) => {
+        const role = message.role === "assistant" ? loadMobileCharacterProfile().name : "あなた";
+        const text = String(message.text || "").replace(/\s+/g, " ").slice(0, 80);
+        return `${role}: ${text}`;
+      })
+      .join("\n");
+  }
+
   function normalizePcHost(value) {
     const raw = String(value || "").trim().replace(/\/+$/, "");
     if (!raw) return "";
@@ -76,6 +195,28 @@
 
   function loadPcConnection() {
     return readJson(PC_CONNECTION_KEY, { host: "", pairingCode: "", savedAt: "" });
+  }
+
+  function normalizeMobileCharacterProfile(profile = {}) {
+    const compact = (value, max = 80) => String(value || "").trim().slice(0, max);
+    return {
+      name: compact(profile.name || "Gemma", 24) || "Gemma",
+      userName: compact(profile.userName, 24),
+      selfName: compact(profile.selfName, 24),
+      gender: ["female", "male", "other"].includes(profile.gender) ? profile.gender : "",
+      tonePreset: ["friendly", "calm", "teacher", "concise"].includes(profile.tonePreset) ? profile.tonePreset : "friendly",
+      personality: compact(profile.personality, 100),
+    };
+  }
+
+  function loadMobileCharacterProfile() {
+    return normalizeMobileCharacterProfile(readJson(MOBILE_CHARACTER_PROFILE_KEY, {}));
+  }
+
+  function saveMobileCharacterProfile(value) {
+    const profile = normalizeMobileCharacterProfile(value);
+    localStorage.setItem(MOBILE_CHARACTER_PROFILE_KEY, JSON.stringify(profile));
+    return profile;
   }
 
   function formatConnectionTime(value) {
@@ -101,6 +242,175 @@
     titleEl.textContent = title;
     detailEl.textContent = detail;
     pcStatus.append(titleEl, detailEl);
+  }
+
+  function setAiLoadStatus(message, variant = "") {
+    if (!aiLoadStatus) return;
+    aiLoadStatus.textContent = message;
+    aiLoadStatus.dataset.variant = variant;
+  }
+
+  function formatAiError(error) {
+    if (!error) return "unknown error";
+    const name = error.name ? `${error.name}: ` : "";
+    const message = error.message || String(error);
+    return `${name}${message}`;
+  }
+
+  function recordAiError(stage, error) {
+    const model = selectedWasmModel();
+    const runtime = transformersRuntimeConfig(model);
+    const detail = {
+      stage,
+      message: formatAiError(error),
+      at: new Date().toISOString(),
+      userAgent: navigator.userAgent,
+      model,
+      runtime: runtime.runtime,
+      cdn: runtime.cdnUrl,
+      wasmPath: runtime.wasmPath,
+    };
+    localStorage.setItem(AI_LAST_ERROR_KEY, JSON.stringify(detail));
+    showAiErrorOutput(JSON.stringify(detail, null, 2));
+    return detail;
+  }
+
+  function showAiErrorOutput(message) {
+    if (!aiErrorOutput) return;
+    aiErrorOutput.hidden = false;
+    aiErrorOutput.value = message;
+    aiErrorOutput.focus();
+    aiErrorOutput.select();
+  }
+
+  function clearStaleAiError() {
+    const raw = localStorage.getItem(AI_LAST_ERROR_KEY) || "";
+    if (!raw) return;
+    try {
+      const detail = JSON.parse(raw);
+      const runtime = transformersRuntimeConfig(detail.model || selectedWasmModel());
+      if (detail.cdn === runtime.cdnUrl && detail.wasmPath === runtime.wasmPath) return;
+    } catch {
+      // Malformed old error data should not block a fresh retry.
+    }
+    localStorage.removeItem(AI_LAST_ERROR_KEY);
+    if (aiErrorOutput) {
+      aiErrorOutput.value = "";
+      aiErrorOutput.hidden = true;
+    }
+    setAiLoadStatus("古いAIエラー履歴をクリアしました。もう一度AIモデルを読み込んでください。");
+  }
+
+  async function copyAiLastError() {
+    clearStaleAiError();
+    const raw = localStorage.getItem(AI_LAST_ERROR_KEY) || "";
+    const message = raw || "AIエラーはまだ記録されていません。";
+    showAiErrorOutput(message);
+    if (raw && navigator.share) {
+      try {
+        const file = new File([message], "gemma4-mobile-ai-error.json", { type: "application/json" });
+        const payload = navigator.canShare?.({ files: [file] })
+          ? {
+              title: "Gemma4 スマホAIエラー",
+              text: "Gemma4 スマホAIエラー詳細",
+              files: [file],
+            }
+          : {
+              title: "Gemma4 スマホAIエラー",
+              text: message,
+            };
+        await navigator.share(payload);
+        setAiLoadStatus("AIエラー詳細を共有しました。");
+        return;
+      } catch (error) {
+        if (error.name === "AbortError") {
+          setAiLoadStatus("共有をキャンセルしました。");
+          return;
+        }
+        try {
+          await navigator.share({
+            title: "Gemma4 スマホAIエラー",
+            text: message,
+          });
+          setAiLoadStatus("AIエラー詳細を共有しました。");
+          return;
+        } catch (fallbackError) {
+          console.warn("AI error share failed", fallbackError);
+        }
+      }
+    }
+    try {
+      await navigator.clipboard?.writeText(message);
+      setAiLoadStatus(
+        raw && !navigator.share
+          ? "共有APIが使えないためコピーしました。Safariで開き直すか、ホーム画面版から試してください。"
+          : raw
+            ? "AIエラー詳細をコピーしました。"
+            : message,
+      );
+    } catch {
+      setAiLoadStatus(message);
+    }
+  }
+
+  function selectedWasmModel() {
+    const stored = localStorage.getItem(AI_MODEL_KEY) || "";
+    return WASM_EXPERIMENT_MODELS.has(stored) ? stored : DEFAULT_WASM_EXPERIMENT_MODEL;
+  }
+
+  function wasmModelConfig(model = selectedWasmModel()) {
+    return WASM_MODEL_CONFIGS[model] || WASM_MODEL_CONFIGS[DEFAULT_WASM_EXPERIMENT_MODEL];
+  }
+
+  function transformersRuntimeConfig(model = selectedWasmModel()) {
+    const config = wasmModelConfig(model);
+    return {
+      runtime: config.runtime || "xenova-v2",
+      cdnUrl: config.cdnUrl || TRANSFORMERS_CDN_URL,
+      wasmPath: config.wasmPath || TRANSFORMERS_WASM_PATH,
+    };
+  }
+
+  function normalizeStoredWasmModel() {
+    const stored = localStorage.getItem(AI_MODEL_KEY) || "";
+    if (!stored || WASM_EXPERIMENT_MODELS.has(stored)) return;
+    localStorage.setItem(AI_MODEL_KEY, DEFAULT_WASM_EXPERIMENT_MODEL);
+    const rawError = localStorage.getItem(AI_LAST_ERROR_KEY) || "";
+    if (rawError.includes(stored)) {
+      localStorage.removeItem(AI_LAST_ERROR_KEY);
+      if (aiErrorOutput) {
+        aiErrorOutput.value = "";
+        aiErrorOutput.hidden = true;
+      }
+    }
+    setAiLoadStatus("廃止されたWASMモデル設定をリセットしました。AIモデルを読み込むを押してください。");
+  }
+
+  function resetTransformersModel() {
+    transformersGenerator = null;
+    transformersLoadPromise = null;
+    transformersLoadedModel = "";
+  }
+
+  function withTimeout(promise, timeoutMs, message) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+  }
+
+  function saveLoadedModelState(model) {
+    localStorage.setItem(AI_LAST_LOADED_KEY, JSON.stringify({
+      model,
+      loadedAt: new Date().toISOString(),
+    }));
+  }
+
+  function lastLoadedModelState() {
+    return readJson(AI_LAST_LOADED_KEY, null);
   }
 
   function renderPcConnection() {
@@ -157,6 +467,14 @@
     const pairingCode = params.get("pairingCode") || params.get("c") || "";
     const connection = savePcConnectionValue(host, pairingCode);
     if (!connection) return null;
+    const profileParam = params.get("p") || "";
+    if (profileParam) {
+      try {
+        saveMobileCharacterProfile(JSON.parse(profileParam));
+      } catch {
+        // Character profile is optional; keep pairing usable if it is malformed.
+      }
+    }
     if (pcHostInput) pcHostInput.value = connection.host;
     if (pcCodeInput) pcCodeInput.value = connection.pairingCode;
     setPcStatus("QRから接続先を保存しました", `${connection.host} / コード ${connection.pairingCode}`, "saved");
@@ -234,6 +552,10 @@
         throw new Error(mobileSendErrorMessage(result.error || `HTTP ${response.status}`));
       }
       markMessagesImported();
+      if (result.duplicate) {
+        setPcStatus("すでにPCへ送信済み", `${result.summary?.total || 0}件はPC側の取り込み待ちにあります。`, "sent");
+        return;
+      }
       setPcStatus("PCへ送信しました", `${result.summary?.total || 0}件をPC側の取り込み待ちに追加しました。`, "sent");
     } catch (error) {
       setPcStatus("PCへ送信できませんでした", mobileSendErrorMessage(error.message), "error");
@@ -391,8 +713,8 @@
       return [
         {
           title: "Transformers.js WASM",
-          status: "優先",
-          detail: "WebGPU未検出のiPhone向け候補です。まず超小型/量子化モデルで返信速度を検証します。",
+          status: "未導入の候補",
+          detail: "WebGPU未検出のiPhone向け候補です。AIチャット本体はまだ動かず、次に超小型/量子化モデルの読み込みを検証します。",
           recommended: true,
         },
         {
@@ -415,6 +737,39 @@
         status: "優先",
         detail: "スマホ単体AIは保留し、チャット保存とPC取り込みを安定運用します。",
         recommended: true,
+      },
+    ];
+  }
+
+  function standaloneAiEnginePlan(capability = detectStandaloneAiCapability()) {
+    if (capability.webAssembly && !capability.webGpuReady) {
+      return [
+        {
+          title: "Transformers.js WASMを第一実験に固定",
+          status: "次に実装",
+          detail: "iPhoneでWebGPU未検出のため、外部APIなし・クラウド同期なしで、WASM量子化モデルの初回DL容量と返信速度を測ります。",
+        },
+        {
+          title: "WebLLM / MediaPipe WebGPU",
+          status: "後回し",
+          detail: "WebGPUが検出できる端末で再評価します。今のiPhone実機では主経路にしません。",
+        },
+      ];
+    }
+    if (capability.webGpuReady) {
+      return [
+        {
+          title: "WebGPU軽量モデル",
+          status: "次に比較",
+          detail: "MediaPipe LLM InferenceとWebLLMの小型モデルを比較します。WASMはフォールバックにします。",
+        },
+      ];
+    }
+    return [
+      {
+        title: "記録モード",
+        status: "継続",
+        detail: "端末内AIモデルは保留し、スマホ内保存とPC取り込みを安定運用します。",
       },
     ];
   }
@@ -450,8 +805,215 @@
     return `${prefix ? `${prefix}\n` : ""}スマホ単体チャットに保存しました。PCへ取り込むと、PC側のAIで続きを扱えます。`;
   }
 
-  async function generateAssistantReply(text) {
+  function wasmExperimentalReply(text) {
+    if (/勉強|学習|ノート|覚え/i.test(text)) {
+      return "WASM実験モードです。モデル本体はまだ未導入なので、学習メモとしてスマホ内に保存し、PC取り込みで学習ノートへ回せます。";
+    }
+    return "WASM実験モードです。WebAssemblyは使えますが、軽量モデル本体はまだ未導入です。今はスマホ内保存とPC取り込みで会話を保持します。";
+  }
+
+  function localConversationReply(text, context = recentConversationContext()) {
+    const message = String(text || "").trim();
+    const character = loadMobileCharacterProfile();
+    const name = character.name || "Gemma";
+    const userName = character.userName ? `${character.userName}、` : "";
+    const selfName = character.selfName ? `${character.selfName}は` : `${name}は`;
+    const softener = character.tonePreset === "concise" ? "" : "ね";
+    const teacher = character.tonePreset === "teacher";
+    const calm = character.tonePreset === "calm";
+    if (!message) return `${userName}送ってくれた内容を確認しました。もう少しだけ詳しく教えてください。`;
+    if (/さっき|今の|それ|そのこと|続き/i.test(message) && context) {
+      return `${userName}さっきの話の続きだね。${selfName}はその流れで聞いています。もう少しだけ詳しく教えてください。`;
+    }
+    if (/あなた(の)?名前|君(の)?名前|きみ(の)?名前|名前(は|を教えて)|誰(ですか|なの|だっけ)|なんて呼べば/i.test(message)) {
+      const selfLabel = character.selfName ? `、自分のことは「${character.selfName}」` : "";
+      return `${userName}${name}です${selfLabel}と呼びます。`;
+    }
+    if (/私(の)?名前|俺(の)?名前|僕(の)?名前|ぼく(の)?名前|わたし(の)?名前|なんて呼んで/i.test(message)) {
+      if (character.userName) return `${userName}あなたのことは「${character.userName}」と呼びます。`;
+      return `${name}には、あなたの呼び方がまだ保存されていません。PCのマイキャラ設定で「あなたをどう呼ぶか」を入れて、QRを読み直してください。`;
+    }
+    if (/おはよ|おはよう/i.test(message)) {
+      return `${userName}おはよう。${selfName}ここにいます。今日もまずはひとつだけ進めていこう${softener}。`;
+    }
+    if (/元気|げんき|調子(は|どう)|どう(だ|ですか|かな)|大丈夫|だいじょうぶ/i.test(message)) {
+      return calm
+        ? `${userName}${selfName}は大丈夫です。声をかけてくれてありがとうございます。`
+        : `${userName}${selfName}は元気だよ。声をかけてくれてありがとう${softener}。`;
+    }
+    if (/おやすみ|眠|寝る/i.test(message)) {
+      return `${userName}おつかれさま。今日はここまでにして、ゆっくり休もう${softener}。`;
+    }
+    if (/疲れ|つかれ|しんど|だる/i.test(message)) {
+      return calm
+        ? `${userName}それはしんどかったですね。今は大きく進めなくて大丈夫です。まず少し休みましょう。`
+        : `${userName}それはしんどい${softener}。今は大きく進めなくていいので、まず水分を取って少し休もう。`;
+    }
+    if (/不安|こわ|怖|心配/i.test(message)) {
+      return `${userName}不安なんだ${softener}。まず何が一番気になっているか、ひとつだけ一緒に整理しよう。`;
+    }
+    if (/勉強|学習|宿題|試験|テスト/i.test(message)) {
+      return teacher
+        ? `${userName}勉強のことですね。まず範囲をひとつに絞って、5分だけ始めるのがよさそうです。`
+        : `${userName}勉強のことだ${softener}。まず一番小さい範囲を決めて、5分だけ始めよう。`;
+    }
+    if (/ありがとう|助か/i.test(message)) {
+      return `${userName}どういたしまして。続きも必要なら、そのまま話して大丈夫です。`;
+    }
+    if (message.length <= 12) {
+      return `${userName}${message}、ですね。もう少し聞かせてください。今どんな感じですか？`;
+    }
+    const personalityHint = character.personality ? ` ${name}は「${character.personality}」の感じで受け止めます。` : "";
+    return `${userName}話してくれてありがとう。${personalityHint}今は気持ちを整理して、次の一歩を小さくするのがよさそうです。`;
+  }
+
+  function sanitizeGeneratedText(value, prompt) {
+    let text = String(value || "").trim();
+    if (!text) return "";
+    const promptText = String(prompt || "").trim();
+    if (promptText && text.startsWith(promptText)) text = text.slice(promptText.length).trim();
+    text = text
+      .replace(/^Assistant:\s*/i, "")
+      .replace(/^返事[:：]\s*/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return text;
+  }
+
+  function isConversationLikeReply(reply, inputText) {
+    const text = String(reply || "").trim();
+    if (text.length < 2 || text.length > 240) return false;
+    if (/C-suite|Editor in Chief|ESPN|Karavel|^[\s:・\-0-9.%/()A-Za-z|]+$/.test(text)) return false;
+    if (/[一-龠]{6,}/.test(text) && !/[ぁ-んァ-ン]/.test(text)) return false;
+    if (/[一-龠]{4,}[をにへとがのはもで]{0,2}[一-龠]{3,}/.test(text) && (text.match(/[ぁ-んァ-ン]/g) || []).length < 3) return false;
+    if (/[,，].*[一-龠]{2,}.*[（(][^）)]*$/.test(text)) return false;
+    if (/[（(][^）)]*$|^[^（(]*[）)]/.test(text)) return false;
+    if (/[가-힣]{2,}|[\u0400-\u04ff]{2,}/.test(text)) return false;
+    if (/(.)\1{5,}/.test(text)) return false;
+    const symbolCount = (text.match(/[^\sぁ-んァ-ン一-龠A-Za-z0-9。、！？,.!?ー「」『』（）()]/g) || []).length;
+    if (symbolCount > Math.max(4, text.length * 0.18)) return false;
+    const inputLooksJapanese = /[ぁ-んァ-ン一-龠]/.test(String(inputText || ""));
+    if (!inputLooksJapanese) return true;
+    const japaneseChars = (text.match(/[ぁ-んァ-ン一-龠]/g) || []).length;
+    const asciiLetters = (text.match(/[A-Za-z]/g) || []).length;
+    const kanaChars = (text.match(/[ぁ-んァ-ン]/g) || []).length;
+    return japaneseChars >= 4 && kanaChars >= 1 && japaneseChars >= asciiLetters;
+  }
+
+  function formatModelProgress(model, progress) {
+    const status = progress?.status ? String(progress.status) : "loading";
+    const file = progress?.file ? ` / ${progress.file}` : "";
+    const loaded = Number(progress?.loaded || 0);
+    const total = Number(progress?.total || 0);
+    const progressValue = Number(progress?.progress || 0);
+    let percent = "";
+    if (Number.isFinite(progressValue) && progressValue > 0) {
+      percent = ` ${Math.max(0, Math.min(100, Math.round(progressValue)))}%`;
+    } else if (loaded > 0 && total > 0) {
+      percent = ` ${Math.round((loaded / total) * 100)}%`;
+    }
+    return `${model}: ${status}${percent}${file}`;
+  }
+
+  async function loadTransformersPipeline() {
+    const model = selectedWasmModel();
+    const config = wasmModelConfig(model);
+    const runtime = transformersRuntimeConfig(model);
+    clearStaleAiError();
+    if (transformersGenerator && transformersLoadedModel === model) return transformersGenerator;
+    if (transformersLoadPromise) return transformersLoadPromise;
+    setAiLoadStatus(`${model} を読み込み中です。初回はモデルDLに時間がかかります。`, "loading");
+    if (aiLoadButton) aiLoadButton.disabled = true;
+    transformersLoadPromise = import(runtime.cdnUrl)
+      .catch((error) => {
+        const detail = recordAiError("cdn_import", error);
+        throw new Error(`${detail.stage}: ${detail.message}`);
+      })
+      .then(async ({ pipeline, env }) => {
+        if (env) {
+          env.allowLocalModels = false;
+          env.useBrowserCache = false;
+          if (runtime.runtime === "xenova-v2" && env.backends?.onnx?.wasm) {
+            env.backends.onnx.wasm.wasmPaths = runtime.wasmPath;
+            env.backends.onnx.wasm.numThreads = 1;
+          }
+        }
+        const generator = await withTimeout(
+          pipeline(config.task, model, {
+            ...(config.pipelineOptions || { quantized: true }),
+            progress_callback: (progress) => {
+              setAiLoadStatus(formatModelProgress(model, progress), "loading");
+            },
+          }),
+          config.loadTimeoutMs || 120000,
+          "model_load_timeout",
+        ).catch((error) => {
+          const detail = recordAiError("model_pipeline", error);
+          throw new Error(`${detail.stage}: ${detail.message}`);
+        });
+        transformersGenerator = generator;
+        transformersLoadedModel = model;
+        localStorage.removeItem(AI_LAST_ERROR_KEY);
+        saveLoadedModelState(model);
+        setAiLoadStatus(`${model} 読み込み完了。チャットできます。リロード後は再初期化が必要です。`, "ready");
+        return generator;
+      })
+      .catch((error) => {
+        transformersLoadPromise = null;
+        const detail = recordAiError("load", error);
+        setAiLoadStatus(`モデル読み込み失敗: ${detail.message}`, "error");
+        throw error;
+      })
+      .finally(() => {
+        if (aiLoadButton) aiLoadButton.disabled = false;
+      });
+    return transformersLoadPromise;
+  }
+
+  async function runTransformersReply(text, context = recentConversationContext()) {
+    const generator = await loadTransformersPipeline();
+    const model = selectedWasmModel();
+    const config = wasmModelConfig(model);
+    const prompt = config.prompt(text, context);
+    setAiLoadStatus(`${model} で返信を生成中です。時間がかかる場合は自動で会話フォールバックへ戻します。`, "loading");
+    const output = await withTimeout(
+      generator(prompt, config.options),
+      config.generationTimeoutMs || 45000,
+      "generation_timeout",
+    );
+    const first = Array.isArray(output) ? output[0] : output;
+    const generated = sanitizeGeneratedText(first?.generated_text, prompt);
+    if (!isConversationLikeReply(generated, text)) {
+      setAiLoadStatus(`${model} は読み込み成功。ただし会話品質が低いため、スマホ内の会話フォールバックで返信しました。`, "ready");
+      return localConversationReply(text, context);
+    }
+    setAiLoadStatus(`${model} の返信生成が完了しました。`, "ready");
+    return generated;
+  }
+
+  async function generateAssistantReply(text, context = recentConversationContext()) {
     const mode = localStorage.getItem(AI_MODE_KEY) || "auto";
+    if (mode === "wasm-experimental") {
+      if (transformersGenerator) {
+        try {
+          return await withTimeout(
+            runTransformersReply(text, context),
+            wasmModelConfig().chatTimeoutMs || 150000,
+            "chat_timeout",
+          );
+        } catch (error) {
+          console.warn("Transformers.js reply failed", error);
+          setAiLoadStatus("スマホAIの返信が完了しなかったため、会話フォールバックで返しました。", "error");
+          resetTransformersModel();
+          return localConversationReply(text, context);
+        }
+      }
+      if (transformersLoadPromise) {
+        setAiLoadStatus("モデル読み込み中のため、今回は会話フォールバックで返しました。読み込み完了後にもう一度試してください。", "loading");
+        return localConversationReply(text, context);
+      }
+      return wasmExperimentalReply(text);
+    }
     if (mode !== "template") {
       try {
         const reply = await browserAiReply(text);
@@ -465,11 +1027,21 @@
 
   function renderAiStatus() {
     const capability = detectStandaloneAiCapability();
+    const mode = localStorage.getItem(AI_MODE_KEY) || "auto";
+    if (aiModeSelect) aiModeSelect.value = mode;
+    if (aiModelSelect) aiModelSelect.value = selectedWasmModel();
     if (aiStatus) {
-      aiStatus.textContent = `AI: ${capability.recommendation}`;
+      aiStatus.textContent = `AI: ${capability.recommendation} / 方式: ${aiModeLabel(mode)}`;
     }
     if (aiPlan) {
       aiPlan.textContent = capability.detail;
+    }
+    if (!transformersGenerator && !transformersLoadPromise && mode === "wasm-experimental") {
+      const lastLoaded = lastLoadedModelState();
+      const selected = selectedWasmModel();
+      if (lastLoaded?.model === selected) {
+        setAiLoadStatus(`${selected} は前回読み込み済みです。ページをリロードしたため、チャット前に再初期化が必要です。AIモデルを読み込むを押してください。`, "ready");
+      }
     }
     if (!aiDiagnostics) return;
     aiDiagnostics.innerHTML = "";
@@ -483,6 +1055,14 @@
       aiDiagnostics.appendChild(row);
     });
     renderAiCandidates(capability);
+    renderAiEnginePlan(capability);
+  }
+
+  function aiModeLabel(mode) {
+    if (mode === "browser-ai") return "Browser AI";
+    if (mode === "wasm-experimental") return "WASM実験";
+    if (mode === "template") return "記録モード";
+    return "自動選択";
   }
 
   function renderAiCandidates(capability = detectStandaloneAiCapability()) {
@@ -497,6 +1077,20 @@
       detail.textContent = candidate.detail;
       row.append(title, detail);
       aiCandidates.appendChild(row);
+    });
+  }
+
+  function renderAiEnginePlan(capability = detectStandaloneAiCapability()) {
+    if (!aiEnginePlan) return;
+    aiEnginePlan.innerHTML = "";
+    standaloneAiEnginePlan(capability).forEach((candidate) => {
+      const row = document.createElement("li");
+      const title = document.createElement("strong");
+      const detail = document.createElement("span");
+      title.textContent = `${candidate.title} / ${candidate.status}`;
+      detail.textContent = candidate.detail;
+      row.append(title, detail);
+      aiEnginePlan.appendChild(row);
     });
   }
 
@@ -538,7 +1132,7 @@
       const text = document.createElement("p");
       text.textContent = message.text;
       const meta = document.createElement("small");
-      const roleLabel = message.role === "assistant" ? "Gemma" : "あなた";
+      const roleLabel = message.role === "assistant" ? loadMobileCharacterProfile().name : "あなた";
       meta.textContent = `${roleLabel} / ${message.imported ? "取り込み済み" : "未取り込み"} / ${formatDate(message.createdAt)}`;
       bubble.append(text, meta);
       row.appendChild(bubble);
@@ -553,6 +1147,7 @@
     const now = new Date().toISOString();
     const idBase = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     const messages = loadMessages();
+    const contextBeforeReply = recentConversationContext(messages);
     messages.push({
       id: `${idBase}-user`,
       role: "user",
@@ -571,13 +1166,51 @@
     saveMessages(messages);
     input.value = "";
     render();
-    assistantMessage.text = await generateAssistantReply(text);
-    assistantMessage.createdAt = new Date().toISOString();
-    saveMessages(messages);
-    render();
+    if (sendButton) sendButton.disabled = true;
+    try {
+      assistantMessage.text = await generateAssistantReply(text, contextBeforeReply);
+    } catch (error) {
+      console.warn("Mobile assistant reply failed", error);
+      setAiLoadStatus("返信生成が完了しなかったため、スマホ内の会話フォールバックで返しました。", "error");
+      assistantMessage.text = localConversationReply(text, contextBeforeReply);
+    } finally {
+      assistantMessage.createdAt = new Date().toISOString();
+      saveMessages(messages);
+      if (sendButton) sendButton.disabled = false;
+      render();
+    }
+  }
+
+  normalizeStoredWasmModel();
+  if (document.querySelector("#mobile-app-version")) {
+    document.querySelector("#mobile-app-version").textContent = `アプリ版 0.8.197 / スマホ版 ${MOBILE_BUILD_LABEL}`;
   }
 
   sendButton?.addEventListener("click", sendMessage);
+  aiLoadButton?.addEventListener("click", () => {
+    localStorage.setItem(AI_MODE_KEY, "wasm-experimental");
+    if (aiModelSelect) localStorage.setItem(AI_MODEL_KEY, aiModelSelect.value || DEFAULT_WASM_EXPERIMENT_MODEL);
+    renderAiStatus();
+    loadTransformersPipeline().catch((error) => {
+      console.warn("Transformers.js load failed", error);
+      if (String(error?.message || error).includes("model_load_timeout")) {
+        setAiLoadStatus("モデル読み込みが時間内に完了しませんでした。Qwen 0.5Bはこの端末では重すぎる可能性があります。チャットは会話フォールバックで続けます。", "error");
+        return;
+      }
+      setAiLoadStatus("モデル読み込みに失敗しました。AIエラーを共有できます。チャットは会話フォールバックで続けます。", "error");
+    });
+  });
+  aiErrorCopyButton?.addEventListener("click", copyAiLastError);
+  aiModelSelect?.addEventListener("change", () => {
+    localStorage.setItem(AI_MODEL_KEY, aiModelSelect.value || DEFAULT_WASM_EXPERIMENT_MODEL);
+    resetTransformersModel();
+    setAiLoadStatus("モデルを切り替えました。AIモデルを読み込むを押してください。");
+    renderAiStatus();
+  });
+  aiModeSelect?.addEventListener("change", () => {
+    localStorage.setItem(AI_MODE_KEY, aiModeSelect.value || "auto");
+    renderAiStatus();
+  });
   pcSaveButton?.addEventListener("click", savePcConnection);
   exportButton?.addEventListener("click", showExportPayload);
   sendPcButton?.addEventListener("click", sendChatToPc);

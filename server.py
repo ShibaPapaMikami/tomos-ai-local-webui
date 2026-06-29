@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import importlib.util
+import ipaddress
 import io
 import json
 import locale
@@ -168,6 +170,25 @@ PULLABLE_MODELS = [
         "family": "Gemma系",
     },
     {"model": "qwen2.5:3b", "label": "Qwen 2.5 3B", "purpose": "高速チャット・翻訳", "family": "Qwen系"},
+    {
+        "model": "hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M",
+        "label": "Huihui Gemma 4 Coder 12B Abliterated",
+        "purpose": "コード実験・制限弱め・上級者向け",
+        "family": "実験モデル",
+        "role": "coding-experimental",
+        "experimental": True,
+        "defaultVisible": False,
+        "allowAutoSelect": False,
+        "safetyLevel": "low",
+        "blockedFor": [
+            "student-default",
+            "company-documents",
+            "external-send-check",
+            "study-pack-default",
+            "adult-mode-default",
+        ],
+        "warning": "通常の安全調整が弱い可能性があります。学生向け標準、社内文書、外部送信前チェックには推奨しません。",
+    },
 ]
 PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"]}
 MODEL_PULL_JOBS: dict[str, dict[str, object]] = {}
@@ -383,17 +404,56 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
     return json.loads(raw.decode("utf-8"))
 
 
+def is_lan_ipv4_address(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return ip.version == 4 and ip.is_private and not ip.is_loopback and not ip.is_link_local
+
+
+def lan_ipv4_sort_key(address: str) -> tuple[int, str]:
+    if address.startswith("192.168."):
+        return (0, address)
+    if address.startswith("172.20."):
+        return (1, address)
+    if address.startswith("10."):
+        return (2, address)
+    return (3, address)
+
+
 def local_lan_ipv4_addresses() -> list[str]:
     addresses: set[str] = set()
     try:
         hostname = socket.gethostname()
         for result in socket.getaddrinfo(hostname, None, socket.AF_INET):
             address = result[4][0]
-            if address and not address.startswith("127."):
+            if address and is_lan_ipv4_address(address):
                 addresses.add(address)
     except OSError:
         pass
-    return sorted(addresses)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("8.8.8.8", 80))
+            address = str(probe.getsockname()[0])
+            if is_lan_ipv4_address(address):
+                addresses.add(address)
+    except OSError:
+        pass
+    try:
+        result = subprocess.run(
+            ["ifconfig"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        for address in re.findall(r"\binet\s+(\d+\.\d+\.\d+\.\d+)\b", result.stdout or ""):
+            if is_lan_ipv4_address(address):
+                addresses.add(address)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return sorted(addresses, key=lan_ipv4_sort_key)
 
 
 def set_mobile_pairing_code(pairing_code: str, expires_at_epoch: float) -> None:
@@ -443,6 +503,11 @@ def mobile_chat_import_summary(payload: dict) -> dict:
     }
 
 
+def mobile_chat_import_fingerprint(payload: dict) -> str:
+    normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def queue_mobile_chat_import(body: dict, now: float | None = None) -> dict:
     pairing_code = str(body.get("pairingCode") or "")
     if not mobile_pairing_code_is_valid(pairing_code, now=now):
@@ -452,13 +517,24 @@ def queue_mobile_chat_import(body: dict, now: float | None = None) -> dict:
     if not summary.get("ok") or int(summary.get("total") or 0) <= 0:
         return {"ok": False, "error": summary.get("error") or "empty_payload", "summary": summary}
     received_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() if now is None else now))
+    fingerprint = mobile_chat_import_fingerprint(payload)
     item = {
         "id": uuid.uuid4().hex,
         "receivedAt": received_at,
         "summary": summary,
         "payload": payload,
+        "fingerprint": fingerprint,
     }
     with MOBILE_IMPORT_LOCK:
+        for existing in MOBILE_PENDING_IMPORTS:
+            if existing.get("fingerprint") == fingerprint:
+                return {
+                    "ok": True,
+                    "duplicate": True,
+                    "importId": existing.get("id"),
+                    "receivedAt": existing.get("receivedAt"),
+                    "summary": existing.get("summary") or summary,
+                }
         MOBILE_PENDING_IMPORTS.append(item)
     return {"ok": True, "importId": item["id"], "receivedAt": received_at, "summary": summary}
 
@@ -484,13 +560,15 @@ def mobile_connect_info(
     host: str,
     port: int,
     lan_addresses: list[str] | None = None,
+    public_port: int | None = None,
     now: float | None = None,
 ) -> dict:
     bind_host = str(host or "127.0.0.1")
     normalized_host = bind_host.lower()
-    lan_enabled = normalized_host not in {"127.0.0.1", "localhost", "::1"}
     addresses = lan_addresses if lan_addresses is not None else local_lan_ipv4_addresses()
-    host_candidates = [f"http://{address}:{port}" for address in addresses] if lan_enabled else []
+    candidate_port = int(public_port if public_port is not None else port)
+    lan_enabled = bool(addresses) or normalized_host not in {"127.0.0.1", "localhost", "::1"}
+    host_candidates = [f"http://{address}:{candidate_port}" for address in addresses]
     current_time = time.time() if now is None else now
     pairing_code, expires_at_epoch = current_or_new_mobile_pairing_code(now=current_time)
     expires_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at_epoch))
@@ -510,6 +588,25 @@ def mobile_connect_info(
         "hostCandidates": host_candidates,
         "qrPayload": qr_payload,
     }
+
+
+def configured_mobile_sync_port(default: int = 54877) -> int:
+    try:
+        return int(os.environ.get("GEMMA_MOBILE_SYNC_PORT", str(default)))
+    except ValueError:
+        return default
+
+
+def local_mobile_sync_connect_info(port: int) -> dict | None:
+    url = f"http://127.0.0.1:{port}/api/mobile/connect-info"
+    try:
+        with urllib.request.urlopen(url, timeout=1) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict) and payload.get("ok"):
+        return payload
+    return None
 
 
 def mobile_preview_urls(port: int, lan_addresses: list[str] | None = None) -> list[str]:
@@ -3365,7 +3462,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/mobile/connect-info":
             host, port = self.server.server_address[:2]
-            json_response(self, 200, mobile_connect_info(str(host), int(port)))
+            public_port = None
+            if is_loopback_client(str(host)):
+                sync_port = configured_mobile_sync_port()
+                if sync_port != int(port):
+                    sync_payload = local_mobile_sync_connect_info(sync_port)
+                    if sync_payload:
+                        json_response(self, 200, sync_payload)
+                        return
+                public_port = sync_port
+            json_response(self, 200, mobile_connect_info(str(host), int(port), public_port=public_port))
             return
         if parsed.path == "/api/mobile/qr.svg":
             query = urllib.parse.parse_qs(parsed.query)

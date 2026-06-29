@@ -19,6 +19,24 @@ function gemmaTextSnippet(value, maxLength = 420) {
   return `${text.slice(0, maxLength)}...`;
 }
 
+function gemmaNormalizeJapaneseSpacing(value) {
+  const lines = String(value || "").split(/(\r?\n)/);
+  let inCodeFence = false;
+  return lines.map((part) => {
+    if (/^\r?\n$/.test(part)) return part;
+    const line = part;
+    if (/^\s*```/.test(line)) {
+      inCodeFence = !inCodeFence;
+      return line;
+    }
+    if (inCodeFence || /^\s*\|/.test(line)) return line;
+    return line.replace(
+      /([ぁ-んァ-ヶ一-龠々〆ヵヶー、。，．・！？「」『』（）])[\t ]+([ぁ-んァ-ヶ一-龠々〆ヵヶー「『（])/g,
+      "$1$2",
+    );
+  }).join("");
+}
+
 function gemmaTimestampForFilename() {
   const date = new Date();
   const pad = (value) => String(value).padStart(2, "0");
@@ -57,6 +75,7 @@ window.GEMMA_UTILS = {
   downloadTextFile: gemmaDownloadTextFile,
   escapeHtml: gemmaEscapeHtml,
   formatDuration: gemmaFormatDuration,
+  normalizeJapaneseSpacing: gemmaNormalizeJapaneseSpacing,
   numberValue: gemmaNumberValue,
   slugForFilename: gemmaSlugForFilename,
   textSnippet: gemmaTextSnippet,

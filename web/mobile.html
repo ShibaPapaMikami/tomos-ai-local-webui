@@ -9,6 +9,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Gemma 4 スマホチャット</title>
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <style>
       :root {
@@ -266,7 +267,8 @@
         gap: 8px;
       }
 
-      input {
+      input,
+      select {
         min-height: 40px;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -379,6 +381,23 @@
         <section class="ai-panel" aria-label="スマホ単体AI">
           <h2>スマホ単体AI</h2>
           <p class="subtitle" id="mobile-ai-plan">端末のAI実行候補を確認中です。</p>
+          <select id="mobile-ai-mode" aria-label="スマホ単体AIの方式">
+            <option value="auto">自動選択</option>
+            <option value="browser-ai">Browser AI</option>
+            <option value="wasm-experimental">WASM実験</option>
+            <option value="template">記録モード</option>
+          </select>
+          <select id="mobile-ai-model" aria-label="WASM実験モデル">
+            <option value="HuggingFaceTB/SmolLM2-135M-Instruct">軽量本命 SmolLM2 135M</option>
+            <option value="Xenova/distilgpt2">PC確認済み distilgpt2</option>
+            <option value="Xenova/LaMini-Flan-T5-77M">読み込み検証 LaMini-Flan-T5 77M</option>
+            <option value="onnx-community/Qwen2.5-0.5B-Instruct">重い実験 Qwen2.5 0.5B</option>
+          </select>
+          <button id="mobile-ai-load" type="button">AIモデルを読み込む</button>
+          <button id="mobile-ai-error-copy" type="button">AIエラーを共有</button>
+          <p class="subtitle" id="mobile-ai-load-status">未読み込み。押すと小型WASMモデルをダウンロードします。iPhoneではまずSmolLM2 135Mを試します。</p>
+          <textarea class="export-output" id="mobile-ai-error-output" readonly hidden></textarea>
+          <ul class="ai-candidates" id="mobile-ai-engine-plan"></ul>
           <ul class="ai-diagnostics" id="mobile-ai-diagnostics"></ul>
           <h2>実験候補</h2>
           <ul class="ai-candidates" id="mobile-ai-candidates"></ul>
@@ -386,7 +405,7 @@
         <section class="chat-list" id="mobile-chat-list" aria-label="スマホチャット"></section>
       </main>
       <footer>
-        <textarea id="mobile-chat-input" placeholder="スマホ単体チャットに送信。今はAIなしで、相手の返事はあとからPCへ取り込めます。"></textarea>
+        <textarea id="mobile-chat-input" placeholder="スマホ単体チャットに送信。WASMが弱い場合は会話フォールバックで返します。"></textarea>
         <div class="actions">
           <button class="primary" id="mobile-chat-send" type="button">送信</button>
           <a class="action-link" href="/mobile-check.html">接続チェック</a>
@@ -401,7 +420,7 @@
         <textarea class="export-output" id="mobile-chat-export-output" readonly hidden></textarea>
       </footer>
     </div>
-    <script src="/pwa.js?v=0.8.197-pwa1"></script>
-    <script src="/mobile-standalone.js?v=0.8.197-mobile1"></script>
+    <script src="/pwa.js?v=0.8.197-mobile30"></script>
+    <script src="/mobile-standalone.js?v=0.8.197-mobile30"></script>
   </body>
 </html>

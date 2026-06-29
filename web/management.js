@@ -212,7 +212,7 @@ window.GEMMA_MANAGEMENT = (() => {
       groups,
       selectedCount,
       summaryLabel: selectedCount > 0
-        ? `教材パック ${selectedCount}件`
+        ? `教材パックを選択（${selectedCount}）`
         : "教材パックを選択",
     };
   }
@@ -619,6 +619,33 @@ window.GEMMA_MANAGEMENT = (() => {
     renderPluginsPanel();
   }
 
+  function mobileCharacterProfileFromStorage() {
+    let character = {};
+    try {
+      character = JSON.parse(localStorage.getItem("gemma4.character") || "{}");
+    } catch {
+      character = {};
+    }
+    const compact = (value, max = 80) => String(value || "").trim().slice(0, max);
+    return {
+      name: compact(character.name || "Gemma", 24) || "Gemma",
+      userName: compact(character.userName, 24),
+      selfName: compact(character.selfName, 24),
+      gender: ["female", "male", "other"].includes(character.gender) ? character.gender : "",
+      tonePreset: ["friendly", "calm", "teacher", "concise"].includes(character.tonePreset) ? character.tonePreset : "friendly",
+      personality: compact(character.personality, 100),
+    };
+  }
+
+  function mobileCharacterProfileParam() {
+    const profile = mobileCharacterProfileFromStorage();
+    try {
+      return encodeURIComponent(JSON.stringify(profile));
+    } catch {
+      return "";
+    }
+  }
+
   function renderMobileConnectInfo({ els, t, info }) {
     if (!info?.ok) {
       if (els.mobileConnectStatus) els.mobileConnectStatus.textContent = t("management.mobileConnectError");
@@ -649,8 +676,9 @@ window.GEMMA_MANAGEMENT = (() => {
       : hosts.length > 0
         ? String(hosts[0]).replace(/\/+$/, "")
         : "";
+    const characterProfile = mobileCharacterProfileParam();
     const mobileUrl = pcHost
-      ? `${pcHost}/m?h=${encodeURIComponent(pcHost)}&c=${encodeURIComponent(info.pairingCode || "")}`
+      ? `${pcHost}/m?h=${encodeURIComponent(pcHost)}&c=${encodeURIComponent(info.pairingCode || "")}${characterProfile ? `&p=${characterProfile}` : ""}`
       : "";
     const qrText = info.qrPayload?.host
       ? `${String(info.qrPayload.host).replace(/\/+$/, "")}/mobile.html`
@@ -845,10 +873,6 @@ window.GEMMA_MANAGEMENT = (() => {
       els.codegraphPluginToggle.textContent = installed ? t("management.remove") : t("management.add");
       els.codegraphPluginToggle.setAttribute("aria-pressed", String(installed));
     }
-    document.querySelectorAll('[data-plugin-workspace="codegraph"]').forEach((button) => {
-      button.disabled = !installed;
-      button.title = installed ? t("management.openFolderSettings") : t("management.addFirst");
-    });
     PLUGIN_CANDIDATE_IDS.forEach((pluginId) => {
       const implemented = isPluginImplemented(state, pluginId);
       const integrated = Boolean(PLUGIN_CANDIDATES[pluginId]?.integrated);
@@ -889,9 +913,6 @@ window.GEMMA_MANAGEMENT = (() => {
         workspaceButton.title = active ? t("management.openFolderSettings") : t("management.addFirst");
         if (pluginId === "fast-search") {
           workspaceButton.textContent = active ? t("management.openSearch") : t("management.openFolderSettings");
-        }
-        if (pluginId === "codegraph") {
-          workspaceButton.textContent = active ? t("management.prepareCodeUnderstanding") : t("management.openFolderSettings");
         }
       });
     });
@@ -957,6 +978,7 @@ window.GEMMA_MANAGEMENT = (() => {
       syncManagementLayout({ els });
     });
     els.mobileConnectToggle?.addEventListener("click", () => {
+      if (els.mobileConnectToggle.disabled) return;
       openManagementPanel({ els, panel: els.mobileConnectPanel });
       refreshMobileConnectInfo({ els, t });
     });

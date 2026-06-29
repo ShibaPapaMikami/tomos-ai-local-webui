@@ -229,6 +229,7 @@
 
   function closeCorrectionDialog({ els }) {
     if (els.correctionText) els.correctionText.value = "";
+    if (els.correctionNewSetName) els.correctionNewSetName.value = "";
     if (els.correctionTrainingSet) els.correctionTrainingSet.innerHTML = "";
     if (els.correctionModal) els.correctionModal.hidden = true;
   }

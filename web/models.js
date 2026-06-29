@@ -4,6 +4,9 @@ function gemmaDisplayModelName(model, task = "chat", helpers = {}) {
   const translate = typeof t === "function" ? t : (key) => key;
   const installed = typeof modelIsInstalled === "function" ? modelIsInstalled(model) : false;
   if (!model) return translate("model.serverDefault");
+  if (model.includes("Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated")) {
+    return `Huihui Gemma 4 Coder 12B Abliterated (${translate("model.experimental")}${installed ? "" : ` / ${translate("model.downloadRequired")}`})`;
+  }
   if (model.includes("gemma-4-12B-agentic-fable5")) {
     return `Gemma 4 Agentic Coder 12B Q4 (${translate("model.coderRecommended")}${installed ? "" : ` / ${translate("model.downloadRequired")}`})`;
   }
@@ -38,6 +41,7 @@ function gemmaComposerModelLabel(model, helpers = {}) {
   const { t } = helpers;
   const translate = typeof t === "function" ? t : (key) => key;
   if (!model) return translate("model.auto");
+  if (model.includes("Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated")) return "Huihui 実験";
   if (model.includes("gemma-4-12B-agentic-fable5")) return "Agentic Coder";
   if (model.includes("gemma-4-12B-coder-fable5")) return "Coder";
   if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) return "HauhauCS";
@@ -54,6 +58,7 @@ function gemmaModelPurpose(model, task = "chat", helpers = {}) {
   const matched = pullable.find((item) => item && item.model === model);
   if (matched?.purpose) return matched.purpose;
   if (!model) return "";
+  if (model.includes("Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated")) return "コード実験・制限弱め・上級者向け";
   if (model.includes("gemma-4-12B-agentic-fable5")) return "コード生成・修正・デバッグ";
   if (model.includes("gemma-4-12B-coder-fable5")) return "コード生成・修正・デバッグ";
   if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) return "強化型チャット・制限弱め・PC負荷強";

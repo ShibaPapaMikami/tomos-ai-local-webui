@@ -641,7 +641,7 @@
       return t("workspace.codeUnderstandingError", { error: codegraph.error || "" });
     }
     if (codegraph.status === "running") return t("workspace.codeUnderstandingPreparing");
-    return t("workspace.codeUnderstandingHelp");
+    return t("workspace.codeUnderstandingNotReady");
   }
 
   function searchCapabilityText({ state, t }) {

@@ -285,17 +285,23 @@ def test_external_llm_url_allows_only_localhost() -> None:
         raise AssertionError("non-local LLM URL should be rejected")
 
 
-def test_mobile_connect_info_localhost_is_not_lan_enabled() -> None:
-    payload = server.mobile_connect_info("127.0.0.1", 54876)
+def test_mobile_connect_info_localhost_uses_lan_candidates_for_qr() -> None:
+    payload = server.mobile_connect_info(
+        "127.0.0.1",
+        54876,
+        lan_addresses=["192.168.1.20"],
+        public_port=54877,
+    )
     assert payload["ok"] is True
-    assert payload["lanAccessEnabled"] is False
-    assert payload["pairingEnabled"] is False
+    assert payload["lanAccessEnabled"] is True
+    assert payload["pairingEnabled"] is True
     assert payload["bindHost"] == "127.0.0.1"
     assert payload["port"] == 54876
     assert payload["pairingCode"].isdigit()
     assert len(payload["pairingCode"]) == 6
-    assert payload["hostCandidates"] == []
-    assert payload["qrPayload"] == {}
+    assert payload["hostCandidates"] == ["http://192.168.1.20:54877"]
+    assert payload["qrPayload"]["host"] == "http://192.168.1.20:54877"
+    assert payload["qrPayload"]["pairingCode"] == payload["pairingCode"]
     assert datetime.fromisoformat(payload["expiresAt"].replace("Z", "+00:00")) > datetime.now(timezone.utc)
 
 
@@ -354,6 +360,36 @@ def test_mobile_chat_import_requires_current_pairing_code() -> None:
         assert accepted["summary"]["total"] == 2
         assert len(server.mobile_pending_imports()) == 1
         assert server.mobile_pending_imports()[0]["payload"]["messages"][0]["text"] == "こんにちは"
+    finally:
+        server.MOBILE_PAIRING_STATE.clear()
+        server.MOBILE_PAIRING_STATE.update(previous_state)
+        server.MOBILE_PENDING_IMPORTS.clear()
+        server.MOBILE_PENDING_IMPORTS.extend(previous_imports)
+
+
+def test_mobile_chat_import_ignores_duplicate_payload() -> None:
+    previous_state = server.MOBILE_PAIRING_STATE.copy()
+    previous_imports = list(server.MOBILE_PENDING_IMPORTS)
+    try:
+        server.MOBILE_PENDING_IMPORTS.clear()
+        info = server.mobile_connect_info("0.0.0.0", 54876, lan_addresses=["192.168.1.20"], now=1000)
+        payload = {
+            "type": "gemma4-mobile-chat",
+            "exportedAt": "2026-06-27T10:00:00Z",
+            "messages": [
+                {"id": "m1", "role": "user", "text": "同じ内容", "createdAt": "2026-06-27T10:00:00Z"},
+                {"id": "m2", "role": "assistant", "text": "同じ返答", "createdAt": "2026-06-27T10:00:01Z"},
+            ],
+        }
+
+        first = server.queue_mobile_chat_import({"pairingCode": info["pairingCode"], "payload": payload}, now=1001)
+        second = server.queue_mobile_chat_import({"pairingCode": info["pairingCode"], "payload": payload}, now=1002)
+
+        assert first["ok"] is True
+        assert second["ok"] is True
+        assert second["duplicate"] is True
+        assert second["importId"] == first["importId"]
+        assert len(server.mobile_pending_imports()) == 1
     finally:
         server.MOBILE_PAIRING_STATE.clear()
         server.MOBILE_PAIRING_STATE.update(previous_state)
@@ -449,10 +485,11 @@ if __name__ == "__main__":
     test_workspace_context_uses_codegraph_summary_when_ready()
     test_workspace_search_capabilities_shape()
     test_external_llm_url_allows_only_localhost()
-    test_mobile_connect_info_localhost_is_not_lan_enabled()
+    test_mobile_connect_info_localhost_uses_lan_candidates_for_qr()
     test_mobile_connect_info_lan_host_builds_pairing_payload()
     test_mobile_connect_info_reuses_active_pairing_code()
     test_mobile_chat_import_requires_current_pairing_code()
+    test_mobile_chat_import_ignores_duplicate_payload()
     test_mobile_preview_urls_use_lan_addresses()
     test_mobile_static_routes_include_pc_mobile_connect_alias()
     test_static_preview_blocks_non_health_get_api()

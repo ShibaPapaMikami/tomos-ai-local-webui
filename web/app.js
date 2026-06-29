@@ -22,8 +22,8 @@ const state = {
   characterMemoryFilter: "all",
   characterMemoryQuery: "",
   studyPacks: window.GEMMA_MANAGEMENT?.loadStudyPacks?.() || {},
-  selectedStudyPackMode: "",
-  selectedStudyPackModes: [],
+  selectedStudyPackMode: loadSelectedStudyPackModes()[0] || "",
+  selectedStudyPackModes: loadSelectedStudyPackModes(),
   plugins: window.GEMMA_MANAGEMENT?.loadPlugins?.() || {},
   activeId: null,
   activeFolderId: localStorage.getItem("gemma4.activeFolderId") || null,
@@ -72,6 +72,7 @@ const state = {
     pullable: [],
     codingInstalled: true,
   },
+  showExperimentalModels: localStorage.getItem("gemma4.showExperimentalModels") === "true",
   modelPullJobs: {},
   modelPullTimer: null,
   appInfo: {
@@ -105,6 +106,22 @@ let stopMicLevelMonitor = null;
 const WORKSPACE_PLAN_TIMEOUT_MS = 120000;
 const WORKSPACE_FILE_TIMEOUT_MS = 300000;
 const SIMPLE_WORKSPACE_FILE_TIMEOUT_MS = 120000;
+
+function loadSelectedStudyPackModes() {
+  try {
+    const values = JSON.parse(localStorage.getItem("gemma4.selectedStudyPackModes") || "[]");
+    return Array.isArray(values) ? values.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSelectedStudyPackModes() {
+  const values = Array.isArray(state.selectedStudyPackModes)
+    ? state.selectedStudyPackModes.filter(Boolean)
+    : [];
+  localStorage.setItem("gemma4.selectedStudyPackModes", JSON.stringify(values));
+}
 
 const SYSTEM_PROMPTS = {
   ja: "あなたは簡潔で有用なAIです。前置きなしで自然に短く答えてください。箇条書きは、比較・手順・整理が必要な場合だけ使ってください。",
@@ -344,6 +361,7 @@ const els = {
   trainingStatus: document.querySelector("#training-status"),
   correctionModal: document.querySelector("#correction-modal"),
   correctionTrainingSet: document.querySelector("#correction-training-set"),
+  correctionNewSetName: document.querySelector("#correction-new-set-name"),
   correctionText: document.querySelector("#correction-text"),
   correctionClose: document.querySelector("#correction-close"),
   correctionCancel: document.querySelector("#correction-cancel"),
@@ -638,11 +656,15 @@ function attachmentReplyOptions() {
 function pushAssistantReply(session, { content, sources, durationSeconds, runMeta }) {
   session.messages.push({
     role: "assistant",
-    content,
+    content: formatAssistantContent(content),
     ...(sources ? { sources } : {}),
     durationSeconds,
     runMeta,
   });
+}
+
+function formatAssistantContent(content) {
+  return window.GEMMA_UTILS?.normalizeJapaneseSpacing?.(content) ?? String(content || "");
 }
 
 function attachmentRunMeta(requestOptions, modelReason) {
@@ -1645,6 +1667,14 @@ function ensureModelPullPolling() {
 }
 
 async function startModelPull(model) {
+  const modelInfo = state.serverModels.pullable.find((item) => item?.model === model) || null;
+  if (modelInfo?.experimental) {
+    const warning = modelInfo.warning || (state.language === "en"
+      ? "This model may have weaker safety tuning. Do not use it for student defaults, company documents, or external-send checks."
+      : "このモデルは通常の安全調整が弱い可能性があります。学生向け標準、社内文書、外部送信前チェックには推奨しません。");
+    const accepted = window.confirm(`${warning}\n\n${state.language === "en" ? "Add this experimental model anyway?" : "この実験モデルを追加しますか？"}`);
+    if (!accepted) return;
+  }
   const ok = window.confirm(state.language === "en"
     ? "Download this model? It can take time and use several GB of data."
     : "モデルをダウンロードします。数GBの通信と時間がかかる場合があります。開始しますか？");
@@ -2020,7 +2050,17 @@ function saveCorrectionDraft() {
   if (!draft) return;
   const corrected = els.correctionText.value.trim();
   if (!corrected) return;
-  const selectedSetId = els.correctionTrainingSet?.value || draft.setId;
+  const newSetName = els.correctionNewSetName?.value.trim() || "";
+  let selectedSetId = els.correctionTrainingSet?.value || draft.setId;
+  if (newSetName) {
+    const createdSet = createTrainingSet(newSetName);
+    selectedSetId = createdSet.id;
+    const folder = activeFolder();
+    if (folder) {
+      folder.trainingSetId = createdSet.id;
+      saveFolders();
+    }
+  }
   const result = window.GEMMA_TRAINING.saveCorrectionToSet({
     sets: state.trainingSets,
     selectedSetId,
@@ -2879,6 +2919,7 @@ function renderStudyPackModeRow() {
   if (packs.length === 0) {
     state.selectedStudyPackMode = "";
     state.selectedStudyPackModes = [];
+    saveSelectedStudyPackModes();
     els.studyPackModeRow.hidden = true;
     return;
   }
@@ -2890,6 +2931,7 @@ function renderStudyPackModeRow() {
   const validValues = new Set(selectionModel.groups.flatMap((group) => group.modes.map((mode) => mode.value)));
   state.selectedStudyPackModes = (state.selectedStudyPackModes || []).filter((value) => validValues.has(value));
   state.selectedStudyPackMode = state.selectedStudyPackModes[0] || "";
+  saveSelectedStudyPackModes();
 
   const details = document.createElement("details");
   details.className = "study-pack-picker";
@@ -2944,6 +2986,7 @@ function renderStudyPackModeRow() {
           checkbox.checked,
         ) || [];
         state.selectedStudyPackMode = state.selectedStudyPackModes[0] || "";
+        saveSelectedStudyPackModes();
         updatePickerSummary();
       });
       item.append(checkbox, text);
@@ -2961,6 +3004,7 @@ function renderStudyPackModeRow() {
   clearButton.addEventListener("click", () => {
     state.selectedStudyPackModes = [];
     state.selectedStudyPackMode = "";
+    saveSelectedStudyPackModes();
     panel.querySelectorAll(".study-pack-picker-item input").forEach((input) => {
       input.checked = false;
     });
@@ -4298,7 +4342,6 @@ async function sendMessage(text) {
     sizeLabel: file.sizeLabel,
   }));
   const requestOptions = chatRequestOptions(text, images.length > 0);
-  const appliedStudyPackModes = [...(state.selectedStudyPackModes || [])];
   const appliedStudyPackSelections = selectedStudyPackModes();
   const appliedStudyPackModeLabel = studyPackModesDisplayLabel(appliedStudyPackSelections);
   const userMessage = { role: "user", content: text, images, imagePreviews, attachments };
@@ -4582,7 +4625,7 @@ async function sendMessage(text) {
         : saveError
           ? `\n\n${t("workspace.saveError")}: ${saveError}`
           : "";
-      assistantMessage.content = requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`;
+      assistantMessage.content = formatAssistantContent(requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`);
       assistantMessage.sources = requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(normalizeSearchResults?.(streamSearchResults) || streamSearchResults)];
@@ -4619,7 +4662,7 @@ async function sendMessage(text) {
         : "";
     session.messages.push({
       role: "assistant",
-      content: requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`,
+      content: formatAssistantContent(requestOptions.codingMode && savedFiles.length > 0 ? savedNote : `${content}${savedNote}`),
       sources: requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(searchResultsFromResponse?.(data) || [])],
@@ -4660,10 +4703,6 @@ async function sendMessage(text) {
       });
     }
   } finally {
-    if (appliedStudyPackModes.length > 0 && appliedStudyPackModes.every((value, index) => state.selectedStudyPackModes?.[index] === value)) {
-      state.selectedStudyPackModes = [];
-      state.selectedStudyPackMode = "";
-    }
     state.abortController = null;
     state.busy = false;
     stopProgressTimer();
@@ -5503,6 +5542,14 @@ els.modelInstaller.addEventListener("click", (event) => {
   const button = event.target.closest("[data-model-pull]");
   if (!button) return;
   startModelPull(button.dataset.modelPull);
+});
+els.modelInstaller.addEventListener("change", (event) => {
+  const toggle = event.target.closest("[data-experimental-models-toggle]");
+  if (!toggle) return;
+  state.showExperimentalModels = Boolean(toggle.checked);
+  localStorage.setItem("gemma4.showExperimentalModels", String(state.showExperimentalModels));
+  renderModelInstaller();
+  syncModelInputs();
 });
 els.externalLlmUrl?.addEventListener("change", () => setExternalLlmUrl(els.externalLlmUrl.value));
 els.externalLlmCheck?.addEventListener("click", checkExternalLlmServer);
