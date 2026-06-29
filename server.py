@@ -45,7 +45,7 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.202")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.203")
 MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -1405,6 +1405,19 @@ def friendly_ollama_error(error_body: str) -> str:
             f"ターミナルで行う場合: ollama pull {model}"
         )
     return message
+
+
+def ollama_http_error_event(exc: urllib.error.HTTPError, model: str = "") -> dict:
+    error_body = exc.read().decode("utf-8", errors="replace")
+    event = {
+        "ok": False,
+        "type": "error",
+        "status": exc.code,
+        "error": friendly_ollama_error(error_body),
+    }
+    if model:
+        event["model"] = model
+    return event
 
 
 def translation_target_from_text(text: str) -> str:
@@ -3695,18 +3708,33 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
                 content_parts: list[str] = []
-                with ollama_stream("/api/chat", payload=payload, timeout=600, base_url=llm_base_url) as stream:
-                    for raw_line in stream:
-                        line = raw_line.decode("utf-8", errors="replace").strip()
-                        if not line:
-                            continue
-                        chunk_data = json.loads(line)
-                        chunk = str(chunk_data.get("message", {}).get("content", ""))
-                        if chunk:
-                            content_parts.append(chunk)
-                            stream_json_event(self, {"ok": True, "type": "chunk", "content": chunk})
-                        if chunk_data.get("done"):
-                            break
+                try:
+                    with ollama_stream("/api/chat", payload=payload, timeout=600, base_url=llm_base_url) as stream:
+                        for raw_line in stream:
+                            line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not line:
+                                continue
+                            chunk_data = json.loads(line)
+                            chunk = str(chunk_data.get("message", {}).get("content", ""))
+                            if chunk:
+                                content_parts.append(chunk)
+                                stream_json_event(self, {"ok": True, "type": "chunk", "content": chunk})
+                            if chunk_data.get("done"):
+                                break
+                except urllib.error.HTTPError as exc:
+                    stream_json_event(self, ollama_http_error_event(exc, model=payload["model"]))
+                    return
+                except Exception as exc:
+                    stream_json_event(
+                        self,
+                        {
+                            "ok": False,
+                            "type": "error",
+                            "error": str(exc),
+                            "model": payload["model"],
+                        },
+                    )
+                    return
                 content = "".join(content_parts)
                 if is_translation_task:
                     content = clean_translation_output(content)
