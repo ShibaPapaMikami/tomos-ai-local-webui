@@ -32,10 +32,34 @@ import urllib.request
 import uuid
 import webbrowser
 import zipfile
-import zlib
 import xml.etree.ElementTree as ET
 
 from search_tools import build_search_context, search_web
+from pdf_reader import (
+    clamp_pdf_page_number,
+    extract_image_ocr_text,
+    extract_pdf_page_text,
+    extract_pdf_text,
+    extract_pdf_text_with_mdls,
+    extract_pdf_text_with_pdftotext,
+    ocr_capabilities,
+    pdf_page_count,
+    usable_pdf_text,
+)
+from knowledge_layer import (
+    default_db_path,
+    index_folder as index_knowledge_folder,
+    knowledge_status,
+    search_knowledge,
+)
+from contract_ledger import (
+    default_contract_db_path,
+    delete_contract,
+    extract_contract_candidate,
+    list_contracts,
+    save_contract,
+)
+from sarashina_ocr_runner import sarashina_compare_page_payload, sarashina_ocr_status
 
 try:
     import segno
@@ -45,8 +69,12 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
+KNOWLEDGE_DB_PATH = default_db_path(ROOT)
+CONTRACT_DB_PATH = default_contract_db_path(ROOT)
 APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.198")
-MODEL = os.environ.get("GEMMA_MODEL", "gemma4:12b")
+GEMMA_BASE_MODEL = "gemma4:12b"
+GEMMA_MLX_MODEL = "gemma4:12b-mlx"
+MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
 TRANSLATION_MODEL_CANDIDATES = [
@@ -55,6 +83,7 @@ TRANSLATION_MODEL_CANDIDATES = [
     "llama3:latest",
 ]
 CODING_MODEL_CANDIDATES = [
+    GEMMA_MLX_MODEL,
     "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M",
 ]
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
@@ -156,7 +185,16 @@ DEFAULT_SYSTEM_PROMPT = (
     "箇条書きは、比較・手順・整理が必要な場合だけ使ってください。"
 )
 PULLABLE_MODELS = [
-    {"model": MODEL, "label": "Gemma 4 12B", "purpose": "標準チャット・画像理解", "family": "Gemma系"},
+    {"model": GEMMA_BASE_MODEL, "label": "Gemma 4 12B", "purpose": "標準チャット・画像理解", "family": "Gemma系"},
+    {
+        "model": GEMMA_MLX_MODEL,
+        "label": "Gemma 4 12B MLX 高速版",
+        "purpose": "Apple Silicon向け高速チャット・コード生成",
+        "family": "Gemma系",
+        "runtime": "MLX",
+        "requiresOllama": "0.31.0",
+        "note": "Ollama 0.31以降でMTP高速化が有効になります。Apple Silicon向けの推奨高速版です。",
+    },
     {
         "model": "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M",
         "label": "Gemma 4 Agentic Coder 12B Q4",
@@ -216,7 +254,6 @@ MAX_SEARCH_FILE_BYTES = 300_000
 MAX_DOCUMENT_CONTEXT_BYTES = 8_000_000
 MAX_ATTACHMENT_BYTES = 12_000_000
 MAX_SEARCH_RESULTS = 80
-MAX_OCR_PDF_PAGES = 3
 MAX_IMAGES_PER_MESSAGE = 4
 MAX_IMAGE_BASE64_CHARS = 12_000_000
 COMFYUI_DEFAULT_PREFIX = "Gemma4UI"
@@ -316,6 +353,7 @@ TEXT_EXTENSIONS = {
     ".yml",
 }
 SEARCHABLE_DOCUMENT_EXTENSIONS = {".docx", ".pdf"}
+CONTRACT_IMPORT_GAP_EXTENSIONS = {".pdf", ".docx"}
 OCR_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 WEATHER_CODES = {
     0: "快晴",
@@ -1762,6 +1800,44 @@ def pick_workspace_folder() -> dict:
     return {"root": str(path)}
 
 
+def contract_pdf_payload_from_path(path_value: str) -> dict[str, object]:
+    path = Path(str(path_value or "")).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        raise ValueError("PDFファイルが見つかりません。")
+    if path.suffix.lower() != ".pdf":
+        raise ValueError("PDFファイルを選択してください。")
+    return {"ok": True, "path": str(path)}
+
+
+def pick_contract_pdf_import_file() -> dict[str, object]:
+    if sys.platform == "darwin":
+        script = 'POSIX path of (choose file with prompt "PDFファイルを選択")'
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise ValueError((result.stderr or "PDF選択がキャンセルされました。").strip())
+        selected = result.stdout.strip()
+    else:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askopenfilename(title="PDFファイルを選択", filetypes=[("PDF", "*.pdf")])
+        root.destroy()
+        if not selected:
+            raise ValueError("PDF選択がキャンセルされました。")
+    return contract_pdf_payload_from_path(selected)
+
+
 def resolve_workspace_file(root: str, relative_path: str) -> Path:
     root_path = resolve_workspace_root(root)
     file_path = (root_path / relative_path).resolve()
@@ -1829,8 +1905,8 @@ def workspace_tree(root: str) -> dict:
 
 
 DOCUMENT_SEARCH_TERMS = {
-    "契約書": ["契約書", "契約", "合意書", "覚書", "NDA", "秘密保持", "業務委託", "agreement", "contract"],
-    "contract": ["contract", "agreement", "nda", "契約書", "契約", "秘密保持", "業務委託"],
+    "契約書": ["契約書", "契約", "合意書", "覚書", "NDA", "秘密保持", "agreement", "contract"],
+    "contract": ["contract", "agreement", "nda", "契約書", "契約", "秘密保持"],
     "agreement": ["agreement", "contract", "nda", "契約書", "契約", "合意書", "覚書"],
     "請求書": ["請求書", "請求", "invoice", "billing", "支払", "振込"],
     "invoice": ["invoice", "billing", "請求書", "請求", "支払"],
@@ -1862,6 +1938,16 @@ def search_query_terms(query: str) -> list[str]:
     return terms[:14]
 
 
+def workspace_text_contains_search_term(text: str, term: str) -> bool:
+    needle = str(term or "").strip().lower()
+    if not needle:
+        return False
+    haystack = str(text or "").lower()
+    if re.fullmatch(r"[a-z0-9]+", needle):
+        return re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", haystack) is not None
+    return needle in haystack
+
+
 def extract_docx_text(path: Path) -> str:
     try:
         with zipfile.ZipFile(path) as archive:
@@ -1884,317 +1970,280 @@ def extract_docx_text(path: Path) -> str:
     return "\n".join(paragraphs)
 
 
-def available_tesseract_languages(tesseract_binary: str) -> list[str]:
-    if not tesseract_binary:
-        return []
-    try:
-        result = subprocess.run(
-            [tesseract_binary, "--list-langs"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-            check=False,
-        )
-    except Exception:
-        return []
-    if result.returncode != 0:
-        return []
-    languages: list[str] = []
-    for line in (result.stdout or "").splitlines():
-        value = line.strip()
-        if not value or value.lower().startswith("list of available languages"):
-            continue
-        languages.append(value)
-    return languages
-
-
-def preferred_ocr_language(languages: list[str]) -> str:
-    available = set(languages)
-    if {"jpn", "eng"}.issubset(available):
-        return "jpn+eng"
-    if "jpn" in available:
-        return "jpn"
-    if "eng" in available:
-        return "eng"
-    return languages[0] if languages else "eng"
-
-
-def ocr_capabilities() -> dict[str, object]:
-    tesseract_binary = shutil.which("tesseract") or ""
-    pdftoppm_binary = shutil.which("pdftoppm") or ""
-    languages = available_tesseract_languages(tesseract_binary)
-    language = preferred_ocr_language(languages)
-    image_available = bool(tesseract_binary)
-    pdf_available = bool(tesseract_binary and pdftoppm_binary)
-    missing: list[str] = []
-    if not tesseract_binary:
-        missing.append("Tesseract")
-    if not pdftoppm_binary:
-        missing.append("Poppler(pdftoppm)")
+def contract_pdf_import_status_payload() -> dict[str, object]:
+    sarashina = sarashina_ocr_status()
+    pdf_import = {
+        "id": "contract-pdf-import",
+        "label": "契約書PDF取り込み",
+        "status": "not-connected",
+        "runnerConnected": False,
+        "defaultEnabled": True,
+        "models": [
+            {
+                "id": "glm-ocr",
+                "label": "GLM-OCR",
+                "purpose": "画像PDF向けの推奨OCR",
+                "status": "recommended",
+            },
+            {
+                "id": "sarashina2.2-ocr",
+                "label": "Sarashina OCR",
+                "purpose": "日本語文書OCRの比較用",
+                "status": sarashina.get("status") or "candidate",
+                "available": bool(sarashina.get("available")),
+            },
+        ],
+        "note": (
+            "Sarashina OCRをローカル比較できます。外部API呼び出しは行いません。CPU実行では1ページ数分かかる場合があります。"
+            if sarashina.get("available")
+            else "PDFテキスト抽出を先に試し、画像PDFなど必要な場合だけOCRを使います。外部API呼び出しは行いません。"
+        ),
+        "sarashina": sarashina,
+    }
     return {
-        "available": image_available or pdf_available,
-        "image": image_available,
-        "pdf": pdf_available,
-        "engine": "Tesseract" if tesseract_binary else "",
-        "tesseract": tesseract_binary,
-        "pdftoppm": pdftoppm_binary,
-        "language": language,
-        "languages": languages[:24],
-        "missing": missing,
+        "ok": True,
+        "pdfImport": pdf_import,
     }
 
 
-def extract_image_ocr_text(path: Path) -> str:
-    capabilities = ocr_capabilities()
-    tesseract_binary = str(capabilities.get("tesseract") or "")
-    if not tesseract_binary:
-        return ""
-    try:
-        result = subprocess.run(
-            [
-                tesseract_binary,
-                str(path),
-                "stdout",
-                "-l",
-                str(capabilities.get("language") or "eng"),
-                "--psm",
-                "6",
-            ],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=90,
-            check=False,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    text = (result.stdout or "").strip()
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text
+def contract_pdf_import_connection_test_payload() -> dict[str, object]:
+    ocr = ocr_capabilities()
+    return {
+        "ok": True,
+        "pdfImportId": "contract-pdf-import",
+        "runnerConnected": False,
+        "testMode": "local-baseline",
+        "message": "ローカルAPIの接続テストは成功しました。契約書PDF取り込みは既存PDF抽出 / Tesseractで動作します。",
+        "baselineOcr": {
+            "available": bool(ocr.get("available")),
+            "engine": ocr.get("engine") or "未検出",
+            "pdf": bool(ocr.get("pdf")),
+            "image": bool(ocr.get("image")),
+            "language": ocr.get("language") or "",
+            "missing": ocr.get("missing", []),
+        },
+    }
 
 
-def extract_pdf_ocr_text(path: Path) -> str:
-    capabilities = ocr_capabilities()
-    pdftoppm_binary = str(capabilities.get("pdftoppm") or "")
-    if not pdftoppm_binary or not capabilities.get("pdf"):
-        return ""
-    texts: list[str] = []
-    try:
-        with tempfile.TemporaryDirectory(prefix="gemma4-pdf-ocr-") as tmp_dir:
-            output_prefix = Path(tmp_dir) / "page"
-            result = subprocess.run(
-                [
-                    pdftoppm_binary,
-                    "-f",
-                    "1",
-                    "-l",
-                    str(MAX_OCR_PDF_PAGES),
-                    "-r",
-                    "180",
-                    "-png",
-                    str(path),
-                    str(output_prefix),
-                ],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=90,
-                check=False,
-            )
-            if result.returncode != 0:
-                return ""
-            for image_path in sorted(Path(tmp_dir).glob("page-*.png"))[:MAX_OCR_PDF_PAGES]:
-                text = extract_image_ocr_text(image_path)
-                if text:
-                    texts.append(text)
-    except Exception:
-        return ""
-    return "\n\n".join(texts).strip()
+def normalize_pdf_import_preview_text(text: str) -> str:
+    cleaned = str(text or "")
+    cleaned = re.sub(r"[\u200b\u200c\u200d\ufeff\u00ad]", "", cleaned)
+    cleaned = cleaned.replace("\r", "")
+    cleaned = re.sub(r"[ \t\f\v]+", " ", cleaned)
+    cleaned = re.sub(r"\n +", "\n", cleaned)
+    cleaned = re.sub(r" +\n", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"\s+([、。，．）」』])", r"\1", cleaned)
+    cleaned = re.sub(r"([「『（])\s+", r"\1", cleaned)
+    cleaned = re.sub(r"(20\d{2})年\s*(\d{1,2})\s+(\d{1,2})\s*月\s*日付", r"\1年\2月\3日付", cleaned)
+    cleaned = re.sub(r"(?<=[ぁ-んァ-ン一-龥]) (?=[ぁ-んァ-ン一-龥])", "", cleaned)
+    lines = [line.strip() for line in cleaned.splitlines()]
+    return "\n".join(line for line in lines if line).strip()
 
 
-def extract_pdf_text(path: Path) -> str:
-    try:
-        from pypdf import PdfReader  # type: ignore
-    except ImportError:
-        text = extract_pdf_text_with_pdftotext(path)
-        return (
-            usable_pdf_text(text)
-            or extract_pdf_text_with_mdls(path)
-            or extract_pdf_text_from_streams(path)
-            or extract_pdf_ocr_text(path)
-        )
-    try:
-        reader = PdfReader(str(path))
-        text = "\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
-        return (
-            usable_pdf_text(text)
-            or extract_pdf_text_with_mdls(path)
-            or extract_pdf_text_from_streams(path)
-            or extract_pdf_ocr_text(path)
-        )
-    except Exception:
-        text = extract_pdf_text_with_pdftotext(path)
-        return (
-            usable_pdf_text(text)
-            or extract_pdf_text_with_mdls(path)
-            or extract_pdf_text_from_streams(path)
-            or extract_pdf_ocr_text(path)
-        )
+def extract_pdf_page_previews(path: Path, limit: int = 8) -> list[dict[str, object]]:
+    count = pdf_page_count(path)
+    max_pages = min(count or limit, limit)
+    previews: list[dict[str, object]] = []
+    for page_number in range(1, max_pages + 1):
+        text = normalize_pdf_import_preview_text(extract_pdf_page_text(path, page_number))
+        previews.append({
+            "page": page_number,
+            "textLength": len(text),
+            "preview": text[:240].strip(),
+        })
+    return previews
 
 
-def extract_pdf_text_with_pdftotext(path: Path) -> str:
-    binary = shutil.which("pdftotext")
-    if not binary:
-        return ""
-    try:
-        result = subprocess.run(
-            [binary, "-layout", str(path), "-"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-            check=False,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    return (result.stdout or "").strip()
+def contract_pdf_import_try_page_payload(source_path: str, page: object = 1, all_pages: bool = False) -> dict[str, object]:
+    cleaned_path = str(source_path or "").strip()
+    if not cleaned_path:
+        return {"ok": False, "error": "PDFファイルのパスを入力してください。"}
+    path = Path(cleaned_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        return {"ok": False, "error": "PDFファイルが見つかりません。"}
+    if path.suffix.lower() != ".pdf":
+        return {"ok": False, "error": "PDFファイルを指定してください。"}
+    page_number = clamp_pdf_page_number(page)
+    text = normalize_pdf_import_preview_text(extract_pdf_text(path) if all_pages else extract_pdf_page_text(path, page_number))
+    page_count = pdf_page_count(path) if all_pages else 0
+    page_previews = extract_pdf_page_previews(path) if all_pages else []
+    preview = text[:1200].strip()
+    contract_candidate = extract_contract_candidate("contract-pdf-import", str(path), text) if text else {}
+    if contract_candidate:
+        contract_candidate["sourceType"] = "contract-pdf-import"
+        extraction_json = contract_candidate.get("extractionJson") if isinstance(contract_candidate.get("extractionJson"), dict) else {}
+        extraction_json["sourceType"] = "contract-pdf-import"
+        contract_candidate["extractionJson"] = extraction_json
+    return {
+        "ok": True,
+        "pdfImportId": "contract-pdf-import",
+        "runner": "local-baseline",
+        "runnerLabel": "既存PDF抽出 / Tesseract",
+        "sourcePath": str(path),
+        "page": "all" if all_pages else page_number,
+        "allPages": bool(all_pages),
+        "pageCount": page_count,
+        "pagePreviews": page_previews,
+        "pagePreviewsTruncated": bool(page_count and len(page_previews) < page_count),
+        "textLength": len(text),
+        "preview": preview,
+        "contractCandidate": contract_candidate,
+        "message": (
+            "既存PDF抽出でプレビューを取得しました。"
+            if preview
+            else "PDFは読めましたが、抽出できる本文がありませんでした。画像PDFの場合は高精度OCR接続後に再試行します。"
+        ),
+    }
 
 
-def extract_pdf_text_with_mdls(path: Path) -> str:
-    binary = shutil.which("mdls")
-    if not binary:
-        return ""
-    try:
-        result = subprocess.run(
-            [binary, "-raw", "-name", "kMDItemTextContent", str(path)],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=20,
-            check=False,
-        )
-    except Exception:
-        return ""
-    if result.returncode != 0:
-        return ""
-    text = (result.stdout or "").strip()
-    if not text or text == "(null)":
-        return ""
-    return text
+def contract_pdf_import_auto_payload(source_path: str) -> dict[str, object]:
+    cleaned_path = str(source_path or "").strip()
+    if not cleaned_path:
+        return {"ok": False, "error": "PDFファイルのパスを入力してください。"}
+    path = Path(cleaned_path).expanduser().resolve()
+    if not path.exists() or not path.is_file():
+        return {"ok": False, "error": "PDFファイルが見つかりません。"}
+    if path.suffix.lower() != ".pdf":
+        return {"ok": False, "error": "PDFファイルを指定してください。"}
+
+    page_count = pdf_page_count(path)
+    direct_text = normalize_pdf_import_preview_text(
+        usable_pdf_text(extract_pdf_text_with_pdftotext(path))
+        or usable_pdf_text(extract_pdf_text_with_mdls(path))
+    )
+    direct_is_good = len(direct_text) >= 120
+    method = "pdf-text"
+    method_label = "PDFテキスト抽出"
+    reason = "PDF内にコピー可能なテキストが見つかりました。OCRは使っていません。"
+    text = direct_text
+    suggestions: list[dict[str, object]] = []
+
+    if not direct_is_good:
+        method = "local-ocr"
+        method_label = "既存PDF抽出 / Tesseract OCR"
+        reason = "PDFテキストが少ないため、既存抽出とTesseract OCRを試しました。"
+        text = normalize_pdf_import_preview_text(extract_pdf_text(path))
+        sarashina = sarashina_ocr_status()
+        suggestions.append({
+            "id": "sarashina2.2-ocr",
+            "label": "Sarashina OCR",
+            "recommended": bool(sarashina.get("available")),
+            "reason": (
+                "既存OCRで本文が弱い場合の高精度比較候補です。CPU実行では1ページ数分かかります。"
+                if sarashina.get("available")
+                else "Sarashina OCRは未準備です。"
+            ),
+        })
+    elif page_count and page_count >= 10:
+        suggestions.append({
+            "id": "review",
+            "label": "原文確認",
+            "recommended": True,
+            "reason": "ページ数が多いため、抽出後に原文ページで重要項目を確認してください。",
+        })
+
+    preview = text[:1600].strip()
+    contract_candidate = extract_contract_candidate("contract-pdf-import", str(path), text) if text else {}
+    if contract_candidate:
+        contract_candidate["sourceType"] = "contract-pdf-import"
+        extraction_json = contract_candidate.get("extractionJson") if isinstance(contract_candidate.get("extractionJson"), dict) else {}
+        extraction_json["sourceType"] = "contract-pdf-import"
+        extraction_json["importMethod"] = method
+        extraction_json["importReason"] = reason
+        contract_candidate["extractionJson"] = extraction_json
+    return {
+        "ok": True,
+        "pdfImportId": "contract-pdf-import",
+        "runner": method,
+        "runnerLabel": method_label,
+        "sourcePath": str(path),
+        "page": "all",
+        "allPages": True,
+        "pageCount": page_count,
+        "textLength": len(text),
+        "preview": preview,
+        "contractCandidate": contract_candidate,
+        "method": method,
+        "methodLabel": method_label,
+        "reason": reason,
+        "suggestions": suggestions,
+        "message": (
+            "PDF取り込みが完了しました。"
+            if preview
+            else "PDFは読めましたが、抽出できる本文がありませんでした。詳細OCRを試してください。"
+        ),
+    }
 
 
-def decode_pdf_string(value: bytes) -> str:
-    if not value:
-        return ""
-    value = re.sub(rb"\\([nrtbf()\\])", lambda match: {
-        b"n": b"\n",
-        b"r": b"\r",
-        b"t": b"\t",
-        b"b": b"\b",
-        b"f": b"\f",
-        b"(": b"(",
-        b")": b")",
-        b"\\": b"\\",
-    }.get(match.group(1), match.group(1)), value)
-    if value.startswith(b"\xfe\xff"):
-        try:
-            return value[2:].decode("utf-16-be", errors="ignore")
-        except Exception:
-            pass
-    for encoding in ("utf-8", "shift_jis", "latin-1"):
-        try:
-            return value.decode(encoding, errors="ignore")
-        except Exception:
+def contract_document_kind(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return "PDF"
+    if suffix == ".docx":
+        return "Word"
+    return suffix.lstrip(".").upper() or "FILE"
+
+
+def iter_contract_import_documents(root_path: Path) -> list[Path]:
+    documents: list[Path] = []
+    for current, dirs, filenames in os.walk(root_path):
+        dirs[:] = sorted(name for name in dirs if name not in {".git", ".gemma4-data", "__pycache__", "node_modules"} and not name.startswith("."))
+        for filename in sorted(filenames):
+            path = Path(current) / filename
+            if path.suffix.lower() not in CONTRACT_IMPORT_GAP_EXTENSIONS:
+                continue
+            try:
+                info = path.stat()
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                documents.append(path)
+    return sorted(documents, key=lambda item: item.relative_to(root_path).as_posix())
+
+
+def contract_import_gap_payload(root_path: Path | str, folder_id: str, contracts: list[dict] | None = None) -> dict[str, object]:
+    root = Path(root_path).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise ValueError("フォルダーが見つかりません。")
+    records = contracts if contracts is not None else list_contracts(CONTRACT_DB_PATH, folder_id)
+    imported_paths = {
+        str(Path(str(record.get("sourcePath", ""))).expanduser().resolve())
+        for record in records
+        if str(record.get("sourcePath", "")).strip()
+    }
+    imported_rel_paths = {
+        str(record.get("sourcePath", "")).strip().replace("\\", "/")
+        for record in records
+        if str(record.get("sourcePath", "")).strip()
+    }
+    items: list[dict[str, object]] = []
+    imported_count = 0
+    for path in iter_contract_import_documents(root):
+        relative_path = path.relative_to(root).as_posix()
+        resolved_path = str(path.resolve())
+        imported = resolved_path in imported_paths or relative_path in imported_rel_paths
+        if imported:
+            imported_count += 1
             continue
-    return ""
-
-
-def decode_pdf_hex_string(value: bytes) -> str:
-    cleaned = re.sub(rb"\s+", b"", value)
-    if len(cleaned) % 2:
-        cleaned += b"0"
-    try:
-        raw = bytes.fromhex(cleaned.decode("ascii"))
-    except Exception:
-        return ""
-    return decode_pdf_string(raw)
-
-
-def usable_pdf_text(text: str) -> str:
-    text = (text or "").strip()
-    return text if pdf_text_looks_readable(text) else ""
-
-
-def pdf_text_looks_readable(text: str) -> bool:
-    sample = re.sub(r"\s+", "", text or "")
-    if len(sample) < 20:
-        return False
-    cjk_count = len(re.findall(r"[ぁ-んァ-ヶ一-龠ー]", sample))
-    cjk_ratio = cjk_count / max(len(sample), 1)
-    symbols = len(re.findall(r"[#%+<>{}\\^_`|~]", sample))
-    letters = len(re.findall(r"[A-Za-z]", sample))
-    if symbols / max(len(sample), 1) > 0.08 and cjk_ratio < 0.08:
-        return False
-    if letters >= 40:
-        words = re.findall(r"[A-Za-z]{3,}", text)
-        long_words = [word for word in words if len(word) >= 6]
-        word_text = "".join(long_words or words)
-        vowel_count = len(re.findall(r"[AEIOUaeiou]", word_text))
-        if word_text and vowel_count / max(len(word_text), 1) < 0.18 and cjk_ratio < 0.2:
-            return False
-    if cjk_count >= 10 and cjk_ratio > 0.05:
-        return True
-    return True
-
-
-def extract_pdf_text_from_streams(path: Path) -> str:
-    try:
-        raw = path.read_bytes()
-    except Exception:
-        return ""
-    chunks: list[bytes] = []
-    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", raw, flags=re.S):
-        chunk = match.group(1)
-        try:
-            chunk = zlib.decompress(chunk)
-        except Exception:
-            pass
-        chunks.append(chunk)
-    chunks.append(raw)
-    texts: list[str] = []
-    for chunk in chunks:
-        for match in re.finditer(rb"\((?:\\.|[^\\)]){2,}\)", chunk, flags=re.S):
-            value = match.group(0)[1:-1]
-            text = decode_pdf_string(value).strip()
-            if text:
-                texts.append(text)
-        for match in re.finditer(rb"<([0-9A-Fa-f\s]{4,})>", chunk):
-            text = decode_pdf_hex_string(match.group(1)).strip()
-            if text:
-                texts.append(text)
-    text = "\n".join(texts)
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", "", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    if not pdf_text_looks_readable(text):
-        return ""
-    return text
+        items.append({
+            "path": resolved_path,
+            "relativePath": relative_path,
+            "kind": contract_document_kind(path),
+            "extension": path.suffix.lower(),
+            "size": path.stat().st_size,
+            "importable": path.suffix.lower() == ".pdf",
+        })
+    checked = imported_count + len(items)
+    return {
+        "ok": True,
+        "folderId": str(folder_id or ""),
+        "root": str(root),
+        "checked": checked,
+        "imported": imported_count,
+        "missing": len(items),
+        "items": items,
+    }
 
 
 def workspace_search_capabilities() -> dict[str, object]:
@@ -2236,6 +2285,15 @@ def searchable_workspace_lines(path: Path) -> list[str] | None:
         return path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None
+
+
+def extract_knowledge_text(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".pdf":
+        return extract_pdf_text(path)
+    if suffix in {".txt", ".md", ".markdown"}:
+        return path.read_text(encoding="utf-8", errors="replace")
+    return ""
 
 
 def append_workspace_search_result(
@@ -2312,7 +2370,7 @@ def search_workspace_files(root: str, query: str) -> dict:
                 continue
             rel = path.relative_to(root_path).as_posix()
             suffix = path.suffix.lower()
-            filename_matches = any(term in rel.lower() for term in needle_lowers)
+            filename_matches = any(workspace_text_contains_search_term(rel, term) for term in needle_lowers)
             if filename_matches:
                 append_workspace_search_result(
                     results,
@@ -2337,8 +2395,7 @@ def search_workspace_files(root: str, query: str) -> dict:
                 pdf_unreadable += 1
             scanned += 1
             for line_index, line in enumerate(lines, start=1):
-                haystack = f"{rel}\n{line}".lower()
-                if not any(term in haystack for term in needle_lowers):
+                if not any(workspace_text_contains_search_term(line, term) for term in needle_lowers):
                     continue
                 append_workspace_search_result(
                     results,
@@ -2782,12 +2839,18 @@ def build_workspace_context(workspace: dict) -> str:
     search_query = str(workspace.get("searchQuery") or "").strip()
     if search_query:
         try:
-            search_data = search_workspace_files(str(root_path), search_query)
+            use_knowledge = bool(workspace.get("knowledge")) and bool(str(workspace.get("folderId", "")).strip())
+            search_data = search_knowledge(
+                db_path=KNOWLEDGE_DB_PATH,
+                folder_id=str(workspace.get("folderId", "")).strip(),
+                query=search_query,
+                limit=8,
+            ) if use_knowledge else search_workspace_files(str(root_path), search_query)
             results = search_data.get("results", [])
             result_count = len(results) if isinstance(results, list) else 0
             search_lines = [
                 "",
-                "--- フォルダー内検索結果 ---",
+                "--- 資料検索結果 ---" if use_knowledge else "--- フォルダー内検索結果 ---",
                 (
                     "以下はユーザーのフォルダー内を検索した結果です。回答するときは、この結果から分かることだけを短く答えてください。"
                     "本文一致の根拠は `path:line`、ファイル名一致の根拠は `path` だけで示してください。"
@@ -2795,17 +2858,25 @@ def build_workspace_context(workspace: dict) -> str:
                     "検索結果にない内容は推測せず、見つからないと伝えてください。"
                 ),
                 f"検索語: {search_query}",
-                f"ヒット数: {result_count}件 / 調査したファイル: {search_data.get('scanned', 0)}件 / スキップ: {search_data.get('skipped', 0)}件",
+                (
+                    f"ヒット数: {result_count}件 / SQLite索引"
+                    if use_knowledge
+                    else f"ヒット数: {result_count}件 / 調査したファイル: {search_data.get('scanned', 0)}件 / スキップ: {search_data.get('skipped', 0)}件"
+                ),
             ]
             for item in results[:12]:
                 if not isinstance(item, dict):
                     continue
                 path_value = item.get("path", "")
-                if item.get("matchType") == "filename":
+                if use_knowledge:
+                    page = f" p.{item.get('page')}" if item.get("page") else ""
+                    heading = f" [{item.get('heading')}]" if item.get("heading") else ""
+                    search_lines.append(f"- {path_value}{page}{heading} {item.get('snippet', '')}")
+                elif item.get("matchType") == "filename":
                     search_lines.append(f"- {path_value} (ファイル名一致) {item.get('preview', '')}")
                 else:
                     search_lines.append(f"- {path_value}:{item.get('line', '')} {item.get('preview', '')}")
-            if search_data.get("truncated"):
+            if not use_knowledge and search_data.get("truncated"):
                 search_lines.append("- 結果が多いため一部だけ表示しています。")
             if not result_count:
                 search_lines.append("- 一致する文字は見つかりませんでした。")
@@ -3126,10 +3197,10 @@ def health_payload() -> dict:
                 "translation": translation_model,
             },
             "availableModels": sorted(models),
-            "recommendedCodingModels": [
+            "recommendedCodingModels": list(dict.fromkeys(
                 model for model in [CODING_MODEL, *CODING_MODEL_CANDIDATES]
                 if model
-            ],
+            )),
             "pullableModels": PULLABLE_MODELS,
             "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": installed,
@@ -3151,10 +3222,10 @@ def health_payload() -> dict:
                 "translation": TRANSLATION_MODEL or MODEL,
             },
             "availableModels": [],
-            "recommendedCodingModels": [
+            "recommendedCodingModels": list(dict.fromkeys(
                 model for model in [CODING_MODEL, *CODING_MODEL_CANDIDATES]
                 if model
-            ],
+            )),
             "pullableModels": PULLABLE_MODELS,
             "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": False,
@@ -3498,6 +3569,15 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/ocr/setup/status":
             json_response(self, 200, ocr_setup_status())
             return
+        if parsed.path == "/api/contracts/pdf-import/status":
+            json_response(self, 200, contract_pdf_import_status_payload())
+            return
+        if parsed.path == "/api/contracts/pdf-import/test":
+            json_response(self, 200, contract_pdf_import_connection_test_payload())
+            return
+        if parsed.path == "/api/contracts/pdf-import/sarashina/status":
+            json_response(self, 200, sarashina_ocr_status())
+            return
         if parsed.path == "/api/models/pull/status":
             json_response(self, 200, model_pull_status())
             return
@@ -3510,6 +3590,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/workspace/preview":
             self.handle_workspace_preview(parsed.query)
+            return
+        if parsed.path == "/api/knowledge/status":
+            self.handle_knowledge_status(parsed.query)
+            return
+        if parsed.path == "/api/contracts/list":
+            self.handle_contracts_list(parsed.query)
             return
 
         path = parsed.path
@@ -3573,6 +3659,45 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/ocr/setup":
             self.handle_ocr_setup()
             return
+        if self.path == "/api/contracts/pdf-import/try-page":
+            try:
+                body = read_json_body(self)
+                json_response(
+                    self,
+                    200,
+                    contract_pdf_import_try_page_payload(
+                        str(body.get("path", "")),
+                        body.get("page", 1),
+                        bool(body.get("allPages")),
+                    ),
+                )
+            except Exception as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/contracts/pdf-import/auto":
+            try:
+                body = read_json_body(self)
+                json_response(self, 200, contract_pdf_import_auto_payload(str(body.get("path", ""))))
+            except Exception as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/contracts/pdf-import/pick-pdf":
+            try:
+                json_response(self, 200, pick_contract_pdf_import_file())
+            except Exception as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/contracts/pdf-import/sarashina/compare-page":
+            try:
+                body = read_json_body(self)
+                json_response(
+                    self,
+                    200,
+                    sarashina_compare_page_payload(str(body.get("path", "")), body.get("page", 1)),
+                )
+            except Exception as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+            return
         if self.path == "/api/attachment/read":
             self.handle_attachment_read()
             return
@@ -3592,6 +3717,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/api/workspace/"):
             self.handle_workspace()
+            return
+        if self.path.startswith("/api/knowledge/"):
+            self.handle_knowledge()
+            return
+        if self.path.startswith("/api/contracts/"):
+            self.handle_contracts()
             return
         if self.path != "/api/chat":
             self.send_error(404)
@@ -3871,6 +4002,109 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+        except Exception as exc:
+            json_response(self, 500, {"ok": False, "error": str(exc)})
+
+    def handle_knowledge_status(self, query: str) -> None:
+        try:
+            params = urllib.parse.parse_qs(query)
+            folder_id = str(params.get("folderId", [""])[0]).strip()
+            if not folder_id:
+                json_response(self, 400, {"ok": False, "error": "folderId is required"})
+                return
+            json_response(self, 200, knowledge_status(db_path=KNOWLEDGE_DB_PATH, folder_id=folder_id))
+        except Exception as exc:
+            json_response(self, 500, {"ok": False, "error": str(exc)})
+
+    def handle_knowledge(self) -> None:
+        try:
+            body = read_json_body(self)
+            folder_id = str(body.get("folderId", "")).strip()
+            if not folder_id:
+                json_response(self, 400, {"ok": False, "error": "folderId is required"})
+                return
+            if self.path == "/api/knowledge/index":
+                root_path = resolve_workspace_root(str(body.get("path", "")))
+                result = index_knowledge_folder(
+                    db_path=KNOWLEDGE_DB_PATH,
+                    folder_id=folder_id,
+                    root_path=root_path,
+                    extract_text=extract_knowledge_text,
+                    force=bool(body.get("force", False)),
+                )
+                json_response(self, 200, result)
+            elif self.path == "/api/knowledge/search":
+                result = search_knowledge(
+                    db_path=KNOWLEDGE_DB_PATH,
+                    folder_id=folder_id,
+                    query=str(body.get("query", "")),
+                    limit=int(body.get("limit", 5)),
+                )
+                json_response(self, 200, result)
+            else:
+                self.send_error(404)
+        except Exception as exc:
+            json_response(self, 500, {"ok": False, "error": str(exc)})
+
+    def handle_contracts_list(self, query: str) -> None:
+        try:
+            params = urllib.parse.parse_qs(query)
+            folder_id = str(params.get("folderId", [""])[0]).strip()
+            json_response(self, 200, {"ok": True, "contracts": list_contracts(CONTRACT_DB_PATH, folder_id)})
+        except Exception as exc:
+            json_response(self, 500, {"ok": False, "error": str(exc)})
+
+    def handle_contracts(self) -> None:
+        try:
+            body = read_json_body(self)
+            if self.path == "/api/contracts/extract":
+                folder_id = str(body.get("folderId", "")).strip()
+                if not folder_id:
+                    json_response(self, 400, {"ok": False, "error": "folderId is required"})
+                    return
+                query = str(body.get("query", "")).strip() or "契約期間 自動更新 解約通知 期限"
+                search_data = search_knowledge(
+                    db_path=KNOWLEDGE_DB_PATH,
+                    folder_id=folder_id,
+                    query=query,
+                    limit=int(body.get("limit", 5)),
+                )
+                snippets_by_path: dict[str, list[str]] = {}
+                for item in search_data.get("results", [])[:5]:
+                    source_path = str(item.get("path", "")).strip()
+                    snippet = str(item.get("snippet", "")).strip()
+                    if source_path and snippet:
+                        snippets_by_path.setdefault(source_path, []).append(snippet)
+                candidates = [
+                    extract_contract_candidate(folder_id, source_path, "\n".join(snippets))
+                    for source_path, snippets in snippets_by_path.items()
+                ]
+                json_response(self, 200, {
+                    "ok": True,
+                    "query": query,
+                    "results": search_data.get("results", []),
+                    "candidates": candidates,
+                })
+                return
+            if self.path == "/api/contracts/import-gaps":
+                folder_id = str(body.get("folderId", "")).strip()
+                root = str(body.get("root", "")).strip()
+                if not folder_id:
+                    json_response(self, 400, {"ok": False, "error": "folderId is required"})
+                    return
+                if not root:
+                    json_response(self, 400, {"ok": False, "error": "root is required"})
+                    return
+                json_response(self, 200, contract_import_gap_payload(root, folder_id))
+                return
+            if self.path == "/api/contracts/save":
+                saved = save_contract(CONTRACT_DB_PATH, body.get("contract", body))
+                json_response(self, 200, {"ok": True, "contract": saved})
+                return
+            if self.path == "/api/contracts/delete":
+                json_response(self, 200, delete_contract(CONTRACT_DB_PATH, str(body.get("id", ""))))
+                return
+            self.send_error(404)
         except Exception as exc:
             json_response(self, 500, {"ok": False, "error": str(exc)})
 

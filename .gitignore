@@ -16,6 +16,7 @@ temp/
 # Python virtual environments
 .venv/
 .venv-asr/
+.venv-ocr/
 venv/
 env/
 

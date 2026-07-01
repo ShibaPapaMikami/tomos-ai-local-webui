@@ -53,16 +53,26 @@ const {
 const coder = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M";
 const hauhauBalanced = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
 const huihuiAbliterated = "hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M";
+const gemmaMlx = "gemma4:12b-mlx";
 const baseModels = {
   chat: "gemma4:12b",
   coding: coder,
   translation: "qwen2.5:3b",
   available: ["gemma4:12b", "qwen2.5:3b", coder],
 };
+const mlxModels = {
+  ...baseModels,
+  available: ["gemma4:12b", gemmaMlx, "qwen2.5:3b", coder],
+};
 
 assert.equal(
   modelForTask("chat", { serverModels: baseModels, modelOverrides: {} }),
   "gemma4:12b",
+);
+
+assert.equal(
+  modelForTask("chat", { serverModels: mlxModels, modelOverrides: {} }),
+  gemmaMlx,
 );
 
 assert.equal(
@@ -99,6 +109,11 @@ assert.equal(
 );
 
 assert.equal(
+  fastChatModel({ serverModels: mlxModels }),
+  gemmaMlx,
+);
+
+assert.equal(
   fastChatModel({ serverModels: { chat: "gemma4:12b", available: ["gemma4:12b"] } }),
   "gemma4:12b",
 );
@@ -112,11 +127,27 @@ assert.equal(
 );
 
 assert.equal(
+  modelForRequestTask("chat", { fastModel: true }, {
+    serverModels: mlxModels,
+    modelOverrides: {},
+  }),
+  gemmaMlx,
+);
+
+assert.equal(
   modelForRequestTask("translation", { responseMode: "quality" }, {
     serverModels: baseModels,
     modelOverrides: {},
   }),
   "gemma4:12b",
+);
+
+assert.equal(
+  modelForRequestTask("translation", { responseMode: "quality" }, {
+    serverModels: mlxModels,
+    modelOverrides: {},
+  }),
+  gemmaMlx,
 );
 
 assert.equal(
@@ -156,6 +187,7 @@ assert.equal(
 assert.equal(composerModelLabel(hauhauBalanced, { t: (key) => key }), "HauhauCS");
 assert.equal(typeof modelPurpose, "function");
 assert.equal(modelPurpose("gemma4:12b"), "標準チャット・画像理解");
+assert.equal(modelPurpose(gemmaMlx), "Apple Silicon向け高速チャット・コード生成");
 assert.equal(modelPurpose("qwen2.5:3b"), "高速チャット・翻訳");
 assert.equal(modelPurpose(coder), "コード生成・修正・デバッグ");
 assert.equal(
@@ -174,6 +206,9 @@ const serviceWorkerSource = fs.readFileSync("web/sw.js", "utf8");
 const stylesSource = fs.readFileSync("web/styles.css", "utf8");
 const codingCandidatesBlock = serverSource.match(/CODING_MODEL_CANDIDATES = \[[\s\S]*?\]\n/)?.[0] || "";
 assert.match(serverSource, /gemma-4-12B-agentic-fable5-composer2\.5-v2-3\.5x-tau2-GGUF:Q4_K_M/);
+assert.match(serverSource, /GEMMA_MLX_MODEL = "gemma4:12b-mlx"/);
+assert.match(serverSource, /Gemma 4 12B MLX 高速版/);
+assert.match(serverSource, /requiresOllama/);
 assert.doesNotMatch(serverSource, /CODING_MODEL_CANDIDATES = \[\s*"hf\.co\/yuxinlu1\/gemma-4-12B-coder-fable5-composer2\.5-v1-GGUF:Q4_K_M"/);
 assert.match(serverSource, /HauhauCS\/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M/);
 assert.match(serverSource, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated-GGUF:Q4_K_M/);
@@ -184,19 +219,19 @@ assert.match(serverSource, /"safetyLevel": "low"/);
 assert.match(serverSource, /"external-send-check"/);
 assert.doesNotMatch(codingCandidatesBlock, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
 assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
-assert.match(indexSource, /\/i18n\.js\?v=0\.8\.198-huihui-composer1/);
+assert.match(indexSource, /\/i18n\.js\?v=0\.8\.198-mlx17/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.198-japanese-spacing1/);
-assert.match(indexSource, /\/models\.js\?v=0\.8\.198-huihui-composer1/);
-assert.match(indexSource, /\/settings\.js\?v=0\.8\.198-huihui-composer1/);
-assert.match(indexSource, /\/management\.js\?v=0\.8\.198-study-pack-persist1/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.198-study-pack-persist1/);
-assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.198-study-pack-persist1/);
-assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.198-huihui-composer1/);
+assert.match(indexSource, /\/models\.js\?v=0\.8\.198-mlx17/);
+assert.match(indexSource, /\/settings\.js\?v=0\.8\.198-mlx17/);
+assert.match(indexSource, /\/management\.js\?v=0\.8\.198-mlx17/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.198-mlx17/);
+assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.198-mlx17/);
+assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.198-mlx17/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.198-japanese-spacing1/);
-assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.198-huihui-composer1/);
-assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.198-huihui-composer1/);
-assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.198-study-pack-persist1/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.198-study-pack-persist1/);
+assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.198-mlx17/);
+assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.198-mlx17/);
+assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.198-mlx17/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.198-mlx17/);
 assert.match(stylesSource, /\.settings-panel \.model-experimental-toggle/);
 assert.match(stylesSource, /\.management-panel \.model-experimental-toggle/);
 assert.match(stylesSource, /\.model-installer > \.model-experimental-toggle/);
@@ -209,6 +244,7 @@ assert.match(stylesSource, /margin: 0/);
 
 const experimentalPullable = [
   { model: "gemma4:12b", label: "Gemma 4 12B", purpose: "標準チャット・画像理解", family: "Gemma系" },
+  { model: gemmaMlx, label: "Gemma 4 12B MLX 高速版", purpose: "Apple Silicon向け高速チャット・コード生成", family: "Gemma系" },
   {
     model: huihuiAbliterated,
     label: "Huihui Gemma 4 Coder 12B Abliterated",
@@ -253,7 +289,7 @@ const hiddenComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerM
       chat: "gemma4:12b",
       coding: coder,
       translation: "qwen2.5:3b",
-      recommendedCoding: [coder],
+      recommendedCoding: [gemmaMlx, coder],
       pullable: experimentalPullable,
     },
     showExperimentalModels: false,
@@ -261,6 +297,7 @@ const hiddenComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerM
   modelIsInstalled: (model) => model === huihuiAbliterated || model === "gemma4:12b" || model === coder || model === "qwen2.5:3b",
 });
 assert.equal(hiddenComposerCandidates.includes(huihuiAbliterated), false);
+assert.equal(hiddenComposerCandidates.includes(gemmaMlx), true);
 const visibleComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerModelCandidates({
   state: {
     composerModel: "",
@@ -268,7 +305,7 @@ const visibleComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composer
       chat: "gemma4:12b",
       coding: coder,
       translation: "qwen2.5:3b",
-      recommendedCoding: [coder],
+      recommendedCoding: [gemmaMlx, coder],
       pullable: experimentalPullable,
     },
     showExperimentalModels: true,
@@ -276,6 +313,34 @@ const visibleComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composer
   modelIsInstalled: (model) => model === huihuiAbliterated || model === "gemma4:12b" || model === coder || model === "qwen2.5:3b",
 });
 assert.equal(visibleComposerCandidates.includes(huihuiAbliterated), true);
+assert.equal(composerModelLabel(gemmaMlx, { t: (key) => key }), "Gemma 4 MLX");
 assert.equal(composerModelLabel(huihuiAbliterated, { t: (key) => key }), "Huihui 実験");
+
+const chatSelect = new FakeElement("select");
+settingsContext.window.GEMMA_SETTINGS.renderModelSettingsSelects({
+  composerModelLabel,
+  displayModelName,
+  els: {
+    chatModel: chatSelect,
+    codingModel: new FakeElement("select"),
+    translationModel: new FakeElement("select"),
+    composerModel: new FakeElement("select"),
+  },
+  modelIsInstalled: (model) => model === gemmaMlx || model === "gemma4:12b" || model === "qwen2.5:3b",
+  state: {
+    composerModel: "",
+    modelOverrides: {},
+    serverModels: {
+      chat: "gemma4:12b",
+      coding: coder,
+      translation: "qwen2.5:3b",
+      recommendedCoding: [gemmaMlx, coder],
+      pullable: experimentalPullable,
+    },
+    showExperimentalModels: false,
+  },
+  t: (key) => key,
+});
+assert.equal(chatSelect.children.some((option) => option.value === gemmaMlx), true);
 
 console.log("model selection tests passed");

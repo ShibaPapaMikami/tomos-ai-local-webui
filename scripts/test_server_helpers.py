@@ -8,6 +8,204 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server
+import sarashina_ocr_runner
+
+
+def test_contract_pdf_import_status_payload_shape() -> None:
+    payload = server.contract_pdf_import_status_payload()
+    assert payload["ok"] is True
+    pdf_import = payload["pdfImport"]
+    assert pdf_import["id"] == "contract-pdf-import"
+    assert pdf_import["status"] == "not-connected"
+    assert pdf_import["runnerConnected"] is False
+    assert pdf_import["defaultEnabled"] is True
+    model_ids = {model["id"] for model in pdf_import["models"]}
+    assert {"glm-ocr", "sarashina2.2-ocr"}.issubset(model_ids)
+
+
+def test_contract_pdf_import_connection_test_payload_shape() -> None:
+    payload = server.contract_pdf_import_connection_test_payload()
+    assert payload["ok"] is True
+    assert payload["pdfImportId"] == "contract-pdf-import"
+    assert payload["runnerConnected"] is False
+    assert payload["testMode"] == "local-baseline"
+    baseline = payload["baselineOcr"]
+    assert "available" in baseline
+    assert "engine" in baseline
+    assert "pdf" in baseline
+    assert "image" in baseline
+
+
+def test_sarashina_ocr_status_payload_shape() -> None:
+    payload = sarashina_ocr_runner.sarashina_ocr_status()
+    assert payload["ok"] is True
+    assert payload["id"] == "sarashina2.2-ocr"
+    assert payload["model"] == "sbintuitions/sarashina2.2-ocr"
+    assert payload["status"] in {"ready", "needs_dependencies", "needs_model_download"}
+    assert isinstance(payload["missing"], list)
+    assert payload["externalApi"] is False
+
+
+def test_sarashina_compare_page_rejects_missing_path() -> None:
+    payload = sarashina_ocr_runner.sarashina_compare_page_payload("")
+    assert payload["ok"] is False
+    assert "PDF" in payload["error"]
+    assert payload["sarashina"]["id"] == "sarashina2.2-ocr"
+
+
+def test_contract_pdf_import_try_page_rejects_missing_path() -> None:
+    payload = server.contract_pdf_import_try_page_payload("")
+    assert payload["ok"] is False
+    assert "PDF" in payload["error"]
+
+
+def test_contract_pdf_import_try_page_payload_preview(monkeypatch=None) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+        path = Path(tmp.name)
+        previous = server.extract_pdf_page_text
+        try:
+            server.extract_pdf_page_text = lambda source, page=1: "秘密保持契約書\u200b\n                                  \u200b\n株式会社BeBlock\u200b\n   契約期間は3年間です。"
+            payload = server.contract_pdf_import_try_page_payload(str(path), page=2)
+        finally:
+            server.extract_pdf_page_text = previous
+    assert payload["ok"] is True
+    assert payload["pdfImportId"] == "contract-pdf-import"
+    assert payload["runner"] == "local-baseline"
+    assert payload["sourcePath"].endswith(".pdf")
+    assert payload["page"] == 2
+    assert payload["textLength"] > 0
+    assert "秘密保持契約書" in payload["preview"]
+    assert "\u200b" not in payload["preview"]
+    assert "                                  " not in payload["preview"]
+    assert "株式会社BeBlock" in payload["preview"]
+    assert payload["contractCandidate"]["contractName"] == "秘密保持契約書"
+    assert payload["contractCandidate"]["counterpartyName"] == "株式会社BeBlock"
+    assert payload["contractCandidate"]["sourceType"] == "contract-pdf-import"
+    assert payload["contractCandidate"]["extractionJson"]["sourceType"] == "contract-pdf-import"
+
+
+def test_contract_pdf_import_try_all_pages_payload_preview(monkeypatch=None) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+        path = Path(tmp.name)
+        previous = server.extract_pdf_text
+        previous_page = server.extract_pdf_page_text
+        previous_count = server.pdf_page_count
+        try:
+            server.extract_pdf_text = lambda source: (
+                "秘密保持契約書\n株式会社BeBlock（以下「委託者」）と、株式会社Gugenka（以下「受託者」）\n"
+                "委託者受託者間の2026年6月25日付の業務委託契約書に基づき秘密保持契約を締結した。\n"
+                "本契約は、2027年6月25日付の業務委託契約書の契約終了日までとし、"
+                "第1条、第2条、第5条、第6条及び第7条の規定は、業務委託契約終了日から3年間に限り効力を有するものとする。"
+            )
+            server.extract_pdf_page_text = lambda source, page=1: f"ページ{page}の秘密保持契約プレビュー"
+            server.pdf_page_count = lambda source: 2
+            payload = server.contract_pdf_import_try_page_payload(str(path), page=1, all_pages=True)
+        finally:
+            server.extract_pdf_text = previous
+            server.extract_pdf_page_text = previous_page
+            server.pdf_page_count = previous_count
+    assert payload["ok"] is True
+    assert payload["allPages"] is True
+    assert payload["page"] == "all"
+    assert payload["contractCandidate"]["contractName"] == "秘密保持契約書"
+    assert payload["contractCandidate"]["counterpartyName"] == "株式会社BeBlock"
+    assert payload["contractCandidate"]["startDate"] == "2026-06-25"
+    assert payload["contractCandidate"]["endDate"] == ""
+    assert payload["contractCandidate"]["notes"].startswith("業務委託契約終了日から3年間")
+    assert len(payload["pagePreviews"]) == 2
+    assert payload["pagePreviews"][0]["page"] == 1
+    assert "ページ1" in payload["pagePreviews"][0]["preview"]
+
+
+def test_contract_pdf_import_auto_payload_prefers_pdf_text(monkeypatch=None) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+        path = Path(tmp.name)
+        previous_pdftotext = server.extract_pdf_text_with_pdftotext
+        previous_mdls = server.extract_pdf_text_with_mdls
+        previous_count = server.pdf_page_count
+        try:
+            server.extract_pdf_text_with_pdftotext = lambda source: (
+                "秘密保持契約書\n株式会社BeBlock（以下「委託者」）と、株式会社Gugenka（以下「受託者」）\n"
+                "委託者受託者間の2026年6月25日付の業務委託契約書に基づき秘密保持契約を締結した。\n"
+                "本契約において秘密情報とは、開示される全ての情報のうち秘密に保持すべきものをいう。"
+                "受領当事者は秘密情報を厳格に管理し、第三者に開示又は漏洩してはならない。"
+                "委託業務終了後も、秘密情報に関する書面、電子データ等を返却または廃棄し、"
+                "本契約により知り得た秘密情報を委託業務終了前と同様に管理しなければならない。"
+            )
+            server.extract_pdf_text_with_mdls = lambda source: ""
+            server.pdf_page_count = lambda source: 1
+            payload = server.contract_pdf_import_auto_payload(str(path))
+        finally:
+            server.extract_pdf_text_with_pdftotext = previous_pdftotext
+            server.extract_pdf_text_with_mdls = previous_mdls
+            server.pdf_page_count = previous_count
+    assert payload["ok"] is True
+    assert payload["method"] == "pdf-text"
+    assert payload["runnerLabel"] == "PDFテキスト抽出"
+    assert "OCRは使っていません" in payload["reason"]
+    assert payload["contractCandidate"]["contractName"] == "秘密保持契約書"
+
+
+def test_contract_import_gap_payload_lists_unimported_pdf_and_docx() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        imported_pdf = root / "imported.pdf"
+        missing_pdf = root / "missing.pdf"
+        missing_docx = root / "missing.docx"
+        ignored_txt = root / "memo.txt"
+        imported_pdf.write_bytes(b"%PDF-1.4\n%imported")
+        missing_pdf.write_bytes(b"%PDF-1.4\n%missing")
+        write_minimal_docx(missing_docx, ["秘密保持契約書", "株式会社サンプル"])
+        ignored_txt.write_text("秘密保持契約", encoding="utf-8")
+
+        payload = server.contract_import_gap_payload(
+            root_path=root,
+            folder_id="folder-a",
+            contracts=[
+                {"sourcePath": str(imported_pdf)},
+            ],
+        )
+
+    assert payload["ok"] is True
+    assert payload["checked"] == 3
+    assert payload["imported"] == 1
+    assert payload["missing"] == 2
+    assert [item["relativePath"] for item in payload["items"]] == [
+        "missing.docx",
+        "missing.pdf",
+    ]
+    assert {item["kind"] for item in payload["items"]} == {"Word", "PDF"}
+
+
+def test_normalize_pdf_import_preview_text_removes_pdf_noise() -> None:
+    text = server.normalize_pdf_import_preview_text(
+        "秘密保持契約書\u200b\n                                  \u200b\n"
+        "株式会社BeBlock\u200b（以下「委託者」）と、\u200b株式会社Gugenka\u200b（以下「受託者」）\n"
+        "                       \u200b「受領当事者」という）"
+    )
+    assert "\u200b" not in text
+    assert "                                  " not in text
+    assert "株式会社BeBlock（以下「委託者」）と、株式会社Gugenka（以下「受託者」）" in text
+    assert "「受領当事者」という）" in text
+
+
+def test_normalize_pdf_import_preview_text_repairs_split_dates() -> None:
+    text = server.normalize_pdf_import_preview_text("委託者受託者間の2026年\n\n6 25 月 日付の業務委託契約書")
+    assert "2026年6月25日付" in text
+
+
+def test_contract_pdf_payload_from_path_accepts_pdf() -> None:
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as tmp:
+        payload = server.contract_pdf_payload_from_path(tmp.name)
+    assert payload["ok"] is True
+    assert payload["path"].endswith(".pdf")
+
+
+def test_clamp_pdf_page_number() -> None:
+    assert server.clamp_pdf_page_number("2") == 2
+    assert server.clamp_pdf_page_number("-1") == 1
+    assert server.clamp_pdf_page_number("abc") == 1
+    assert server.clamp_pdf_page_number("999") == 100
 
 
 def test_asr_status_payload_shape() -> None:
@@ -134,6 +332,20 @@ def test_workspace_document_type_search_expands_terms() -> None:
         assert result["results"][0]["path"] == "agreement.txt"
 
 
+def test_workspace_contract_search_ignores_loose_outsourcing_hits() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "【20260629】秘密保持契約書 BeBlock.pdf").write_bytes(b"%PDF-1.4\n%binary")
+        (root / "mail.txt").write_text("昨日業務委託から添付のような報告をもらいました。\n", encoding="utf-8")
+        (root / "gundam.txt").write_text("【キャラクター：孫悟空（Son Goku）】\n■基本属性・性格\n", encoding="utf-8")
+
+        result = server.search_workspace_files(str(root), "契約書")
+
+        assert "業務委託" not in result["terms"]
+        assert [item["path"] for item in result["results"]] == ["【20260629】秘密保持契約書 BeBlock.pdf"]
+        assert result["results"][0]["matchType"] == "filename"
+
+
 def write_minimal_docx(path: Path, paragraphs: list[str]) -> None:
     paragraph_xml = "".join(
         f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"
@@ -222,7 +434,7 @@ def test_workspace_context_instructs_source_citation() -> None:
         context = server.build_workspace_context({
             "root": str(root),
             "files": [],
-            "searchQuery": "gundam",
+            "searchQuery": "ガンダム",
         })
         assert "本文一致の根拠は `path:line`" in context
         assert "ファイル名一致の根拠は `path`" in context
@@ -469,6 +681,19 @@ def test_iter_subprocess_output_lines_handles_binary_lines() -> None:
 
 
 if __name__ == "__main__":
+    test_contract_pdf_import_status_payload_shape()
+    test_contract_pdf_import_connection_test_payload_shape()
+    test_sarashina_ocr_status_payload_shape()
+    test_sarashina_compare_page_rejects_missing_path()
+    test_contract_pdf_import_try_page_rejects_missing_path()
+    test_contract_pdf_import_try_page_payload_preview()
+    test_contract_pdf_import_try_all_pages_payload_preview()
+    test_contract_pdf_import_auto_payload_prefers_pdf_text()
+    test_contract_import_gap_payload_lists_unimported_pdf_and_docx()
+    test_normalize_pdf_import_preview_text_removes_pdf_noise()
+    test_normalize_pdf_import_preview_text_repairs_split_dates()
+    test_contract_pdf_payload_from_path_accepts_pdf()
+    test_clamp_pdf_page_number()
     test_asr_status_payload_shape()
     test_asr_model_normalization()
     test_whisper_cpp_status_shape()

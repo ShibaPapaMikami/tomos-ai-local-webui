@@ -16,6 +16,9 @@ function gemmaDisplayModelName(model, task = "chat", helpers = {}) {
   if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) {
     return `HauhauCS Balanced 12B Q4${installed ? "" : ` (${translate("model.downloadRequired")})`}`;
   }
+  if (model === "gemma4:12b-mlx") {
+    return `Gemma 4 12B MLX 高速版 (${translate("model.gemmaMlxFast")}${installed ? "" : ` / ${translate("model.downloadRequired")}`})`;
+  }
   if (model === "gemma4:12b") {
     if (task === "coding") return `Gemma 4 12B (${translate("model.gemmaCoding")})`;
     if (task === "translation") return `Gemma 4 12B (${translate("model.gemmaTranslation")})`;
@@ -45,6 +48,7 @@ function gemmaComposerModelLabel(model, helpers = {}) {
   if (model.includes("gemma-4-12B-agentic-fable5")) return "Agentic Coder";
   if (model.includes("gemma-4-12B-coder-fable5")) return "Coder";
   if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) return "HauhauCS";
+  if (model === "gemma4:12b-mlx") return "Gemma 4 MLX";
   if (model === "gemma4:12b") return "Gemma 4";
   if (model === "qwen2.5:3b") return "Qwen";
   if (model === "phi3:latest") return "Phi-3";
@@ -62,6 +66,7 @@ function gemmaModelPurpose(model, task = "chat", helpers = {}) {
   if (model.includes("gemma-4-12B-agentic-fable5")) return "コード生成・修正・デバッグ";
   if (model.includes("gemma-4-12B-coder-fable5")) return "コード生成・修正・デバッグ";
   if (model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")) return "強化型チャット・制限弱め・PC負荷強";
+  if (model === "gemma4:12b-mlx") return "Apple Silicon向け高速チャット・コード生成";
   if (model === "gemma4:12b") return "標準チャット・画像理解";
   if (model === "qwen2.5:3b") return "高速チャット・翻訳";
   if (task === "coding") return "コード生成";
@@ -94,6 +99,12 @@ function gemmaModelForTask(task, options = {}) {
   const composerModel = String(options.composerModel || "").trim();
   if (options.useComposer && composerModel) return composerModel;
   if (overrides[task]) return overrides[task];
+  if (task === "chat") {
+    const mlxInstalled = typeof options.modelIsInstalled === "function"
+      ? options.modelIsInstalled("gemma4:12b-mlx")
+      : gemmaModelIsInstalled("gemma4:12b-mlx", serverModels);
+    if (mlxInstalled || serverModels.chat === "gemma4:12b-mlx") return "gemma4:12b-mlx";
+  }
   return serverModels[task] || serverModels.chat || "";
 }
 
@@ -104,6 +115,10 @@ function gemmaFallbackCodingModel(options = {}) {
 
 function gemmaFastChatModel(options = {}) {
   const serverModels = options.serverModels || {};
+  const mlxInstalled = typeof options.modelIsInstalled === "function"
+    ? options.modelIsInstalled("gemma4:12b-mlx")
+    : gemmaModelIsInstalled("gemma4:12b-mlx", serverModels);
+  if (mlxInstalled || serverModels.chat === "gemma4:12b-mlx") return "gemma4:12b-mlx";
   const isInstalled = typeof options.modelIsInstalled === "function"
     ? options.modelIsInstalled("qwen2.5:3b")
     : gemmaModelIsInstalled("qwen2.5:3b", serverModels);
@@ -118,7 +133,7 @@ function gemmaModelForRequestTask(task, requestOptions = {}, options = {}) {
   if (composerModel) return composerModel;
   if (task === "chat" && requestOptions.fastModel) return gemmaFastChatModel(options);
   if (task === "translation" && !overrides.translation && requestOptions.responseMode === "quality") {
-    return serverModels.chat || "gemma4:12b";
+    return gemmaModelForTask("chat", options) || "gemma4:12b";
   }
   return gemmaModelForTask(task, options);
 }

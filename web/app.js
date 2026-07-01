@@ -64,8 +64,8 @@ const state = {
   externalLlmStatus: "",
   activeTrainingSetId: localStorage.getItem("gemma4.activeTrainingSetId") || "",
   serverModels: {
-    chat: "gemma4:12b",
-    coding: "gemma4:12b",
+    chat: "gemma4:12b-mlx",
+    coding: "gemma4:12b-mlx",
     translation: "gemma4:12b",
     available: [],
     recommendedCoding: [],
@@ -186,6 +186,7 @@ const els = {
   settingsMenuToggle: document.querySelector("#settings-menu-toggle"),
   settingsMenuBack: document.querySelector("#settings-menu-back"),
   sidebarSettingsMenu: document.querySelector("#sidebar-settings-menu"),
+  appsGroup: document.querySelector("#apps-group"),
   responseSettingsToggle: document.querySelector("#response-settings-toggle"),
   responseSettingsPanel: document.querySelector("#response-settings-panel"),
   responseSettingsClose: document.querySelector("#response-settings-close"),
@@ -230,6 +231,10 @@ const els = {
   workspaceCodegraphEnabled: document.querySelector("#workspace-codegraph-enabled"),
   workspaceCodegraphPrepare: document.querySelector("#workspace-codegraph-prepare"),
   workspaceCodegraphStatus: document.querySelector("#workspace-codegraph-status"),
+  workspaceKnowledgeRow: document.querySelector("#workspace-knowledge-row"),
+  workspaceKnowledgeEnabled: document.querySelector("#workspace-knowledge-enabled"),
+  workspaceKnowledgePrepare: document.querySelector("#workspace-knowledge-prepare"),
+  workspaceKnowledgeStatus: document.querySelector("#workspace-knowledge-status"),
   workspaceSearchRow: document.querySelector("#workspace-search-row"),
   workspaceSearchQuery: document.querySelector("#workspace-search-query"),
   workspaceSearchRun: document.querySelector("#workspace-search-run"),
@@ -312,6 +317,41 @@ const els = {
   pluginsToggle: document.querySelector("#plugins-toggle"),
   pluginsPanel: document.querySelector("#plugins-panel"),
   pluginsClose: document.querySelector("#plugins-close"),
+  contractPdfImportStatus: document.querySelector("#contract-pdf-import-status"),
+  contractPdfImportCandidates: document.querySelector("#contract-pdf-import-candidates"),
+  contractPdfImportNote: document.querySelector("#contract-pdf-import-note"),
+  contractPdfImportPath: document.querySelector("#contract-pdf-import-path"),
+  contractPdfImportSelected: document.querySelector("#contract-pdf-import-selected"),
+  contractPdfImportPage: document.querySelector("#contract-pdf-import-page"),
+  contractPdfImportActionStatus: document.querySelector("#contract-pdf-import-action-status"),
+  contractPdfImportPickPdf: document.querySelector("#contract-pdf-import-pick-pdf"),
+  contractPdfImportAuto: document.querySelector("#contract-pdf-import-auto"),
+  contractPdfImportRefresh: document.querySelector("#contract-pdf-import-refresh"),
+  contractPdfImportConnectionTest: document.querySelector("#contract-pdf-import-connection-test"),
+  contractPdfImportTry: document.querySelector("#contract-pdf-import-try"),
+  contractPdfImportTryAll: document.querySelector("#contract-pdf-import-try-all"),
+  contractPdfImportSarashina: document.querySelector("#contract-pdf-import-sarashina"),
+  contractPdfImportSendContract: document.querySelector("#contract-pdf-import-send-contract"),
+  contractPdfImportResult: document.querySelector("#contract-pdf-import-result"),
+  contractsToggle: document.querySelector("#contracts-toggle"),
+  contractsPanel: document.querySelector("#contracts-panel"),
+  contractsClose: document.querySelector("#contracts-close"),
+  contractsRefresh: document.querySelector("#contracts-refresh"),
+  contractsExportCsv: document.querySelector("#contracts-export-csv"),
+  contractsExportJson: document.querySelector("#contracts-export-json"),
+  contractsImportJson: document.querySelector("#contracts-import-json"),
+  contractsDeleteDummies: document.querySelector("#contracts-delete-dummies"),
+  contractsImportInput: document.querySelector("#contracts-import-input"),
+  contractsGapCheck: document.querySelector("#contracts-gap-check"),
+  contractsGapList: document.querySelector("#contracts-gap-list"),
+  contractsStatus: document.querySelector("#contracts-status"),
+  contractsSearch: document.querySelector("#contracts-search"),
+  contractsSort: document.querySelector("#contracts-sort"),
+  contractsFilter: document.querySelector("#contracts-filter"),
+  contractsAlertSummary: document.querySelector("#contracts-alert-summary"),
+  contractTemplateRow: document.querySelector("#contract-template-row"),
+  contractExtractionReview: document.querySelector("#contract-extraction-review"),
+  contractsList: document.querySelector("#contracts-list"),
   languageModelsToggle: document.querySelector("#language-models-toggle"),
   languageModelsPanel: document.querySelector("#language-models-panel"),
   languageModelsClose: document.querySelector("#language-models-close"),
@@ -756,11 +796,11 @@ function lastReadableWorkspaceSource(session) {
 }
 
 function isWorkspaceSourceContentFollowup(text) {
-  const normalized = String(text || "").trim();
-  if (!normalized || !state.workspaceRoot || isCharacterPreferenceRequest(normalized)) return false;
-  return /^(どんな内容|どんな中身|内容[は？?]*|中身[は？?]*|要約|要約して|読んで|開いて|見せて|何が書いて|何が入って|どんなこと)/.test(normalized)
-    || /(内容|中身|要約|本文).{0,12}(教えて|知りたい|見せて|読んで|確認)/.test(normalized)
-    || /この(?:PDF|ファイル|資料|文書)|さっきの(?:PDF|ファイル|資料|文書)|それの(?:内容|中身|要約)/.test(normalized);
+  return Boolean(window.GEMMA_WORKSPACE?.isWorkspaceSourceContentFollowup?.(text, {
+    hasWorkspaceRoot: Boolean(state.workspaceRoot),
+    isCharacterPreferenceRequest,
+    isExcludedRequest: isStudyPackRewriteRequest,
+  }));
 }
 
 async function readWorkspaceSourceContent(source) {
@@ -1088,12 +1128,15 @@ async function handleWorkspaceSearchContentRequest(text, sources, requestOptions
 function workspaceSearchQueryFromText(text) {
   const folder = activeFolder();
   const fastSearchReady = Boolean(state.plugins?.["fast-search"]?.installed);
-  if (!state.workspaceRoot || !fastSearchReady || !folder) return "";
+  const knowledgeReady = activeKnowledgeReady();
+  if (!state.workspaceRoot || !folder || (!fastSearchReady && !knowledgeReady)) return "";
   if ((isWorkspaceBuildRequest(text) && !isWorkspaceLookupRequest(text)) || isTranslationRequest(text)) return "";
   const normalized = String(text || "").trim();
-  if (!hasExplicitWorkspaceLookupIntent(normalized) || isCharacterPreferenceRequest(normalized)) {
+  const knowledgeTermQuery = knowledgeReady ? workspaceKnowledgeTermQueryFromText(normalized) : "";
+  if (!knowledgeTermQuery && (!hasExplicitWorkspaceLookupIntent(normalized) || isCharacterPreferenceRequest(normalized))) {
     return "";
   }
+  if (knowledgeTermQuery) return knowledgeTermQuery;
   const fileKind = workspaceFileKindFromText(normalized);
   if (fileKind) return fileKind === "word" ? "doc" : fileKind;
   const quoted = normalized.match(/[「『"']([^「」『』"']{1,80})[」』"']/);
@@ -1102,6 +1145,8 @@ function workspaceSearchQueryFromText(text) {
   if (fileName?.[1]) return fileName[1].trim();
   const documentType = normalized.match(/(契約書|請求書|仕様書|見積書|領収書|議事録|PDF|pdf|Word|ワード|docx?|contract|agreement|invoice|specification|spec|estimate|quotation|receipt|minutes)/i);
   if (documentType?.[1]) return documentType[1].trim();
+  const subjectQuery = workspaceSubjectQueryFromText(normalized);
+  if (subjectQuery) return subjectQuery;
   const beforeFileWord = normalized.match(/([A-Za-z0-9_.-]{2,80}|[ぁ-んァ-ヶ一-龠ー]{2,40})\s*(?:という|の)?\s*(?:ファイル|file)/i);
   if (beforeFileWord?.[1]) return beforeFileWord[1].trim();
   const beforeFile = normalized.match(/([A-Za-z0-9_.-]{2,80}|[ぁ-んァ-ヶ一-龠ー]{2,40})\s*(?:は|って|が|を)?\s*(?:どの|どこ|含ま|書か|記載|検索|探)/i);
@@ -1111,18 +1156,97 @@ function workspaceSearchQueryFromText(text) {
   return "";
 }
 
+function isWorkspaceCountRequest(text) {
+  return /(何件|何個|いくつ|件数|数え|数えて|how many|count)/i.test(String(text || ""));
+}
+
+function cleanupWorkspaceSearchTerm(value) {
+  return String(value || "")
+    .replace(/[？?。.!！、,]+$/g, "")
+    .replace(/^(この|その|あの)\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[「『"']|[」』"']$/g, "");
+}
+
+function workspaceSubjectQueryFromText(text) {
+  const normalized = String(text || "").trim();
+  const patterns = [
+    /^(.{2,80}?)(?:について|に関して|の)?(?:記載|書か|含ま).*(?:ファイル|資料|文書|PDF|Word)/i,
+    /^(.{2,80}?)(?:が|を|の)?(?:入って|載って|まとまって).*(?:ファイル|資料|文書|PDF|Word)/i,
+    /(?:ファイル|資料|文書|PDF|Word).*(?:で|に)(.{2,80}?)(?:について|に関して|を)?(?:記載|書か|含ま|探|検索)/i,
+  ];
+  for (const pattern of patterns) {
+    const term = cleanupWorkspaceSearchTerm(normalized.match(pattern)?.[1] || "");
+    if (term && term.length <= 80) return term;
+  }
+  return "";
+}
+
+function activeKnowledgeReady() {
+  const knowledge = activeFolder()?.plugins?.knowledge || {};
+  return Boolean(state.workspaceRoot && knowledge.enabled && knowledge.status === "ready");
+}
+
+function workspaceKnowledgeTermQueryFromText(text) {
+  const normalized = String(text || "")
+    .replace(/[？?]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized || normalized.length > 80) return "";
+  if (hasExplicitWorkspaceLookupIntent(normalized)) return "";
+  const patterns = [
+    /^(.{2,48}?)(?:って(?:何|なに|どういう意味|どんなもの)|とは(?:何|なに)?|の意味(?:は)?|について(?:教えて|説明して)?)$/i,
+    /^(?:この|その|あの)?(.{2,48}?)(?:を|について)(?:教えて|説明して)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    const term = cleanupWorkspaceSearchTerm(match?.[1] || "");
+    if (term && !/[。.!！]/.test(term) && term.length <= 48) return term;
+  }
+  return "";
+}
+
 function workspacePayload(text = "") {
   const codegraph = activeFolder()?.plugins?.codegraph || {};
+  const knowledge = activeFolder()?.plugins?.knowledge || {};
   return {
+    folderId: activeFolder()?.id || "",
     root: state.workspaceRoot,
     files: [...state.selectedFiles],
     codegraph: Boolean(codegraph.enabled && codegraph.status === "ready"),
+    knowledge: Boolean(knowledge.enabled && knowledge.status === "ready"),
     searchQuery: workspaceSearchQueryFromText(text),
+    countRequest: isWorkspaceCountRequest(text),
   };
 }
 
 async function workspaceSearchSourcesForChat(workspace) {
   if (!workspace?.root || !workspace?.searchQuery) return [];
+  if (workspace.knowledge && workspace.folderId) {
+    try {
+      const data = await window.GEMMA_WORKSPACE?.searchKnowledge?.({
+        folderId: workspace.folderId,
+        query: workspace.searchQuery,
+        limit: 8,
+      });
+      if (data?.ok && Array.isArray(data.results) && data.results.length) {
+        return data.results.slice(0, 8).map((item) => ({
+          type: "workspace",
+          sourceType: "knowledge",
+          title: item.page ? `${item.path || ""} p.${item.page}` : String(item.path || ""),
+          path: String(item.path || ""),
+          line: "",
+          snippet: String(item.snippet || ""),
+          matchType: "body",
+          sourceKind: String(item.path || "").toLowerCase().endsWith(".pdf") ? "pdf" : "text",
+          heading: String(item.heading || ""),
+        })).filter((source) => source.path);
+      }
+    } catch {
+      // Fall back to the direct workspace scan below.
+    }
+  }
   try {
     const response = await fetch("/api/workspace/search", {
       method: "POST",
@@ -1148,10 +1272,14 @@ async function workspaceSearchSourcesForChat(workspace) {
 function workspaceSearchAnswer(workspace, sources) {
   if (!workspace?.searchQuery) return "";
   if (!sources.length) {
+    if (workspace.countRequest) {
+      return applyCharacterToneToToolReply(`フォルダー内検索では「${workspace.searchQuery}」に一致するファイルは0件だったよ。画像内の文字はまだ検索対象外です。PDFは環境によって本文検索できない場合があります。`);
+    }
     return applyCharacterToneToToolReply(t("workspace.chatSearchNoResults", { query: workspace.searchQuery }));
   }
   const visible = sources.slice(0, 6);
   const filenameOnly = visible.every((source) => source.matchType === "filename");
+  const uniquePathCount = new Set(sources.map((source) => source.path).filter(Boolean)).size;
   const lines = visible.map((source) => {
     const location = source.line ? `${source.path}:${source.line}` : source.path;
     const matchLabel = source.matchType === "filename" ? "（ファイル名）" : "";
@@ -1161,10 +1289,11 @@ function workspaceSearchAnswer(workspace, sources) {
   const summary = filenameOnly
     ? `フォルダー内検索で「${workspace.searchQuery}」がファイル名に含まれるファイルが見つかりました。本文の中ではなく、ファイル名で見つかった結果です。`
     : t("workspace.chatSearchFound", { query: workspace.searchQuery });
+  const countSummary = `フォルダー内検索では「${workspace.searchQuery}」に一致するファイルは${uniquePathCount}件あるよ。`;
   const more = sources.length > visible.length
     ? `\n${t("workspace.chatSearchMore", { count: sources.length - visible.length })}`
     : "";
-  return applyCharacterToneToToolReply(`${summary}\n${lines.join("\n")}${more}`);
+  return applyCharacterToneToToolReply(`${workspace.countRequest ? countSummary : summary}\n${lines.join("\n")}${more}`);
 }
 
 function codegraphSourcesForChat(limit = 5) {
@@ -1267,6 +1396,21 @@ async function openWorkspaceSource(source) {
   }
 }
 
+async function revealWorkspaceSource(source) {
+  const path = String(source?.path || "").trim();
+  if (!state.workspaceRoot || !path) return;
+  try {
+    const data = await window.GEMMA_WORKSPACE?.revealPath?.({ root: state.workspaceRoot, path });
+    if (els.workspaceStatus) {
+      els.workspaceStatus.textContent = t("workspace.revealed", { path: data?.path || path });
+    }
+  } catch (error) {
+    if (els.workspaceStatus) {
+      els.workspaceStatus.textContent = `${t("error.prefix")}: ${error.message || t("workspace.sourceOpenError")}`;
+    }
+  }
+}
+
 function ensureFolderData() {
   const initialized = localStorage.getItem("gemma4.foldersInitialized") === "true";
   if (state.folders.length === 0 && !initialized) {
@@ -1298,6 +1442,11 @@ function ensureFolderData() {
     }
     folder.plugins.codegraph.enabled = Boolean(folder.plugins.codegraph.enabled);
     if (typeof folder.plugins.codegraph.status !== "string") folder.plugins.codegraph.status = "not-ready";
+    if (!folder.plugins.knowledge || typeof folder.plugins.knowledge !== "object" || Array.isArray(folder.plugins.knowledge)) {
+      folder.plugins.knowledge = {};
+    }
+    folder.plugins.knowledge.enabled = Boolean(folder.plugins.knowledge.enabled);
+    if (typeof folder.plugins.knowledge.status !== "string") folder.plugins.knowledge.status = "not-ready";
     if (!folder.name) folder.name = t("folder.untitled");
   }
   ensureTrainingSets();
@@ -2140,7 +2289,10 @@ function studyPackModesDisplayLabel(selectedItems = selectedStudyPackModes()) {
   return `教材パック ${selectedItems.length}件`;
 }
 
-function studyPackModeOutputPrompt(selected) {
+function studyPackModeOutputPrompt(selected, requestText = "") {
+  if (isReplyDraftRequest(requestText)) {
+    return "出力はまず「返信本文案:」として、すぐコピペできる返信本文だけを書いてください。件名案、修正版、変更した理由、送信前の確認事項、複数パターンは、ユーザーが求めた時だけ出してください。";
+  }
   const modeId = selected?.mode?.id || "";
   if (modeId === "logic-gap-check") {
     return "出力は「気になる点」「直し方」「必要なら修正版」の順にしてください。指摘だけで十分な場合は、無理に全文を書き換えないでください。ファイル保存やダウンロード案内は、ユーザーが明示しない限り行わないでください。";
@@ -2166,7 +2318,7 @@ function studyPackModeExamplePrompt(selected) {
   return `良い出力例です。内容をコピーせず、形式と粒度だけ参考にしてください。\n${lines.join("\n")}\n`;
 }
 
-function studyPackContextSystemPrompt() {
+function studyPackContextSystemPrompt(requestText = "") {
   const selectedItems = selectedStudyPackModes();
   const selected = selectedItems[0] || selectedStudyPackMode();
   const packs = installedStudyPacks().filter((pack) => pack.modes?.length);
@@ -2180,9 +2332,22 @@ function studyPackContextSystemPrompt() {
   const modePrompts = selectedForPrompt.map((item, index) => {
     const packName = t(item.pack.nameKey) || item.pack.id;
     const modeName = t(item.mode.nameKey) || item.mode.id;
-    return `教材${index + 1}: ${packName} / ${modeName}\n指示: ${item.mode.prompt}\n${studyPackModeOutputPrompt(item)}\n${studyPackModeExamplePrompt(item)}`;
+    const compact = window.GEMMA_MANAGEMENT?.compactStudyPackPrompt?.({
+      packName,
+      modeName,
+      mode: item.mode,
+      outputPrompt: studyPackModeOutputPrompt(item, requestText),
+      includeExamples: selectedForPrompt.length === 1,
+    });
+    return `教材${index + 1}: ${compact || `${packName} / ${modeName}\n方針: ${item.mode.prompt}`}`;
   }).join("\n---\n");
-  return `${activeLine}選択された教材パックのモードを次の回答に使います。\n${modePrompts}複数の教材が選択されている場合は、矛盾しない範囲で統合し、最終回答を1つにまとめてください。教材パック本体は書き換えません。\n`;
+  const replyDraftOutputLimit = isReplyDraftRequest(requestText)
+    ? "返信文依頼では、出力は「返信本文案:」を最初に置き、すぐコピペできる本文を中心にしてください。件名案、変更した理由、送信前の確認事項、複数パターンの長い列挙は、ユーザーが求めた時だけ出してください。\n"
+    : "";
+  const multiPackOutputLimit = selectedForPrompt.length > 1
+    ? "複数の教材が選択されている場合は、矛盾しない範囲で統合し、出力は「件名案」「修正版」「変更点（最大2つ）」までに絞ってください。「送信前の確認事項」はユーザーが求めた時だけ出してください。\n"
+    : "";
+  return `${activeLine}選択された教材パックのモードを次の回答に使います。\n${modePrompts}${replyDraftOutputLimit}${isReplyDraftRequest(requestText) ? "" : multiPackOutputLimit}教材パック本体は書き換えません。\n`;
 }
 
 function renderCharacterPanel() {
@@ -2585,6 +2750,25 @@ function applyCodegraphToActiveFolder(enabled) {
   render();
 }
 
+function applyKnowledgeToActiveFolder(enabled) {
+  const folder = activeFolder();
+  if (!folder) return;
+  folder.plugins = folder.plugins && typeof folder.plugins === "object" && !Array.isArray(folder.plugins)
+    ? folder.plugins
+    : {};
+  folder.plugins.knowledge = folder.plugins.knowledge && typeof folder.plugins.knowledge === "object" && !Array.isArray(folder.plugins.knowledge)
+    ? folder.plugins.knowledge
+    : {};
+  folder.plugins.knowledge.enabled = Boolean(enabled);
+  folder.plugins.knowledge.status = enabled
+    ? folder.plugins.knowledge.status && folder.plugins.knowledge.status !== "off"
+      ? folder.plugins.knowledge.status
+      : "not-ready"
+    : "off";
+  saveFolders();
+  render();
+}
+
 async function prepareCodegraphForActiveFolder() {
   const folder = activeFolder();
   if (!folder || !state.workspaceRoot) return;
@@ -2612,6 +2796,50 @@ async function prepareCodegraphForActiveFolder() {
   } catch (error) {
     folder.plugins.codegraph.status = "error";
     folder.plugins.codegraph.error = error.message || "原因不明のエラーです。アプリを再起動してもう一度お試しください。";
+  }
+  saveFolders();
+  render();
+}
+
+async function prepareKnowledgeForActiveFolder() {
+  const folder = activeFolder();
+  if (!folder || !state.workspaceRoot) return;
+  folder.plugins = folder.plugins && typeof folder.plugins === "object" && !Array.isArray(folder.plugins)
+    ? folder.plugins
+    : {};
+  folder.plugins.knowledge = folder.plugins.knowledge && typeof folder.plugins.knowledge === "object" && !Array.isArray(folder.plugins.knowledge)
+    ? folder.plugins.knowledge
+    : {};
+  folder.plugins.knowledge.enabled = true;
+  folder.plugins.knowledge.status = "running";
+  folder.plugins.knowledge.error = "";
+  saveFolders();
+  render();
+  try {
+    const data = await window.GEMMA_WORKSPACE.prepareKnowledge({
+      folderId: folder.id,
+      root: state.workspaceRoot,
+      force: false,
+    });
+    folder.plugins.knowledge.status = "ready";
+    folder.plugins.knowledge.fileCount = Number(data.fileCount) || 0;
+    folder.plugins.knowledge.textCount = Number(data.textCount) || 0;
+    folder.plugins.knowledge.failedCount = Number(data.failedCount) || 0;
+    folder.plugins.knowledge.lastIndexedAt = Number(data.lastIndexedAt) || Date.now();
+    folder.plugins.knowledge.indexed = Number(data.indexed) || 0;
+    folder.plugins.knowledge.skipped = Number(data.skipped) || 0;
+    folder.plugins.knowledge.failed = Number(data.failed) || 0;
+    folder.plugins.knowledge.error = "";
+    if (els.workspaceKnowledgeStatus) {
+      els.workspaceKnowledgeStatus.textContent = t("workspace.knowledgeSearchDone", {
+        indexed: folder.plugins.knowledge.indexed,
+        skipped: folder.plugins.knowledge.skipped,
+        failed: folder.plugins.knowledge.failed,
+      });
+    }
+  } catch (error) {
+    folder.plugins.knowledge.status = "error";
+    folder.plugins.knowledge.error = error.message || "原因不明のエラーです。アプリを再起動してもう一度お試しください。";
   }
   saveFolders();
   render();
@@ -2868,6 +3096,7 @@ function renderMessages() {
     formatDuration,
     modelForTask,
     openWorkspaceSource,
+    revealWorkspaceSource,
     saveMemoryCandidate,
     saveWorkspaceTranscript,
     state,
@@ -3166,10 +3395,21 @@ const {
 function isWorkspaceBuildRequest(text) {
   if (!state.workspaceRoot) return false;
   if (isTranslationRequest(text)) return false;
+  if (isBusinessEmailDraft(text)) return false;
   if (isStudyPackRewriteRequest(text) && !explicitlyRequestsWorkspaceSave(text)) return false;
   if (shouldKeepStudyPackReplyInChat(text)) return false;
   if (isWorkspaceLookupRequest(text)) return false;
   return /テトリス|ゲーム|サイト|アプリ|ページ|ツール|作って|つくって|作成|生成|構築|実装|修正|変更|保存|ファイル|html|css|javascript|コード|program|app|game|build|create|implement/i.test(text);
+}
+
+function isBusinessEmailDraft(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized || normalized.length < 40) return false;
+  const hasRecipient = /^[^\n]{1,40}(様|さま|さん)\s*$/m.test(normalized);
+  const hasGreeting = /(いつもお世話になっております|お世話になっております|平素よりお世話になっております)/.test(normalized);
+  const hasSignature = /\n[^\n]{1,20}\s*$/.test(normalized);
+  const hasBusinessClosing = /(よろしくお願いいたします|よろしくお願い申し上げます|ご確認のほど|ご確認いただけます)/.test(normalized);
+  return hasRecipient && hasGreeting && hasSignature && hasBusinessClosing;
 }
 
 function explicitlyRequestsWorkspaceSave(text) {
@@ -3179,13 +3419,36 @@ function explicitlyRequestsWorkspaceSave(text) {
 }
 
 function shouldKeepStudyPackReplyInChat(text) {
-  return selectedStudyPackModes().length > 0 && !explicitlyRequestsWorkspaceSave(text);
+  const normalized = String(text || "").trim();
+  if (hasExplicitWorkspaceLookupIntent(normalized)) return false;
+  return selectedStudyPackModes().length > 0 && !explicitlyRequestsWorkspaceSave(normalized);
 }
 
 function isStudyPackRewriteRequest(text) {
   const normalized = String(text || "").trim();
   if (!normalized) return false;
-  return /(リライト|書き直|書き換|言い換|推敲|添削|校正|読みやすく|読みやすい|論理チェック|論理の抜け|AIっぽさ|レポート向け|レポート添削|文章を整|文を整|rewrite|proofread|revise|polish)/i.test(normalized);
+  return /(リライト|書き直|書き換|言い換|推敲|添削|校正|読みやすく|読みやすい|論理チェック|論理の抜け|AIっぽさ|レポート向け|レポート添削|文章を整|文を整|返信文|返信案|返信メール|メール返信|返答案|文案|例文|続きを考えて|つづく返信|続く返信|rewrite|proofread|revise|polish|reply draft|email reply)/i.test(normalized);
+}
+
+function isReplyDraftRequest(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  if (/(返信文|返信案|返信メール|メール返信|返答案|続きを考えて|つづく返信|続く返信|reply draft|email reply)/i.test(normalized)) return true;
+  const hasQuotedMail = /(差出人:|宛先:|件名:|Forwarded message|On .+ wrote:|年\d{1,2}月\d{1,2}日.+:)/i.test(normalized);
+  const hasReplyOpening = /(ご配慮あるお言葉|ご連絡ありがとうございます|ご返信ありがとうございます|ご確認ありがとうございます|承知いたしました|かしこまりました)/.test(normalized);
+  return hasQuotedMail && hasReplyOpening;
+}
+
+function isImplicitStudyPackWritingRequest(text) {
+  return selectedStudyPackModes().length > 0 && isBusinessEmailDraft(text);
+}
+
+function shouldApplyStudyPackToRequest(text, hasImages = false) {
+  const hasSelection = selectedStudyPackModes().length > 0 || Boolean(selectedStudyPackMode());
+  return Boolean(window.GEMMA_MANAGEMENT?.shouldApplyStudyPackForText?.(text, {
+    hasSelection,
+    hasImages,
+  }));
 }
 
 function hasExplicitWorkspaceLookupIntent(text) {
@@ -3222,6 +3485,7 @@ function shouldUseWorkspaceContextForChat(text, requestOptions = {}) {
   if (requestOptions.translationMode) return false;
   if (isStudyPackRewriteRequest(text) && !explicitlyRequestsWorkspaceSave(text)) return false;
   if (requestOptions.codingMode) return true;
+  if (activeKnowledgeReady() && workspaceKnowledgeTermQueryFromText(text)) return true;
   return isWorkspaceLookupRequest(text);
 }
 
@@ -3247,6 +3511,20 @@ function isSimpleReplyRequest(text) {
   return /^(おはよ|おはよう|こんにちは|こんばんは|ありがとう|ありがと|どうも|了解|はい|うん|ok|OK|hi|hello|thanks|thankyou|goodmorning)/i.test(normalized);
 }
 
+function isCasualPreferenceQuestion(text) {
+  const normalized = String(text || "").replace(/\s+/g, "").trim();
+  if (!normalized || normalized.length > 32) return false;
+  if (/教えて|調べ|検索|説明|理由|なぜ|比較|要約|分析|設計|実装|修正|コード|ファイル|保存|添削|翻訳/i.test(normalized)) return false;
+  return /(好き[？?]?|好み[？?]?|どれが好き|どの.+好き|どう思う[？?]?|元気[？?]?|楽しい[？?]?)/.test(normalized);
+}
+
+function isCasualStateChatRequest(text) {
+  const normalized = String(text || "").replace(/\s+/g, "").trim();
+  if (!normalized || normalized.length > 32) return false;
+  if (/教えて|調べ|検索|説明|理由|なぜ|比較|要約|分析|設計|実装|修正|コード|ファイル|保存|添削|翻訳/i.test(normalized)) return false;
+  return /(腹へった|はらへった|お腹すいた|おなかすいた|腹減った|眠い|ねむい|疲れた|つかれた|さむい|寒い|暑い|あつい|だるい|かなしい|うれしい|楽しい|たのしい|帰ろ|かえろ|帰る|かえる|そろそろ帰|おつかれ|お疲れ)/.test(normalized);
+}
+
 function isLightweightChatRequest(text, hasImages = false) {
   if (hasImages || state.webSearch) return false;
   const normalized = text.replace(/\s+/g, "").trim();
@@ -3259,6 +3537,8 @@ function isLightweightChatRequest(text, hasImages = false) {
   return (
     isSimpleReplyRequest(text) ||
     isCasualQuickReplyRequest(text) ||
+    isCasualPreferenceQuestion(text) ||
+    isCasualStateChatRequest(text) ||
     /かな|かも|どうしよ|どうしよう|おすすめ|たべよう|食べよう|飲もう|ねむい|疲れた|つかれた|がんばる|頑張る/i.test(normalized)
   );
 }
@@ -3268,14 +3548,14 @@ function effectiveResponseMode(text, codingMode) {
   const selected = state.responseMode;
   if (selected !== "auto") return selected;
   if (isTranslationRequest(text)) return translationNeedsQuality(text) ? "quality" : "fast";
-  return isSimpleReplyRequest(text) ? "fast" : "balanced";
+  return isSimpleReplyRequest(text) || isCasualPreferenceQuestion(text) || isCasualStateChatRequest(text) ? "fast" : "balanced";
 }
 
 function effectiveThinkingMode(text, codingMode, responseMode) {
   const selected = state.thinkingMode;
   if (selected !== "auto") return selected;
   if (codingMode || responseMode === "quality") return "high";
-  if (responseMode === "fast" || isSimpleReplyRequest(text)) return "low";
+  if (responseMode === "fast" || isSimpleReplyRequest(text) || isCasualPreferenceQuestion(text) || isCasualStateChatRequest(text)) return "low";
   return "medium";
 }
 
@@ -3422,13 +3702,35 @@ function modelReasonText(reasonKey) {
 function chatRequestOptions(text, hasImages = false) {
   const translationMode = isTranslationRequest(text);
   const codingMode = !translationMode && isWorkspaceBuildRequest(text);
-  const hasStudyPackSelection = selectedStudyPackModes().length > 0 || Boolean(selectedStudyPackMode());
+  const hasStudyPackSelection = shouldApplyStudyPackToRequest(text, hasImages);
+  const rewriteStudyPackMode = hasStudyPackSelection && (isStudyPackRewriteRequest(text) || isImplicitStudyPackWritingRequest(text));
   const lightweightMode = !hasStudyPackSelection && !codingMode && !translationMode && isLightweightChatRequest(text, hasImages);
   const mode = effectiveResponseMode(text, codingMode);
   const thinkingMode = effectiveThinkingMode(text, codingMode, mode);
   const maxTokens = numberValue(els.numPredict, 96);
   const contextSize = numberValue(els.numCtx, 2048);
   const historyTurns = numberValue(els.historyTurns, 4);
+  if (rewriteStudyPackMode) {
+    return {
+      codingMode,
+      translationMode,
+      responseMode: "fast",
+      thinkingMode: "medium",
+      progressLabel: t("progress.fast"),
+      modelReason: modelReasonText("model.reasonFastMode"),
+      temperature: Math.min(numberValue(els.temperature, 0.7), 0.45),
+      topP: Math.min(numberValue(els.topP, 0.9), 0.82),
+      topK: Math.min(numberValue(els.topK, 40), 24),
+      numPredict: 900,
+      numCtx: Math.min(Math.max(contextSize, 2048), 3072),
+      historyTurns: 1,
+      keepAlive: "30m",
+      think: false,
+      webSearch: false,
+      useStudyPackContext: true,
+      isolateUserMessage: true,
+    };
+  }
   if (lightweightMode) {
     return {
       codingMode,
@@ -3447,6 +3749,7 @@ function chatRequestOptions(text, hasImages = false) {
       think: false,
       webSearch: false,
       fastModel: true,
+      useStudyPackContext: false,
     };
   }
   if (translationMode) {
@@ -3468,6 +3771,7 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: "30m",
       think: false,
       webSearch: false,
+      useStudyPackContext: false,
     };
   }
   if (mode === "fast") {
@@ -3487,6 +3791,8 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: "30m",
       think: false,
       webSearch: false,
+      useStudyPackContext: hasStudyPackSelection,
+      isolateUserMessage: hasStudyPackSelection,
     });
   }
   if (mode === "quality") {
@@ -3506,6 +3812,8 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: codingMode ? "30m" : "20m",
       think: false,
       webSearch: state.webSearch,
+      useStudyPackContext: hasStudyPackSelection,
+      isolateUserMessage: hasStudyPackSelection,
     });
   }
   const searchBudget = applySearchBudget?.({
@@ -3529,12 +3837,18 @@ function chatRequestOptions(text, hasImages = false) {
     temperature: numberValue(els.temperature, 0.7),
     topP: numberValue(els.topP, 0.9),
     topK: numberValue(els.topK, 40),
-    numPredict: hasStudyPackSelection ? Math.max(searchBudget.numPredict, 768) : searchBudget.numPredict,
+    numPredict: rewriteStudyPackMode
+      ? Math.min(Math.max(searchBudget.numPredict, 700), 900)
+      : hasStudyPackSelection
+        ? Math.max(searchBudget.numPredict, 640)
+        : searchBudget.numPredict,
     numCtx: hasStudyPackSelection ? Math.max(searchBudget.numCtx, 4096) : searchBudget.numCtx,
     historyTurns: searchBudget.historyTurns,
     keepAlive: codingMode ? "20m" : "15m",
     think: false,
     webSearch: state.webSearch,
+    useStudyPackContext: hasStudyPackSelection,
+    isolateUserMessage: rewriteStudyPackMode,
   });
 }
 
@@ -4342,7 +4656,7 @@ async function sendMessage(text) {
     sizeLabel: file.sizeLabel,
   }));
   const requestOptions = chatRequestOptions(text, images.length > 0);
-  const appliedStudyPackSelections = selectedStudyPackModes();
+  const appliedStudyPackSelections = requestOptions.useStudyPackContext ? selectedStudyPackModes() : [];
   const appliedStudyPackModeLabel = studyPackModesDisplayLabel(appliedStudyPackSelections);
   const userMessage = { role: "user", content: text, images, imagePreviews, attachments };
   session.messages.push(userMessage);
@@ -4471,9 +4785,9 @@ async function sendMessage(text) {
             requestOptions.thinkingMode,
             requestOptions.translationMode,
           );
-    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${baseRequestSystem}${requestOptions.translationMode ? "" : studyPackContextSystemPrompt()}${trainingContextSystemPrompt()}`;
+    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${baseRequestSystem}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${trainingContextSystemPrompt()}`;
     const modelUserMessage = messageWithAttachmentContext(userMessage, attachmentContext);
-    const requestMessages = requestOptions.translationMode || requestOptions.fastModel
+    const requestMessages = requestOptions.translationMode || requestOptions.fastModel || requestOptions.isolateUserMessage
       ? [modelUserMessage]
       : [...session.messages.slice(0, -1), modelUserMessage];
     const stream = true;
@@ -4499,6 +4813,10 @@ async function sendMessage(text) {
     const workspaceRequest = shouldUseWorkspaceContext ? workspacePayload(text) : null;
     const localSearchSources = shouldUseWorkspaceContext ? await workspaceSearchSourcesForChat(workspaceRequest) : [];
     const codegraphSources = shouldUseWorkspaceContext ? codegraphSourcesForChat() : [];
+    runMetaOverrides = {
+      ...runMetaOverrides,
+      codeUnderstanding: codegraphSources.length > 0,
+    };
     if (shouldUseWorkspaceContext && await handleWorkspaceSearchContentRequest(text, localSearchSources, requestOptions)) {
       return;
     }
@@ -5262,6 +5580,7 @@ function setupManagementPanels() {
     els,
     renderStudyPacksPanel,
     renderPluginsPanel,
+    renderContractsPanel,
   });
 }
 
@@ -5271,6 +5590,943 @@ function renderStudyPacksPanel() {
 
 function renderPluginsPanel() {
   window.GEMMA_MANAGEMENT?.renderPluginsPanel?.({ state, els, t });
+}
+
+async function renderContractPdfImportPanel() {
+  if (!els.contractPdfImportActionStatus) return;
+  try {
+    const response = await fetch("/api/contracts/pdf-import/status");
+    const data = await response.json();
+    const contractPdfImport = data.pdfImport || null;
+    if (els.contractPdfImportStatus) {
+      els.contractPdfImportStatus.textContent = contractPdfImport?.runnerConnected
+        ? t("contracts.pdfImportConnected")
+        : t("contracts.pdfImportTextReady");
+    }
+    if (els.contractPdfImportCandidates) {
+      els.contractPdfImportCandidates.textContent = t("contracts.pdfImportRecommendedOcr");
+    }
+    if (els.contractPdfImportNote) {
+      els.contractPdfImportNote.textContent = t("contracts.pdfImportNote");
+    }
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = contractPdfImport?.runnerConnected
+        ? t("contracts.pdfImportRunnerReady")
+        : t("contracts.pdfImportIdle");
+    }
+    if (els.contractPdfImportTry) {
+      els.contractPdfImportTry.disabled = false;
+      els.contractPdfImportTry.textContent = t("contracts.pdfImportTryOnePage");
+    }
+    if (els.contractPdfImportTryAll) {
+      els.contractPdfImportTryAll.disabled = false;
+      els.contractPdfImportTryAll.textContent = t("contracts.pdfImportTryAllPages");
+    }
+  } catch {
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportStatusError");
+    }
+  }
+}
+
+async function runContractPdfImportTryPage({ allPages = false } = {}) {
+  const path = String(els.contractPdfImportPath?.value || "").trim();
+  const page = Number(els.contractPdfImportPage?.value || 1);
+  contractPdfImportCandidate = null;
+  if (els.contractPdfImportActionStatus) {
+    els.contractPdfImportActionStatus.textContent = allPages
+      ? t("contracts.pdfImportTryingAllPages")
+      : t("contracts.pdfImportTryingOnePage");
+  }
+  if (els.contractPdfImportTry) els.contractPdfImportTry.disabled = true;
+  if (els.contractPdfImportTryAll) els.contractPdfImportTryAll.disabled = true;
+  if (els.contractPdfImportTry) {
+    els.contractPdfImportTry.textContent = allPages ? t("contracts.pdfImportTryOnePageWaiting") : t("contracts.pdfImportTryingOnePageButton");
+  }
+  if (els.contractPdfImportTryAll) {
+    els.contractPdfImportTryAll.textContent = allPages ? t("contracts.pdfImportTryingAllPagesButton") : t("contracts.pdfImportTryAllPagesWaiting");
+  }
+  if (els.contractPdfImportSendContract) {
+    els.contractPdfImportSendContract.hidden = true;
+  }
+  if (els.contractPdfImportResult) {
+    els.contractPdfImportResult.hidden = true;
+    els.contractPdfImportResult.textContent = "";
+  }
+  try {
+    const response = await fetch("/api/contracts/pdf-import/try-page", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, page, allPages }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || response.statusText || "try_page_failed");
+    }
+    const hasPreview = Boolean(String(data.preview || "").trim());
+    contractPdfImportCandidate = data.contractCandidate || null;
+    const hasCandidate = Boolean(
+      contractPdfImportCandidate
+      && (contractPdfImportCandidate.contractName || contractPdfImportCandidate.counterpartyName || contractPdfImportCandidate.sourcePath)
+    );
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = hasPreview
+        ? t(allPages ? "contracts.pdfImportTryAllPagesOk" : "contracts.pdfImportTryOnePageOk", {
+            runner: data.runnerLabel || data.runner || "-",
+            length: data.textLength || 0,
+          })
+        : t("contracts.pdfImportTryOnePageEmpty");
+    }
+    if (els.contractPdfImportResult) {
+      const pagePreviewLines = Array.isArray(data.pagePreviews) && data.pagePreviews.length
+        ? [
+            "",
+            "--- ページ別プレビュー ---",
+            ...data.pagePreviews.map((item) => (
+              `p.${item.page}: ${String(item.preview || "").replace(/\s+/g, " ").slice(0, 180) || "本文なし"}`
+            )),
+            data.pagePreviewsTruncated ? t("contracts.pdfImportPagePreviewTruncated", { count: data.pageCount || data.pagePreviews.length }) : "",
+          ]
+        : [];
+      els.contractPdfImportResult.hidden = false;
+      els.contractPdfImportResult.textContent = [
+        data.message || "",
+        data.sourcePath ? `PDF: ${data.sourcePath}` : "",
+        data.allPages ? t("contracts.pdfImportAllPagesLabel") : (data.page ? `ページ: ${data.page}` : ""),
+        hasCandidate ? t("contracts.pdfImportContractCandidate", {
+          name: contractPdfImportCandidate.contractName || "-",
+          counterparty: contractPdfImportCandidate.counterpartyName || "-",
+        }) : "",
+        ...pagePreviewLines,
+        data.preview ? `\n--- プレビュー ---\n${data.preview}` : "",
+      ].filter(Boolean).join("\n");
+    }
+    if (els.contractPdfImportSendContract) {
+      els.contractPdfImportSendContract.hidden = !hasCandidate;
+      els.contractPdfImportSendContract.disabled = false;
+      els.contractPdfImportSendContract.textContent = t("contracts.pdfImportSendContract");
+    }
+  } catch (error) {
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportTryOnePageFailed", {
+        error: error?.message || String(error),
+      });
+    }
+  } finally {
+    if (els.contractPdfImportTry) {
+      els.contractPdfImportTry.disabled = false;
+      els.contractPdfImportTry.textContent = t("contracts.pdfImportTryOnePage");
+    }
+    if (els.contractPdfImportTryAll) {
+      els.contractPdfImportTryAll.disabled = false;
+      els.contractPdfImportTryAll.textContent = t("contracts.pdfImportTryAllPages");
+    }
+  }
+}
+
+async function runContractPdfImportAuto() {
+  const path = String(els.contractPdfImportPath?.value || "").trim();
+  contractPdfImportCandidate = null;
+  if (els.contractPdfImportActionStatus) {
+    els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportAutoRunning");
+  }
+  if (els.contractPdfImportAuto) {
+    els.contractPdfImportAuto.disabled = true;
+    els.contractPdfImportAuto.textContent = t("contracts.pdfImportAutoWorkingButton");
+  }
+  if (els.contractPdfImportSendContract) {
+    els.contractPdfImportSendContract.hidden = true;
+  }
+  if (els.contractPdfImportResult) {
+    els.contractPdfImportResult.hidden = false;
+    els.contractPdfImportResult.textContent = [
+      t("contracts.pdfImportAutoRunning"),
+      path ? `PDF: ${path}` : "",
+      t("contracts.pdfImportAutoFlow"),
+    ].filter(Boolean).join("\n");
+  }
+  try {
+    const response = await fetch("/api/contracts/pdf-import/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || response.statusText || "auto_import_failed");
+    }
+    const hasPreview = Boolean(String(data.preview || "").trim());
+    contractPdfImportCandidate = data.contractCandidate || null;
+    const hasCandidate = Boolean(
+      contractPdfImportCandidate
+      && (contractPdfImportCandidate.contractName || contractPdfImportCandidate.counterpartyName || contractPdfImportCandidate.sourcePath)
+    );
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = hasPreview
+        ? t("contracts.pdfImportAutoOk", {
+            method: data.methodLabel || data.runnerLabel || "-",
+            length: data.textLength || 0,
+          })
+        : t("contracts.pdfImportTryOnePageEmpty");
+    }
+    if (els.contractPdfImportResult) {
+      const suggestionLines = Array.isArray(data.suggestions) && data.suggestions.length
+        ? [
+            "",
+            "--- 次の候補 ---",
+            ...data.suggestions.map((item) => `- ${item.label || item.id}: ${item.reason || ""}`),
+          ]
+        : [];
+      els.contractPdfImportResult.hidden = false;
+      els.contractPdfImportResult.textContent = [
+        data.message || "",
+        data.sourcePath ? `PDF: ${data.sourcePath}` : "",
+        data.methodLabel ? t("contracts.pdfImportAutoMethod", { method: data.methodLabel }) : "",
+        data.reason ? t("contracts.pdfImportAutoReason", { reason: data.reason }) : "",
+        data.pageCount ? t("contracts.pdfImportAutoPages", { count: data.pageCount }) : "",
+        hasCandidate ? t("contracts.pdfImportContractCandidate", {
+          name: contractPdfImportCandidate.contractName || "-",
+          counterparty: contractPdfImportCandidate.counterpartyName || "-",
+        }) : "",
+        ...suggestionLines,
+        data.preview ? `\n--- プレビュー ---\n${data.preview}` : "",
+      ].filter(Boolean).join("\n");
+    }
+    if (els.contractPdfImportSendContract) {
+      els.contractPdfImportSendContract.hidden = !hasCandidate;
+      els.contractPdfImportSendContract.disabled = false;
+      els.contractPdfImportSendContract.textContent = t("contracts.pdfImportSendContract");
+    }
+  } catch (error) {
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportAutoFailed", {
+        error: error?.message || String(error),
+      });
+    }
+    if (els.contractPdfImportResult) {
+      els.contractPdfImportResult.hidden = false;
+      els.contractPdfImportResult.textContent = error?.message || String(error);
+    }
+  } finally {
+    if (els.contractPdfImportAuto) {
+      els.contractPdfImportAuto.disabled = false;
+      els.contractPdfImportAuto.textContent = t("contracts.pdfImportAuto");
+    }
+  }
+}
+
+function sendContractPdfImportCandidate() {
+  if (!contractPdfImportCandidate) {
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportContractSendEmpty");
+    }
+    return;
+  }
+  if (els.contractPdfImportSendContract) {
+    els.contractPdfImportSendContract.disabled = true;
+    els.contractPdfImportSendContract.textContent = t("contracts.pdfImportSendingContract");
+  }
+  if (els.contractPdfImportActionStatus) {
+    els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportSendingContract");
+  }
+  const folder = activeFolder();
+  contractCandidates = [{
+    ...contractPdfImportCandidate,
+    folderId: folder?.id || contractPdfImportCandidate.folderId || "contract-pdf-import",
+  }];
+  renderContractsPanel();
+  renderContractPdfImportPanel();
+  renderContractExtractionReview();
+  contractStatus(t("contracts.pdfImportContractSent"));
+  if (els.contractPdfImportActionStatus) {
+    els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportContractSent");
+  }
+  if (els.contractPdfImportSendContract) {
+    els.contractPdfImportSendContract.textContent = t("contracts.pdfImportContractSentButton");
+  }
+  window.GEMMA_MANAGEMENT?.openManagementPanel?.(els.contractsPanel, { els });
+}
+
+async function pickContractPdfImportPdf() {
+  if (els.contractPdfImportActionStatus) {
+    els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportPickingPdf");
+  }
+  if (els.contractPdfImportPickPdf) {
+    els.contractPdfImportPickPdf.disabled = true;
+  }
+  try {
+    const response = await fetch("/api/contracts/pdf-import/pick-pdf", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || response.statusText || "pick_pdf_failed");
+    }
+    setContractPdfImportPath(data.path || "");
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportPickPdfOk");
+    }
+  } catch (error) {
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportPickPdfFailed", {
+        error: error?.message || String(error),
+      });
+    }
+  } finally {
+    if (els.contractPdfImportPickPdf) {
+      els.contractPdfImportPickPdf.disabled = false;
+    }
+  }
+}
+
+async function runContractPdfImportConnectionTest() {
+  if (els.contractPdfImportActionStatus) {
+    els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportConnectionTesting");
+  }
+  if (els.contractPdfImportConnectionTest) {
+    els.contractPdfImportConnectionTest.disabled = true;
+  }
+  try {
+    const response = await fetch("/api/contracts/pdf-import/test");
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || response.statusText || "connection_test_failed");
+    }
+    const baseline = data.baselineOcr || {};
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportConnectionOk", {
+        engine: baseline.engine || "-",
+        pdf: baseline.pdf ? "OK" : "未検出",
+        image: baseline.image ? "OK" : "未検出",
+      });
+    }
+  } catch (error) {
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportConnectionFailed", {
+        error: error?.message || String(error),
+      });
+    }
+  } finally {
+    if (els.contractPdfImportConnectionTest) {
+      els.contractPdfImportConnectionTest.disabled = false;
+    }
+  }
+}
+
+async function runContractPdfImportSarashinaCompare() {
+  const path = String(els.contractPdfImportPath?.value || "").trim();
+  const page = Number(els.contractPdfImportPage?.value || 1);
+  const startedAt = Date.now();
+  let progressTimer = null;
+  const updateProgress = () => {
+    const seconds = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+    const step = seconds < 15
+      ? t("contracts.pdfImportSarashinaProgressRender")
+      : (seconds < 90
+        ? t("contracts.pdfImportSarashinaProgressLoad")
+        : t("contracts.pdfImportSarashinaProgressInfer"));
+    const message = t("contracts.pdfImportSarashinaProgress", { seconds, step });
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = message;
+    }
+    if (els.contractPdfImportResult) {
+      els.contractPdfImportResult.hidden = false;
+      els.contractPdfImportResult.textContent = [
+        message,
+        t("contracts.pdfImportSarashinaProgressNote"),
+        path ? `PDF: ${path}` : "",
+        `ページ: ${page || 1}`,
+      ].filter(Boolean).join("\n");
+    }
+  };
+  if (els.contractPdfImportActionStatus) {
+    els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportSarashinaChecking");
+  }
+  updateProgress();
+  progressTimer = setInterval(updateProgress, 1000);
+  if (els.contractPdfImportSarashina) {
+    els.contractPdfImportSarashina.disabled = true;
+    els.contractPdfImportSarashina.textContent = t("contracts.pdfImportSarashinaWorkingButton");
+  }
+  try {
+    const response = await fetch("/api/contracts/pdf-import/sarashina/compare-page", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, page }),
+    });
+    const data = await response.json();
+    const sarashina = data.sarashina || {};
+    const missing = Array.isArray(sarashina.missing) ? sarashina.missing.join(" / ") : "";
+    if (!response.ok || !data.ok) {
+      const message = missing
+        ? t("contracts.pdfImportSarashinaMissing", { missing })
+        : (data.error || t("contracts.pdfImportSarashinaNotReady"));
+      throw new Error(message);
+    }
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportSarashinaOk", {
+        length: data.textLength || 0,
+        seconds: data.elapsedSeconds || "-",
+      });
+    }
+    if (els.contractPdfImportResult) {
+      els.contractPdfImportResult.hidden = false;
+      els.contractPdfImportResult.textContent = [
+        data.message || t("contracts.pdfImportSarashinaReady"),
+        data.sourcePath ? `PDF: ${data.sourcePath}` : "",
+        data.page ? `ページ: ${data.page}` : "",
+        data.elapsedSeconds ? `所要時間: ${data.elapsedSeconds}秒` : "",
+        data.preview ? `\n--- Sarashina OCRプレビュー ---\n${data.preview}` : "",
+      ].filter(Boolean).join("\n");
+    }
+  } catch (error) {
+    if (els.contractPdfImportActionStatus) {
+      els.contractPdfImportActionStatus.textContent = t("contracts.pdfImportSarashinaFailed", {
+        error: error?.message || String(error),
+      });
+    }
+    if (els.contractPdfImportResult) {
+      els.contractPdfImportResult.hidden = false;
+      els.contractPdfImportResult.textContent = error?.message || String(error);
+    }
+  } finally {
+    if (progressTimer) {
+      clearInterval(progressTimer);
+    }
+    if (els.contractPdfImportSarashina) {
+      els.contractPdfImportSarashina.disabled = false;
+      els.contractPdfImportSarashina.textContent = t("contracts.pdfImportSarashinaCompare");
+    }
+  }
+}
+
+let contractRecords = [];
+let contractCandidates = [];
+let contractPdfImportCandidate = null;
+
+function contractDateValue(value) {
+  const timestamp = Date.parse(`${String(value || "").trim()}T00:00:00`);
+  return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
+}
+
+function contractDaysUntil(value) {
+  const target = contractDateValue(value);
+  if (!Number.isFinite(target)) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.ceil((target - today.getTime()) / 86400000);
+}
+
+function contractAttentionLevel(record) {
+  const noticeDays = contractDaysUntil(record.noticeDeadline);
+  const endDays = contractDaysUntil(record.endDate);
+  if ((noticeDays !== null && noticeDays < 0) || (endDays !== null && endDays < 0)) return "overdue";
+  if ((noticeDays !== null && noticeDays <= 30) || (endDays !== null && endDays <= 30)) return "soon";
+  if (record.status === "needs_review" || record.autoRenew === "unknown") return "review";
+  return "";
+}
+
+function contractAttentionLabel(record) {
+  const level = contractAttentionLevel(record);
+  if (level === "overdue") return t("contracts.alertOverdue");
+  if (level === "soon") return t("contracts.alertSoon");
+  if (level === "review") return t("contracts.alertReview");
+  return t("contracts.alertOk");
+}
+
+function contractSourceLabel(record) {
+  const sourceType = record?.sourceType || record?.extractionJson?.sourceType || "";
+  if (sourceType === "contract-pdf-import") return t("contracts.sourcePdfImport");
+  if (sourceType === "ocr-experiment") return t("contracts.sourceOcrExperiment");
+  return "";
+}
+
+function contractSourcePathLabel(record) {
+  return String(record?.sourcePath || "").trim();
+}
+
+function isDummyContractRecord(record) {
+  const sourceType = record?.sourceType || record?.extractionJson?.sourceType || "";
+  return sourceType === "dummy-search-test"
+    || String(record?.notes || "").includes("検索テスト用ダミー")
+    || String(record?.summary || "").includes("検索テスト用ダミー");
+}
+
+function contractShareJson(record) {
+  const sourceType = record?.sourceType || record?.extractionJson?.sourceType || "";
+  const payload = {
+    contractName: String(record?.contractName || ""),
+    counterpartyName: String(record?.counterpartyName || ""),
+    sourceType,
+    sourcePath: contractSourcePathLabel(record),
+    status: String(record?.status || ""),
+    startDate: String(record?.startDate || ""),
+    endDate: String(record?.endDate || ""),
+    noticeDeadline: String(record?.noticeDeadline || ""),
+    autoRenew: String(record?.autoRenew || "unknown"),
+    notes: String(record?.notes || ""),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+async function copyContractJson(record) {
+  if (!record) return;
+  const json = contractShareJson(record);
+  try {
+    await navigator.clipboard?.writeText(json);
+    contractStatus(t("contracts.jsonCopied"));
+  } catch (error) {
+    contractStatus(t("contracts.jsonCopyFailed", { error: error.message || String(error) }));
+  }
+}
+
+async function revealContractSource(record) {
+  const sourcePath = contractSourcePathLabel(record);
+  if (!sourcePath) return;
+  const slashIndex = Math.max(sourcePath.lastIndexOf("/"), sourcePath.lastIndexOf("\\"));
+  if (sourcePath.startsWith("/") && slashIndex > 0) {
+    const root = sourcePath.slice(0, slashIndex) || "/";
+    const path = sourcePath.slice(slashIndex + 1);
+    try {
+      const data = await window.GEMMA_WORKSPACE?.revealPath?.({ root, path });
+      contractStatus(t("workspace.revealed", { path: data?.path || sourcePath }));
+    } catch (error) {
+      contractStatus(t("contracts.error", { error: error.message || String(error) }));
+    }
+    return;
+  }
+  revealWorkspaceSource({ type: "workspace", path: sourcePath, line: "", snippet: "" });
+}
+
+function sortedContractRecords() {
+  const sortMode = els.contractsSort?.value || "notice";
+  const filterMode = els.contractsFilter?.value || "all";
+  const searchText = String(els.contractsSearch?.value || "").trim().toLowerCase();
+  const records = contractRecords
+    .filter((record) => filterMode !== "attention" || Boolean(contractAttentionLevel(record)))
+    .filter((record) => {
+      if (!searchText) return true;
+      return [
+        record.contractName,
+        record.counterpartyName,
+        record.ownerName,
+        record.startDate,
+        record.endDate,
+        record.noticeDeadline,
+        record.notes,
+        record.summary,
+        record.sourcePath,
+        contractSourceLabel(record),
+      ].some((value) => String(value || "").toLowerCase().includes(searchText));
+    });
+  return [...records].sort((a, b) => {
+    if (sortMode === "end") return contractDateValue(a.endDate) - contractDateValue(b.endDate);
+    if (sortMode === "updated") return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+    return contractDateValue(a.noticeDeadline) - contractDateValue(b.noticeDeadline);
+  });
+}
+
+function renderContractAlertSummary() {
+  if (!els.contractsAlertSummary) return;
+  const overdue = contractRecords.filter((record) => contractAttentionLevel(record) === "overdue").length;
+  const soon = contractRecords.filter((record) => contractAttentionLevel(record) === "soon").length;
+  const review = contractRecords.filter((record) => contractAttentionLevel(record) === "review").length;
+  els.contractsAlertSummary.textContent = contractRecords.length
+    ? t("contracts.alertSummary", { overdue, soon, review })
+    : "";
+}
+
+function contractExportFilename(extension) {
+  const folderName = activeFolder()?.name || "contracts";
+  const safeName = String(folderName).replace(/[\\/:*?"<>|]/g, "-").trim() || "contracts";
+  const today = new Date().toISOString().slice(0, 10);
+  return `gemma4-contracts-${safeName}-${today}.${extension}`;
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function contractExportRows() {
+  return contractRecords.map((record) => ({
+    contractName: record.contractName || "",
+    counterpartyName: record.counterpartyName || "",
+    ownerName: record.ownerName || "",
+    startDate: record.startDate || "",
+    endDate: record.endDate || "",
+    autoRenew: record.autoRenew || "unknown",
+    noticeDeadline: record.noticeDeadline || "",
+    noticePeriodDays: record.noticePeriodDays ?? "",
+    status: record.status || "",
+    sourcePath: record.sourcePath || "",
+    notes: record.notes || "",
+  }));
+}
+
+function exportContractsCsv() {
+  if (!contractRecords.length) {
+    contractStatus(t("contracts.exportEmpty"));
+    return;
+  }
+  const headers = [
+    "contractName",
+    "counterpartyName",
+    "ownerName",
+    "startDate",
+    "endDate",
+    "autoRenew",
+    "noticeDeadline",
+    "noticePeriodDays",
+    "status",
+    "sourcePath",
+    "notes",
+  ];
+  const rows = contractExportRows();
+  const csv = [
+    headers.map(csvCell).join(","),
+    ...rows.map((row) => headers.map((key) => csvCell(row[key])).join(",")),
+  ].join("\n");
+  downloadTextFile(contractExportFilename("csv"), `\uFEFF${csv}\n`);
+  contractStatus(t("contracts.exportedCsv", { count: rows.length }));
+}
+
+function exportContractsJson() {
+  if (!contractRecords.length) {
+    contractStatus(t("contracts.exportEmpty"));
+    return;
+  }
+  const payload = {
+    type: "gemma4.contracts",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    folderId: activeFolder()?.id || "",
+    folderName: activeFolder()?.name || "",
+    records: contractExportRows(),
+  };
+  downloadTextFile(contractExportFilename("json"), `${JSON.stringify(payload, null, 2)}\n`);
+  contractStatus(t("contracts.exportedJson", { count: payload.records.length }));
+}
+
+function normalizeImportedContract(record, folderId) {
+  const source = record && typeof record === "object" ? record : {};
+  return {
+    folderId,
+    sourcePath: String(source.sourcePath || ""),
+    contractName: String(source.contractName || ""),
+    counterpartyName: String(source.counterpartyName || ""),
+    ownerName: String(source.ownerName || ""),
+    startDate: String(source.startDate || ""),
+    endDate: String(source.endDate || ""),
+    autoRenew: ["yes", "no", "unknown"].includes(source.autoRenew) ? source.autoRenew : "unknown",
+    noticeDeadline: String(source.noticeDeadline || ""),
+    noticePeriodDays: source.noticePeriodDays === "" || source.noticePeriodDays === null || source.noticePeriodDays === undefined
+      ? null
+      : Number(source.noticePeriodDays),
+    status: ["active", "expired", "cancelled", "needs_review"].includes(source.status) ? source.status : "needs_review",
+    summary: String(source.summary || ""),
+    notes: String(source.notes || ""),
+    confirmed: true,
+  };
+}
+
+async function importContractsJsonFile(file) {
+  const folder = activeFolder();
+  if (!folder) {
+    contractStatus(t("contracts.noFolder"));
+    return;
+  }
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    if (payload?.type !== "gemma4.contracts" || !Array.isArray(payload.records)) {
+      contractStatus(t("contracts.importInvalid"));
+      return;
+    }
+    const records = payload.records
+      .map((record) => normalizeImportedContract(record, folder.id))
+      .filter((record) => record.contractName || record.counterpartyName || record.sourcePath);
+    if (!records.length) {
+      contractStatus(t("contracts.importEmpty"));
+      return;
+    }
+    for (const record of records) {
+      await contractApi("/api/contracts/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contract: record }),
+      });
+    }
+    contractStatus(t("contracts.importedJson", { count: records.length }));
+    await loadContracts();
+  } catch (error) {
+    contractStatus(t("contracts.error", { error: error.message }));
+  } finally {
+    if (els.contractsImportInput) els.contractsImportInput.value = "";
+  }
+}
+
+async function contractApi(path, options = {}) {
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+function renderContractsPanel() {
+  if (!els.contractTemplateRow) return;
+  els.contractTemplateRow.innerHTML = "";
+  renderContractsList();
+}
+
+function contractStatus(text) {
+  if (els.contractsStatus) els.contractsStatus.textContent = text || "";
+}
+
+function setContractPdfImportPath(path) {
+  const value = String(path || "").trim();
+  if (els.contractPdfImportPath) {
+    els.contractPdfImportPath.value = value;
+  }
+  if (els.contractPdfImportSelected) {
+    els.contractPdfImportSelected.textContent = value
+      ? t("contracts.pdfImportSelectedFile", { path: value })
+      : t("contracts.pdfImportNoFile");
+  }
+}
+
+async function loadContracts() {
+  const folder = activeFolder();
+  if (!folder) {
+    contractRecords = [];
+    contractStatus(t("contracts.noFolder"));
+    renderContractsList();
+    return;
+  }
+  try {
+    const data = await contractApi(`/api/contracts/list?folderId=${encodeURIComponent(folder.id)}`);
+    contractRecords = Array.isArray(data.contracts) ? data.contracts : [];
+    contractStatus(t("contracts.loaded", { count: contractRecords.length }));
+  } catch (error) {
+    contractStatus(t("contracts.error", { error: error.message }));
+  }
+  renderContractsList();
+}
+
+function renderContractGapList(items = []) {
+  if (!els.contractsGapList) return;
+  if (!items.length) {
+    els.contractsGapList.innerHTML = `<div class="management-note">${escapeHtml(t("contracts.gapNoMissing"))}</div>`;
+    return;
+  }
+  els.contractsGapList.innerHTML = items.map((item) => {
+    const isPdf = String(item.extension || "").toLowerCase() === ".pdf";
+    return `
+      <article class="contract-gap-item">
+        <div>
+          <strong>${escapeHtml(item.relativePath || item.path || "-")}</strong>
+          <span class="plugin-kind-badge">${escapeHtml(item.kind || "-")}</span>
+          ${isPdf ? "" : `<small>${escapeHtml(t("contracts.gapWordNote"))}</small>`}
+        </div>
+        ${isPdf ? `<button class="ghost-button" type="button" data-contract-gap-pdf="${escapeHtml(item.path || "")}">${escapeHtml(t("contracts.gapOpenPdf"))}</button>` : ""}
+      </article>
+    `;
+  }).join("");
+}
+
+async function checkContractImportGaps() {
+  const folder = activeFolder();
+  if (!folder || !state.workspaceRoot) {
+    contractStatus(t("contracts.gapNoFolder"));
+    renderContractGapList([]);
+    return;
+  }
+  contractStatus(t("contracts.gapChecking"));
+  if (els.contractsGapCheck) {
+    els.contractsGapCheck.disabled = true;
+  }
+  try {
+    const data = await contractApi("/api/contracts/import-gaps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId: folder.id, root: state.workspaceRoot }),
+    });
+    const items = Array.isArray(data.items) ? data.items : [];
+    renderContractGapList(items);
+    contractStatus(items.length
+      ? t("contracts.gapChecked", { missing: data.missing || items.length, imported: data.imported || 0 })
+      : t("contracts.gapNoMissing"));
+  } catch (error) {
+    contractStatus(t("contracts.error", { error: error.message }));
+  } finally {
+    if (els.contractsGapCheck) {
+      els.contractsGapCheck.disabled = false;
+    }
+  }
+}
+
+function renderContractsList() {
+  if (!els.contractsList) return;
+  renderContractAlertSummary();
+  const folder = activeFolder();
+  if (!folder) {
+    els.contractsList.innerHTML = `<div class="management-note">${escapeHtml(t("contracts.noFolder"))}</div>`;
+    return;
+  }
+  const records = sortedContractRecords();
+  if (!contractRecords.length) {
+    els.contractsList.innerHTML = `<div class="management-note">${escapeHtml(t("contracts.empty"))}</div>`;
+    return;
+  }
+  if (!records.length) {
+    els.contractsList.innerHTML = `<div class="management-note">${escapeHtml(t("contracts.noFilteredRecords"))}</div>`;
+    return;
+  }
+  els.contractsList.innerHTML = records.map((record) => {
+    const originalIndex = contractRecords.indexOf(record);
+    const attention = contractAttentionLevel(record);
+    const sourcePath = contractSourcePathLabel(record);
+    return `
+    <article class="contract-record${attention ? ` is-${attention}` : ""}">
+      <div class="contract-record-main">
+        <div>
+          <strong>${escapeHtml(record.contractName || t("contracts.unknownContract"))}</strong>
+          <span>${escapeHtml(record.counterpartyName || t("contracts.unknownCounterparty"))}</span>
+          ${contractSourceLabel(record) ? `<small class="plugin-kind-badge">${escapeHtml(contractSourceLabel(record))}</small>` : ""}
+          ${sourcePath ? `<small class="contract-source-path">${escapeHtml(sourcePath)}</small>` : ""}
+        </div>
+        <em>${escapeHtml(contractAttentionLabel(record))}</em>
+      </div>
+      <dl class="contract-record-grid">
+        <div><dt>${escapeHtml(t("contracts.startDate"))}</dt><dd>${escapeHtml(record.startDate || "-")}</dd></div>
+        <div><dt>${escapeHtml(t("contracts.endDate"))}</dt><dd>${escapeHtml(record.endDate || "-")}</dd></div>
+        <div><dt>${escapeHtml(t("contracts.noticeDeadline"))}</dt><dd>${escapeHtml(record.noticeDeadline || "-")}</dd></div>
+        <div><dt>${escapeHtml(t("contracts.autoRenew"))}</dt><dd>${escapeHtml(t(`contracts.autoRenew.${record.autoRenew || "unknown"}`))}</dd></div>
+      </dl>
+      <div class="contract-record-actions">
+        ${sourcePath ? `<button class="ghost-button" type="button" data-contract-open="${originalIndex}">${escapeHtml(t("contracts.revealSource"))}</button>` : ""}
+        <button class="ghost-button" type="button" data-contract-edit="${originalIndex}">${escapeHtml(t("contracts.edit"))}</button>
+        <button class="ghost-button" type="button" data-contract-copy-json="${originalIndex}">${escapeHtml(t("contracts.copyJson"))}</button>
+        <button class="ghost-button" type="button" data-contract-delete="${escapeHtml(record.id || "")}">${escapeHtml(t("contracts.delete"))}</button>
+      </div>
+    </article>
+  `;
+  }).join("");
+}
+
+function renderContractExtractionReview() {
+  if (!els.contractExtractionReview) return;
+  if (!contractCandidates.length) {
+    els.contractExtractionReview.innerHTML = "";
+    return;
+  }
+  els.contractExtractionReview.innerHTML = contractCandidates.map((candidate, index) => `
+    <article class="contract-review-card">
+      <div class="contract-review-source">
+        <div>
+          <strong>${escapeHtml(candidate.sourcePath || t("contracts.source"))}</strong>
+          ${contractSourceLabel(candidate) ? `<small class="plugin-kind-badge">${escapeHtml(contractSourceLabel(candidate))}</small>` : ""}
+          ${contractSourcePathLabel(candidate) ? `<small class="contract-source-path">${escapeHtml(contractSourcePathLabel(candidate))}</small>` : ""}
+        </div>
+        ${contractSourcePathLabel(candidate) ? `<button class="ghost-button" type="button" data-contract-candidate-open="${index}">${escapeHtml(t("contracts.revealSource"))}</button>` : ""}
+      </div>
+      <div class="contract-form-grid">
+        <label><span>${escapeHtml(t("contracts.contractName"))}</span><input data-contract-field="contractName" data-contract-index="${index}" value="${escapeHtml(candidate.contractName || "")}" /></label>
+        <label><span>${escapeHtml(t("contracts.counterparty"))}</span><input data-contract-field="counterpartyName" data-contract-index="${index}" value="${escapeHtml(candidate.counterpartyName || "")}" /></label>
+        <label><span>${escapeHtml(t("contracts.owner"))}</span><input data-contract-field="ownerName" data-contract-index="${index}" value="${escapeHtml(candidate.ownerName || "")}" /></label>
+        <label><span>${escapeHtml(t("contracts.startDate"))}</span><input data-contract-field="startDate" data-contract-index="${index}" value="${escapeHtml(candidate.startDate || "")}" placeholder="YYYY-MM-DD" /></label>
+        <label><span>${escapeHtml(t("contracts.endDate"))}</span><input data-contract-field="endDate" data-contract-index="${index}" value="${escapeHtml(candidate.endDate || "")}" placeholder="YYYY-MM-DD" /></label>
+        <label><span>${escapeHtml(t("contracts.noticeDeadline"))}</span><input data-contract-field="noticeDeadline" data-contract-index="${index}" value="${escapeHtml(candidate.noticeDeadline || "")}" placeholder="YYYY-MM-DD" /></label>
+        <label><span>${escapeHtml(t("contracts.autoRenew"))}</span>
+          <select data-contract-field="autoRenew" data-contract-index="${index}">
+            <option value="unknown"${candidate.autoRenew === "unknown" ? " selected" : ""}>${escapeHtml(t("contracts.autoRenew.unknown"))}</option>
+            <option value="yes"${candidate.autoRenew === "yes" ? " selected" : ""}>${escapeHtml(t("contracts.autoRenew.yes"))}</option>
+            <option value="no"${candidate.autoRenew === "no" ? " selected" : ""}>${escapeHtml(t("contracts.autoRenew.no"))}</option>
+          </select>
+        </label>
+      </div>
+      <label class="contract-notes"><span>${escapeHtml(t("contracts.notes"))}</span><textarea data-contract-field="notes" data-contract-index="${index}" rows="3">${escapeHtml(candidate.notes || "")}</textarea></label>
+      <div class="contract-record-actions">
+        <button class="ghost-button primary-action" type="button" data-contract-save="${index}">${escapeHtml(t("contracts.save"))}</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function updateContractCandidateFromField(target) {
+  const index = Number(target.dataset.contractIndex);
+  const field = target.dataset.contractField;
+  if (!Number.isInteger(index) || !contractCandidates[index] || !field) return;
+  contractCandidates[index][field] = target.value;
+}
+
+async function saveContractCandidate(index) {
+  const candidate = contractCandidates[index];
+  if (!candidate) return;
+  contractStatus(t("contracts.saving"));
+  try {
+    await contractApi("/api/contracts/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contract: { ...candidate, confirmed: true } }),
+    });
+    contractCandidates.splice(index, 1);
+    contractStatus(t("contracts.saved"));
+    renderContractExtractionReview();
+    await loadContracts();
+  } catch (error) {
+    contractStatus(t("contracts.error", { error: error.message }));
+  }
+}
+
+function editContractRecord(index) {
+  const record = contractRecords[index];
+  if (!record) return;
+  contractCandidates = [{
+    ...record,
+    confirmed: true,
+  }];
+  renderContractExtractionReview();
+  contractStatus(t("contracts.editing"));
+  els.contractExtractionReview?.scrollIntoView({ block: "nearest" });
+}
+
+async function deleteContractRecord(id) {
+  if (!id || !window.confirm(t("contracts.deleteConfirm"))) return;
+  try {
+    await contractApi("/api/contracts/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    contractStatus(t("contracts.deleted"));
+    await loadContracts();
+  } catch (error) {
+    contractStatus(t("contracts.error", { error: error.message }));
+  }
+}
+
+async function deleteDummyContractRecords() {
+  const dummyRecords = contractRecords.filter(isDummyContractRecord);
+  if (!dummyRecords.length) {
+    contractStatus(t("contracts.deleteDummiesEmpty"));
+    return;
+  }
+  if (!window.confirm(t("contracts.deleteDummiesConfirm", { count: dummyRecords.length }))) return;
+  try {
+    for (const record of dummyRecords) {
+      if (!record.id) continue;
+      await contractApi("/api/contracts/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: record.id }),
+      });
+    }
+    contractStatus(t("contracts.deleteDummiesDone", { count: dummyRecords.length }));
+    await loadContracts();
+  } catch (error) {
+    contractStatus(t("contracts.error", { error: error.message }));
+  }
 }
 
 els.trainingExport?.addEventListener("click", exportTrainingData);
@@ -5288,6 +6544,72 @@ els.trainingSetCreate?.addEventListener("click", () => {
 els.trainingSetSelect?.addEventListener("change", () => setActiveTrainingSet(els.trainingSetSelect.value));
 els.trainingSetRename?.addEventListener("click", renameActiveTrainingSet);
 els.trainingSetDelete?.addEventListener("click", deleteActiveTrainingSet);
+els.contractPdfImportRefresh?.addEventListener("click", renderContractPdfImportPanel);
+els.contractPdfImportPickPdf?.addEventListener("click", pickContractPdfImportPdf);
+els.contractPdfImportAuto?.addEventListener("click", runContractPdfImportAuto);
+els.contractPdfImportConnectionTest?.addEventListener("click", runContractPdfImportConnectionTest);
+els.contractPdfImportTry?.addEventListener("click", runContractPdfImportTryPage);
+els.contractPdfImportTryAll?.addEventListener("click", () => runContractPdfImportTryPage({ allPages: true }));
+els.contractPdfImportSarashina?.addEventListener("click", runContractPdfImportSarashinaCompare);
+els.contractPdfImportSendContract?.addEventListener("click", sendContractPdfImportCandidate);
+els.contractsToggle?.addEventListener("click", loadContracts);
+els.contractsToggle?.addEventListener("click", renderContractPdfImportPanel);
+els.contractsRefresh?.addEventListener("click", loadContracts);
+els.contractsExportCsv?.addEventListener("click", exportContractsCsv);
+els.contractsExportJson?.addEventListener("click", exportContractsJson);
+els.contractsImportJson?.addEventListener("click", () => els.contractsImportInput?.click());
+els.contractsDeleteDummies?.addEventListener("click", deleteDummyContractRecords);
+els.contractsImportInput?.addEventListener("change", () => importContractsJsonFile(els.contractsImportInput.files?.[0]));
+els.contractsSort?.addEventListener("change", renderContractsList);
+els.contractsFilter?.addEventListener("change", renderContractsList);
+els.contractsSearch?.addEventListener("input", renderContractsList);
+els.contractsGapCheck?.addEventListener("click", checkContractImportGaps);
+els.contractsGapList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-contract-gap-pdf]");
+  if (!button) return;
+  setContractPdfImportPath(button.dataset.contractGapPdf || "");
+  contractStatus(t("contracts.pdfImportPickPdfOk"));
+  els.contractPdfImportAuto?.focus();
+});
+els.contractExtractionReview?.addEventListener("input", (event) => {
+  if (event.target.matches("[data-contract-field]")) updateContractCandidateFromField(event.target);
+});
+els.contractExtractionReview?.addEventListener("change", (event) => {
+  if (event.target.matches("[data-contract-field]")) updateContractCandidateFromField(event.target);
+});
+els.contractExtractionReview?.addEventListener("click", (event) => {
+  const saveButton = event.target.closest("[data-contract-save]");
+  if (saveButton) {
+    saveContractCandidate(Number(saveButton.dataset.contractSave));
+    return;
+  }
+  const openButton = event.target.closest("[data-contract-candidate-open]");
+  if (openButton) {
+    const source = contractCandidates[Number(openButton.dataset.contractCandidateOpen)];
+    revealContractSource(source);
+  }
+});
+els.contractsList?.addEventListener("click", (event) => {
+  const openButton = event.target.closest("[data-contract-open]");
+  if (openButton) {
+    const record = contractRecords[Number(openButton.dataset.contractOpen)];
+    revealContractSource(record);
+    return;
+  }
+  const copyJsonButton = event.target.closest("[data-contract-copy-json]");
+  if (copyJsonButton) {
+    const record = contractRecords[Number(copyJsonButton.dataset.contractCopyJson)];
+    copyContractJson(record);
+    return;
+  }
+  const editButton = event.target.closest("[data-contract-edit]");
+  if (editButton) {
+    editContractRecord(Number(editButton.dataset.contractEdit));
+    return;
+  }
+  const deleteButton = event.target.closest("[data-contract-delete]");
+  if (deleteButton) deleteContractRecord(deleteButton.dataset.contractDelete || "");
+});
 els.systemPromptTemplate?.addEventListener("change", () => applySystemPromptTemplate(els.systemPromptTemplate.value));
 els.systemPrompt?.addEventListener("input", () => {
   syncSystemPromptTemplate();
@@ -5311,6 +6633,8 @@ els.trainingExampleList?.addEventListener("click", (event) => {
 els.workspaceTrainingSet?.addEventListener("change", () => applyTrainingSetToActiveFolder(els.workspaceTrainingSet.value));
 els.workspaceCodegraphEnabled?.addEventListener("change", () => applyCodegraphToActiveFolder(els.workspaceCodegraphEnabled.checked));
 els.workspaceCodegraphPrepare?.addEventListener("click", prepareCodegraphForActiveFolder);
+els.workspaceKnowledgeEnabled?.addEventListener("change", () => applyKnowledgeToActiveFolder(els.workspaceKnowledgeEnabled.checked));
+els.workspaceKnowledgePrepare?.addEventListener("click", prepareKnowledgeForActiveFolder);
 els.workspaceSearchRun?.addEventListener("click", () => window.GEMMA_WORKSPACE?.searchWorkspaceAction?.({ els, state, t }));
 els.workspaceSearchQuery?.addEventListener("input", () => {
   if (els.workspaceSearchStatus) delete els.workspaceSearchStatus.dataset.searchState;

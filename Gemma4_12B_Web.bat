@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 set GEMMA_APP_VERSION=0.8.198
-if "%GEMMA_MODEL%"=="" set GEMMA_MODEL=gemma4:12b
+if "%GEMMA_MODEL%"=="" set GEMMA_MODEL=gemma4:12b-mlx
 if "%GEMMA_CODING_MODEL%"=="" set GEMMA_CODING_MODEL=%GEMMA_MODEL%
 if "%GEMMA_TRANSLATION_MODEL%"=="" set GEMMA_TRANSLATION_MODEL=auto
 if "%GEMMA_ASR_MODEL%"=="" set GEMMA_ASR_MODEL=whisper.cpp:tiny

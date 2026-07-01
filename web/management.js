@@ -122,6 +122,7 @@ window.GEMMA_MANAGEMENT = (() => {
     whisper: { implemented: true, integrated: true, version: "0.1.0" },
     ocr: { implemented: true, version: "0.1.0" },
     "fast-search": { implemented: true, version: "0.1.0" },
+    contracts: { implemented: true, version: "0.1.0" },
     "tree-sitter": { implemented: false },
   };
   const PLUGIN_CANDIDATE_IDS = Object.keys(PLUGIN_CANDIDATES);
@@ -222,6 +223,41 @@ window.GEMMA_MANAGEMENT = (() => {
     if (checked) selected.add(value);
     else selected.delete(value);
     return Array.from(selected);
+  }
+
+  function compactStudyPackPrompt({
+    packName = "",
+    modeName = "",
+    mode = {},
+    outputPrompt = "",
+    includeExamples = false,
+  } = {}) {
+    const prompt = String(mode?.prompt || "").replace(/\s+/g, " ").trim();
+    const output = String(outputPrompt || "").replace(/\s+/g, " ").trim();
+    const lines = [
+      `${packName} / ${modeName}`.trim(),
+      prompt ? `方針: ${prompt}` : "",
+      output ? `出力: ${output}` : "",
+    ];
+    if (includeExamples) {
+      const examples = Array.isArray(mode?.examples) ? mode.examples.slice(0, 1) : [];
+      for (const example of examples) {
+        const input = String(example?.input || "").replace(/\s+/g, " ").trim();
+        const outputExample = String(example?.output || "").replace(/\s+/g, " ").trim();
+        if (input && outputExample) lines.push(`例: ${input} => ${outputExample}`);
+      }
+    }
+    return lines.filter(Boolean).join("\n");
+  }
+
+  function shouldApplyStudyPackForText(text, options = {}) {
+    const normalized = String(text || "").trim();
+    if (!options.hasSelection || !normalized) return false;
+    if (options.hasImages) return true;
+    if (/(リライト|書き直|書き換|言い換|推敲|添削|校正|読みやすく|読みやすい|論理チェック|論理の抜け|AIっぽさ|レポート向け|レポート添削|文章を整|文を整|返信文|返信案|返信メール|メール返信|返答案|文案|例文|続きを考えて|つづく返信|続く返信|rewrite|proofread|revise|polish|reply draft|email reply)/i.test(normalized)) {
+      return true;
+    }
+    return false;
   }
 
   function loadImportedStudyPackDefinitions() {
@@ -405,6 +441,12 @@ window.GEMMA_MANAGEMENT = (() => {
     return Boolean(PLUGIN_CANDIDATES[pluginId]?.implemented);
   }
 
+  function syncInstalledAppsVisibility({ state, els }) {
+    const contractsInstalled = Boolean(state.plugins?.contracts?.installed);
+    if (els.contractsToggle) els.contractsToggle.hidden = !contractsInstalled;
+    if (els.appsGroup) els.appsGroup.hidden = !contractsInstalled;
+  }
+
   function renderOcrPluginState({ state, t }) {
     const card = document.querySelector('[data-plugin-card="ocr"]');
     const badge = document.querySelector('[data-plugin-kind="ocr"]');
@@ -545,6 +587,7 @@ window.GEMMA_MANAGEMENT = (() => {
       els.studyPacksPanel,
       els.trainingManagementPanel,
       els.pluginsPanel,
+      els.contractsPanel,
       els.languageModelsPanel,
     ].forEach((panel) => {
       if (panel && panel !== except) panel.hidden = true;
@@ -582,6 +625,7 @@ window.GEMMA_MANAGEMENT = (() => {
       els.studyPacksPanel,
       els.trainingManagementPanel,
       els.pluginsPanel,
+      els.contractsPanel,
       els.languageModelsPanel,
     ].filter((panel) => panel && !panel.hidden);
   }
@@ -604,7 +648,7 @@ window.GEMMA_MANAGEMENT = (() => {
     return "";
   }
 
-  function setupManagementPanels({ els, renderStudyPacksPanel, renderPluginsPanel }) {
+  function setupManagementPanels({ els, renderStudyPacksPanel, renderPluginsPanel, renderContractsPanel }) {
     const trainingPanel = document.querySelector(".training-panel");
     if (trainingPanel && els.trainingManagementBody && trainingPanel.parentElement !== els.trainingManagementBody) {
       els.trainingManagementBody.appendChild(trainingPanel);
@@ -617,6 +661,7 @@ window.GEMMA_MANAGEMENT = (() => {
     }
     renderStudyPacksPanel();
     renderPluginsPanel();
+    renderContractsPanel?.();
   }
 
   function mobileCharacterProfileFromStorage() {
@@ -857,6 +902,7 @@ window.GEMMA_MANAGEMENT = (() => {
   function renderPluginsPanel({ state, els, t }) {
     const codegraph = state.plugins?.codegraph || {};
     const installed = Boolean(codegraph.installed);
+    syncInstalledAppsVisibility({ state, els });
     const searchCapabilities = document.querySelector("#plugin-search-capabilities");
     if (searchCapabilities) {
       searchCapabilities.textContent = formatPluginSearchCapabilities({
@@ -927,6 +973,7 @@ window.GEMMA_MANAGEMENT = (() => {
       status: !current ? "ready" : "removed",
     };
     savePlugins(state.plugins);
+    syncInstalledAppsVisibility({ state, els });
     renderPluginsPanel({ state, els, t });
   }
 
@@ -1060,6 +1107,14 @@ window.GEMMA_MANAGEMENT = (() => {
       if (els.pluginsPanel) els.pluginsPanel.hidden = true;
       syncManagementLayout({ els });
     });
+    els.contractsToggle?.addEventListener("click", () => {
+      openManagementPanel({ els, panel: els.contractsPanel });
+      renderContractsPanel?.();
+    });
+    els.contractsClose?.addEventListener("click", () => {
+      if (els.contractsPanel) els.contractsPanel.hidden = true;
+      syncManagementLayout({ els });
+    });
     els.languageModelsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.languageModelsPanel });
     });
@@ -1110,6 +1165,8 @@ window.GEMMA_MANAGEMENT = (() => {
     studyPackSelectionModel,
     studyPackMultiSelectionModel,
     toggleStudyPackModeValue,
+    compactStudyPackPrompt,
+    shouldApplyStudyPackForText,
     importStudyPackFromFiles,
     loadPlugins,
     savePlugins,

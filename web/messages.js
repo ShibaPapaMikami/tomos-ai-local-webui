@@ -10,6 +10,7 @@ function renderGemmaMessages(deps) {
     formatDuration,
     modelForTask,
     openWorkspaceSource,
+    revealWorkspaceSource,
     saveMemoryCandidate,
     saveWorkspaceTranscript,
     state,
@@ -137,6 +138,8 @@ function renderGemmaMessages(deps) {
         const sources = document.createElement("div");
         sources.className = "sources";
         for (const source of workspaceSources) {
+          const sourceCard = document.createElement("span");
+          sourceCard.className = "workspace-source-card";
           const chip = document.createElement("button");
           chip.type = "button";
           chip.className = "workspace-source";
@@ -169,7 +172,21 @@ function renderGemmaMessages(deps) {
             body.append(snippet);
           }
           chip.append(marker, body);
-          sources.append(chip);
+          sourceCard.append(chip);
+          if (source.path && source.sourceType !== "codegraph") {
+            const reveal = document.createElement("button");
+            reveal.type = "button";
+            reveal.className = "workspace-source-reveal";
+            reveal.textContent = "↗";
+            reveal.title = t("workspace.revealSource", { path: source.path || source.title || "" });
+            reveal.setAttribute("aria-label", t("workspace.revealSource", { path: source.path || source.title || "" }));
+            reveal.addEventListener("click", (event) => {
+              event.stopPropagation();
+              revealWorkspaceSource?.(source);
+            });
+            sourceCard.append(reveal);
+          }
+          sources.append(sourceCard);
         }
         workspaceGroup.append(title, sources);
         wrapper.append(workspaceGroup);

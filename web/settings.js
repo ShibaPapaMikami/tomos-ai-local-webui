@@ -272,6 +272,7 @@ function isComposerModelCandidate(model) {
   if (!model) return false;
   return (
     model === "gemma4:12b" ||
+    model === "gemma4:12b-mlx" ||
     model === "qwen2.5:3b" ||
     model.includes("gemma-4-12B-agentic-fable5-composer2.5-v2") ||
     model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")
@@ -301,6 +302,7 @@ function composerModelCandidates({ state, modelIsInstalled }) {
     ...state.serverModels.recommendedCoding,
     ...COMPOSER_OPTIONAL_MODEL_IDS,
     ...experimentalComposerModelCandidates({ state }),
+    "gemma4:12b-mlx",
     "gemma4:12b",
     "qwen2.5:3b",
     isComposerModelCandidate(state.composerModel) ? state.composerModel : "",
@@ -326,6 +328,7 @@ function renderModelSettingsSelects({
     task: "chat",
     models: installed([
       state.serverModels.chat,
+      "gemma4:12b-mlx",
       "gemma4:12b",
       "qwen2.5:3b",
     ], "chat"),

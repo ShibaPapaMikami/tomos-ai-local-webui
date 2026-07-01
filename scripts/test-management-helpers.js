@@ -28,6 +28,8 @@ const {
   formatPluginSearchCapabilities,
   handleEscapeKey,
   importStudyPackFromFiles,
+  compactStudyPackPrompt,
+  shouldApplyStudyPackForText,
   studyPackSelectionModel,
   studyPackMultiSelectionModel,
   toggleStudyPackModeValue,
@@ -37,6 +39,7 @@ const {
   summarizeMobileImportPayload,
   mobileImportPayloadToSession,
   renderPluginsPanel,
+  togglePluginCandidate,
   studyPackById,
 } = context.window.GEMMA_MANAGEMENT;
 
@@ -134,6 +137,11 @@ assert.equal(
   "現在の検索対象: テキスト / Word / PDFはファイル名のみ / 未対応: 画像内文字",
 );
 
+const indexHtml = fs.readFileSync("web/index.html", "utf8");
+const i18nJs = fs.readFileSync("web/i18n.js", "utf8");
+const stylesCss = fs.readFileSync("web/styles.css", "utf8");
+const appJs = fs.readFileSync("web/app.js", "utf8");
+
 const searchCapabilitiesElement = { textContent: "" };
 const ocrCandidateStatus = { textContent: "", dataset: {} };
 const ocrCandidateToggle = {
@@ -153,12 +161,13 @@ context.document.querySelectorAll = (selector) => {
 const pluginEls = {
   codegraphPluginStatus: { textContent: "", dataset: {} },
   codegraphPluginToggle: { textContent: "", setAttribute(name, value) { this[name] = value; } },
+  contractsToggle: { hidden: false },
 };
 renderPluginsPanel({
   els: pluginEls,
   state: {
     appInfo: { searchCapabilities: { text: true, docx: true, pdf: true, pdfBackend: "Spotlight", imageOcr: false } },
-    plugins: { codegraph: { installed: true }, ocr: { planned: true } },
+    plugins: { codegraph: { installed: true }, ocr: { planned: true }, contracts: { installed: false } },
   },
   t,
 });
@@ -166,6 +175,17 @@ assert.equal(pluginEls.codegraphPluginStatus.textContent, "フォルダー編集
 assert.match(searchCapabilitiesElement.textContent, /PDF本文/);
 assert.equal(ocrCandidateStatus.textContent, "検討リスト入り（まだ使えません）");
 assert.equal(ocrCandidateToggle.textContent, "検討リストから外す");
+assert.equal(pluginEls.contractsToggle.hidden, true);
+assert.match(indexHtml, /data-plugin-candidate-status="contracts"/);
+assert.match(indexHtml, /data-plugin-candidate-toggle="contracts"/);
+assert.match(indexHtml, /data-i18n="management\.pluginContractsTitle"/);
+assert.match(indexHtml, /追加DLなし（内蔵機能）/);
+assert.match(i18nJs, /"management\.pluginContractsSize": "追加DLなし（内蔵機能）"/);
+assert.match(indexHtml, /id="contracts-toggle"[^>]*hidden/);
+const contractAppState = { plugins: { contracts: { installed: false } } };
+togglePluginCandidate({ state: contractAppState, els: pluginEls, t, pluginId: "contracts" });
+assert.equal(contractAppState.plugins.contracts.installed, true);
+assert.equal(pluginEls.contractsToggle.hidden, false);
 
 const codingPack = studyPackById("coding-assist-basic");
 assert.equal(codingPack.nameKey, "management.codingAssistPack");
@@ -175,14 +195,10 @@ assert.equal(
   studyPackMenuGroups({ packs: [codingPack], selectedValue: "coding-assist-basic:code-review", t })[0].modes[0].label,
   "コードレビュー",
 );
-const indexHtml = fs.readFileSync("web/index.html", "utf8");
-const i18nJs = fs.readFileSync("web/i18n.js", "utf8");
-const stylesCss = fs.readFileSync("web/styles.css", "utf8");
-const appJs = fs.readFileSync("web/app.js", "utf8");
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.198-huihui-composer1"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.198-experimental-toggle4"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.198-mlx17"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.198-mlx17"/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);
@@ -214,6 +230,127 @@ assert.match(indexHtml, /data-i18n="management\.mobileConnectCode"/);
 assert.match(indexHtml, /data-study-pack-toggle="coding-assist-basic"/);
 assert.match(indexHtml, /data-i18n="management\.codingAssistPack"/);
 assert.match(indexHtml, /data-i18n="studyPack\.mode\.releaseCheckShort"/);
+assert.match(indexHtml, /id="contracts-toggle"[^>]*hidden/);
+assert.doesNotMatch(indexHtml, /id="experiments-toggle"/);
+assert.doesNotMatch(indexHtml, /id="experiments-panel"/);
+assert.match(indexHtml, /id="contract-pdf-import-status"/);
+assert.match(indexHtml, /id="contract-pdf-import-path" type="hidden"/);
+assert.match(indexHtml, /id="contract-pdf-import-selected"/);
+assert.match(indexHtml, /data-i18n="contracts\.pdfImportNoFile"/);
+assert.doesNotMatch(indexHtml, /data-i18n="contracts\.pdfImportPath"/);
+assert.doesNotMatch(indexHtml, /data-i18n="contracts\.pdfImportPathHelp"/);
+assert.ok(
+  indexHtml.indexOf('data-i18n="contracts.pdfImportAdvanced"') < indexHtml.indexOf('id="contract-pdf-import-page"'),
+  "page number should be available only in detailed checks",
+);
+assert.match(indexHtml, /id="contract-pdf-import-pick-pdf"/);
+assert.match(indexHtml, /id="contract-pdf-import-auto"/);
+assert.match(indexHtml, /id="contract-pdf-import-connection-test"/);
+assert.match(indexHtml, /id="contract-pdf-import-try"/);
+assert.doesNotMatch(indexHtml, /id="contract-pdf-import-try" disabled/);
+assert.match(indexHtml, /id="contract-pdf-import-sarashina"/);
+assert.match(indexHtml, /id="contract-pdf-import-send-contract"/);
+assert.match(indexHtml, /id="contract-pdf-import-result"/);
+assert.match(indexHtml, /id="contracts-panel"/);
+assert.match(indexHtml, /id="contract-pdf-import"/);
+assert.match(indexHtml, /data-i18n="contracts\.pdfImportTitle"/);
+assert.match(indexHtml, /class="contract-section-title"/);
+assert.doesNotMatch(indexHtml, /id="contracts-extract"/);
+assert.match(indexHtml, /class="contract-pdf-import-status-row"/);
+assert.match(indexHtml, /class="contract-pdf-import-button-row contract-import-action-row"/);
+assert.match(indexHtml, /class="ghost-button contract-import-action-button"[\s\S]{0,120}id="contract-pdf-import-pick-pdf"/);
+assert.match(indexHtml, /class="ghost-button contract-import-action-button"[\s\S]{0,120}id="contract-pdf-import-auto"/);
+assert.match(indexHtml, /id="contracts-gap-check"/);
+assert.match(indexHtml, /class="ghost-button contract-import-action-button"[\s\S]{0,120}id="contracts-gap-check"/);
+assert.match(indexHtml, /id="contracts-gap-list"/);
+assert.ok(
+  indexHtml.indexOf('id="contract-pdf-import-auto"') < indexHtml.indexOf('id="contracts-gap-check"'),
+  "gap check should appear below PDF import button",
+);
+assert.ok(
+  indexHtml.indexOf('id="contracts-gap-check"') < indexHtml.indexOf('id="contract-pdf-import-result"'),
+  "gap check should stay inside the PDF import area",
+);
+assert.doesNotMatch(indexHtml, /data-i18n="contracts\.gapCheckHelp"/);
+assert.doesNotMatch(indexHtml, /class="management-card contract-gap-check"/);
+assert.match(indexHtml, /id="contracts-export-csv"/);
+assert.match(indexHtml, /id="contracts-export-json"/);
+assert.match(indexHtml, /id="contracts-import-json"/);
+assert.match(indexHtml, /id="contracts-import-input"/);
+assert.match(indexHtml, /class="contract-ledger-actions"/);
+assert.match(indexHtml, /class="contract-ledger-admin-actions"/);
+assert.match(indexHtml, /data-i18n="contracts\.adminActions"/);
+assert.match(indexHtml, /id="contracts-delete-dummies"[^>]*hidden/);
+assert.match(indexHtml, /data-i18n="contracts\.menu"/);
+assert.match(i18nJs, /"contracts\.title": "契約書管理"/);
+assert.match(i18nJs, /"contracts\.localOnly": "契約書一覧"/);
+assert.match(i18nJs, /"contracts\.sourcePdfImport": "契約書取り込みから追加"/);
+assert.match(i18nJs, /"contracts\.sourceOcrExperiment": "旧PDF取り込みから追加"/);
+assert.doesNotMatch(i18nJs, /experiments\./);
+assert.match(i18nJs, /"contracts\.exportCsv": "CSV書き出し"/);
+assert.match(i18nJs, /"contracts\.importJson": "JSON取り込み"/);
+assert.match(i18nJs, /"contracts\.pdfImportTitle": "契約書取り込み"/);
+assert.match(i18nJs, /"contracts\.pdfImportConnectionTest": "接続テスト"/);
+assert.match(i18nJs, /"contracts\.pdfImportNoFile": "契約書未選択"/);
+assert.match(i18nJs, /"contracts\.pdfImportSelectedFile": "選択中: \{path\}"/);
+assert.doesNotMatch(i18nJs, /"contracts\.pdfImportPath"/);
+assert.doesNotMatch(i18nJs, /"contracts\.pdfImportPathHelp"/);
+assert.match(i18nJs, /"contracts\.pdfImportPickPdf": "契約書を選択"/);
+assert.match(i18nJs, /"contracts\.pdfImportAuto": "契約書を取り込み"/);
+assert.match(i18nJs, /"contracts\.pdfImportTryOnePage": "1ページだけ試す"/);
+assert.match(i18nJs, /"contracts\.pdfImportSarashinaCompare": "Sarashina OCRで比較"/);
+assert.match(i18nJs, /"contracts\.pdfImportSendContract": "契約書管理に送る"/);
+assert.doesNotMatch(i18nJs, /"contracts\.extract": "現在のフォルダーから抽出"/);
+assert.match(i18nJs, /"contracts\.gapCheck": "取り込み漏れチェック"/);
+assert.doesNotMatch(i18nJs, /"contracts\.gapCheckHelp"/);
+assert.match(appJs, /\/api\/contracts\/import-gaps/);
+assert.match(appJs, /\/api\/contracts\/pdf-import\/status/);
+assert.match(appJs, /\/api\/contracts\/pdf-import\/test/);
+assert.match(appJs, /\/api\/contracts\/pdf-import\/pick-pdf/);
+assert.match(appJs, /contractPdfImportSelected/);
+assert.match(appJs, /\/api\/contracts\/pdf-import\/auto/);
+assert.match(appJs, /\/api\/contracts\/pdf-import\/try-page/);
+assert.match(stylesCss, /\.primary-action \{/);
+assert.match(stylesCss, /background: var\(--accent\)/);
+assert.match(stylesCss, /color: var\(--accent-ink\)/);
+assert.match(indexHtml, /class="contract-pdf-import-button-row contract-import-action-row"/);
+assert.match(stylesCss, /\.contract-import-action-row/);
+assert.match(stylesCss, /\.contract-import-action-button/);
+assert.match(stylesCss, /flex: 0 0 180px/);
+assert.match(stylesCss, /width: 180px/);
+assert.match(stylesCss, /\.contract-ledger-actions/);
+assert.match(stylesCss, /\.contract-ledger-admin-actions/);
+assert.match(stylesCss, /\.contract-section-title/);
+assert.match(stylesCss, /\.workspace\.management-open \.topbar/);
+assert.match(stylesCss, /display: none/);
+assert.match(stylesCss, /\.workspace\.management-open \.settings-panel/);
+assert.match(stylesCss, /\.workspace\.management-open \{/);
+assert.match(stylesCss, /overflow: auto/);
+assert.match(stylesCss, /background: transparent/);
+assert.match(stylesCss, /border: 0/);
+assert.match(stylesCss, /max-height: none/);
+assert.match(appJs, /\/api\/contracts\/pdf-import\/sarashina\/compare-page/);
+assert.doesNotMatch(appJs, /\/api\/experiments\/contract-pdf-import/);
+assert.match(appJs, /contractPdfImportPage/);
+assert.doesNotMatch(appJs, /renderExperimentsPanel/);
+assert.match(appJs, /async function runContractPdfImportConnectionTest/);
+assert.match(appJs, /async function pickContractPdfImportPdf/);
+assert.match(appJs, /async function runContractPdfImportAuto/);
+assert.match(appJs, /async function runContractPdfImportTryPage/);
+assert.match(appJs, /async function runContractPdfImportSarashinaCompare/);
+assert.match(appJs, /function sendContractPdfImportCandidate/);
+assert.match(appJs, /function contractSourceLabel/);
+assert.match(appJs, /function isBusinessEmailDraft/);
+assert.match(appJs, /function isImplicitStudyPackWritingRequest/);
+assert.match(appJs, /isBusinessEmailDraft\(text\)\) return false/);
+assert.match(appJs, /isStudyPackRewriteRequest\(text\) \|\| isImplicitStudyPackWritingRequest\(text\)/);
+assert.match(appJs, /function isCasualStateChatRequest/);
+assert.match(appJs, /はらへった/);
+assert.match(appJs, /isCasualPreferenceQuestion\(text\) \|\| isCasualStateChatRequest\(text\) \? "fast" : "balanced"/);
+assert.match(appJs, /contracts\.sourcePdfImport/);
+assert.match(appJs, /contracts\.sourceOcrExperiment/);
+assert.match(appJs, /function exportContractsCsv/);
+assert.match(appJs, /function importContractsJsonFile/);
 
 const mobileConnectEls = {
   mobileConnectCode: { textContent: "" },
@@ -374,6 +511,36 @@ async function runImportTests() {
   assert.equal(multiSelectionModel.groups[1].modes[0].checked, true);
   assert.deepEqual(Array.from(toggleStudyPackModeValue(["a:one"], "b:two", true)), ["a:one", "b:two"]);
   assert.deepEqual(Array.from(toggleStudyPackModeValue(["a:one", "b:two"], "a:one", false)), ["b:two"]);
+  const compactPrompt = compactStudyPackPrompt({
+    modeName: "メールを整える",
+    mode: {
+      prompt: "社外向けメールとして、結論、背景、確認事項が分かるように整えてください。必要以上に硬くしすぎないでください。",
+      examples: [
+        { input: "長い入力例", output: "長い出力例" },
+      ],
+    },
+    outputPrompt: "出力はまず「修正版:」として、対象本文そのものを書き換えてください。必要な場合だけ、最後に「変更点:」を2〜3個添えてください。",
+    includeExamples: false,
+  });
+  assert.match(compactPrompt, /結論、背景、確認事項/);
+  assert.match(compactPrompt, /修正版/);
+  assert.doesNotMatch(compactPrompt, /長い入力例|長い出力例/);
+  assert.ok(compactPrompt.length < 260);
+  assert.equal(shouldApplyStudyPackForText("リライトして\n本文です", { hasSelection: true }), true);
+  assert.equal(shouldApplyStudyPackForText("このメールを添削して", { hasSelection: true }), true);
+  assert.equal(shouldApplyStudyPackForText("以下につづく返信文を考えて", { hasSelection: true }), true);
+  assert.match(appJs, /返信文\|返信案\|返信メール\|メール返信/);
+  assert.match(appJs, /function isReplyDraftRequest/);
+  assert.match(appJs, /返信本文案:/);
+  assert.match(appJs, /studyPackModeOutputPrompt\(selected, requestText = ""\)/);
+  assert.match(appJs, /すぐコピペできる返信本文だけ/);
+  assert.match(appJs, /hasQuotedMail && hasReplyOpening/);
+  assert.match(appJs, /件名案、変更した理由、送信前の確認事項/);
+  assert.match(appJs, /studyPackContextSystemPrompt\(text\)/);
+  assert.match(appJs, /numPredict: 900/);
+  assert.equal(shouldApplyStudyPackForText("ガンダム好き？", { hasSelection: true }), false);
+  assert.equal(shouldApplyStudyPackForText("しばぱぱはどの機体が好き？", { hasSelection: true }), false);
+  assert.equal(shouldApplyStudyPackForText("ニューガンダムだよ", { hasSelection: true }), false);
   assert.match(appJs, /localStorage\.getItem\("gemma4\.selectedStudyPackModes"\)/);
   assert.match(appJs, /localStorage\.setItem\("gemma4\.selectedStudyPackModes"/);
   assert.doesNotMatch(appJs, /appliedStudyPackModes\.length > 0/);

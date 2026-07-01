@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=0.8.198-experimental-toggle4" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.198-mlx17" />
   </head>
   <body>
     <div class="app-shell">
@@ -56,6 +56,10 @@
             <button class="ghost-button" id="study-packs-toggle" type="button" data-i18n="management.studyPacks">教材パック</button>
             <button class="ghost-button" id="training-panel-toggle" type="button" data-i18n="management.trainingSets">学習セット</button>
             <button class="ghost-button" id="plugins-toggle" type="button" data-i18n="management.plugins">プラグイン</button>
+          </div>
+          <div class="sidebar-settings-group" id="apps-group" hidden>
+            <span data-i18n="management.apps">アプリ</span>
+            <button class="ghost-button" id="contracts-toggle" type="button" data-i18n="contracts.menu" hidden>契約書管理</button>
           </div>
         </div>
 
@@ -745,6 +749,17 @@
                   <button class="ghost-button" type="button" data-plugin-candidate-toggle="fast-search" data-i18n="management.add">追加</button>
                 </div>
               </article>
+              <article class="plugin-candidate-card plugin-available">
+                <strong data-i18n="management.pluginContractsTitle">契約書管理</strong>
+                <span class="plugin-kind-badge" data-i18n="management.pluginAppKind">アプリ</span>
+                <span data-i18n="management.pluginContractsHelp">契約書PDFの読み取り、原文確認、ローカル契約台帳を使えるようにします。</span>
+                <span class="plugin-candidate-meta" data-i18n="management.pluginContractsSize">追加DLなし（内蔵機能）</span>
+                <span class="plugin-state-note" data-i18n="management.pluginContractsUseNote">追加すると、左メニューのアプリ欄に「契約書管理」が表示されます。</span>
+                <div class="plugin-candidate-actions">
+                  <small data-plugin-candidate-status="contracts" data-i18n="management.notAdded">未追加</small>
+                  <button class="ghost-button" type="button" data-plugin-candidate-toggle="contracts" data-i18n="management.add">追加</button>
+                </div>
+              </article>
               <article class="plugin-candidate-card plugin-planned">
                 <strong data-i18n="management.pluginAstTitle">高度なコード解析</strong>
                 <span class="plugin-kind-badge" data-i18n="management.pluginPlannedOnly">今後の候補</span>
@@ -761,6 +776,108 @@
             </div>
           </div>
           <p class="management-note" data-i18n="management.pluginsNote">プラグイン画面では機能を追加するだけです。コード理解は、左カラムで使いたいフォルダーを選び、フォルダー編集から「このフォルダーで使う」を有効にして準備します。</p>
+        </section>
+
+        <section class="management-panel" id="contracts-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="contracts.title">契約書管理</strong>
+              <span data-i18n="contracts.help">フォルダー内の契約書から、契約期間・自動更新・解約通知期限をローカル台帳に整理します。AI抽出結果は確認補助です。契約判断は必ず原文PDFと該当ページを確認してください。法務判断・法的助言ではありません。</span>
+            </div>
+            <button class="ghost-button" id="contracts-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="management-panel-body contracts-body">
+            <article class="management-card contract-pdf-import" id="contract-pdf-import">
+              <div class="contract-pdf-import-main">
+                <div>
+                  <strong class="contract-section-title" data-i18n="contracts.pdfImportTitle">契約書取り込み</strong>
+                  <span data-i18n="contracts.pdfImportHelp">契約書PDFを読み取り、原文ページを確認しながら契約台帳に送ります。</span>
+                </div>
+                <span class="plugin-kind-badge" id="contract-pdf-import-status" data-i18n="contracts.pdfImportTextReady">PDF読み取り: 使用可能</span>
+                <span class="plugin-candidate-meta" id="contract-pdf-import-candidates" data-i18n="contracts.pdfImportRecommendedOcr">画像PDF OCR: GLM-OCRを推奨</span>
+                <input id="contract-pdf-import-path" type="hidden" />
+                <div class="contract-pdf-import-button-row contract-import-action-row">
+                  <button class="ghost-button contract-import-action-button" type="button" id="contract-pdf-import-pick-pdf" data-i18n="contracts.pdfImportPickPdf">契約書を選択</button>
+                  <small id="contract-pdf-import-selected" data-i18n="contracts.pdfImportNoFile">契約書未選択</small>
+                  <button class="ghost-button contract-import-action-button" type="button" id="contract-pdf-import-auto" data-i18n="contracts.pdfImportAuto">契約書を取り込み</button>
+                  <button class="ghost-button primary-action contract-import-action-button" type="button" id="contract-pdf-import-send-contract" hidden data-i18n="contracts.pdfImportSendContract">契約書管理に送る</button>
+                </div>
+                <div class="contract-pdf-import-status-row">
+                  <small id="contract-pdf-import-action-status" data-i18n="contracts.pdfImportIdle">契約書を選択してください</small>
+                </div>
+                <div class="contract-actions contract-gap-actions contract-import-action-row">
+                  <button class="ghost-button contract-import-action-button" id="contracts-gap-check" type="button" data-i18n="contracts.gapCheck">取り込み漏れチェック</button>
+                  <span id="contracts-status" class="management-card-meta" aria-live="polite"></span>
+                </div>
+                <div class="contract-gap-list" id="contracts-gap-list"></div>
+                <details class="plugin-candidate-details">
+                  <summary data-i18n="contracts.pdfImportAdvanced">詳細確認</summary>
+                  <div class="contract-pdf-import-status-row">
+                    <strong data-i18n="contracts.pdfImportMethodTitle">読み取り方式</strong>
+                    <small data-i18n="contracts.pdfImportTextReadyHelp">テキストPDFはそのまま読み取り、画像PDFの場合だけOCRを使います。</small>
+                    <small id="contract-pdf-import-note" data-i18n="contracts.pdfImportNote">PDFテキスト抽出を先に試し、画像PDFなど必要な場合だけOCRを使います。抽出結果は必ず原文ページで確認してください。</small>
+                  </div>
+                  <label class="setting-field setting-wide">
+                    <span data-i18n="contracts.pdfImportPageNumber">ページ番号</span>
+                    <input id="contract-pdf-import-page" type="number" min="1" max="100" value="1" />
+                  </label>
+                  <div class="plugin-candidate-actions contract-pdf-import-actions">
+                    <button class="ghost-button" type="button" id="contract-pdf-import-refresh" data-i18n="contracts.pdfImportRefresh">状態を確認</button>
+                    <button class="ghost-button" type="button" id="contract-pdf-import-connection-test" data-i18n="contracts.pdfImportConnectionTest">接続テスト</button>
+                    <button class="ghost-button" type="button" id="contract-pdf-import-try" data-i18n="contracts.pdfImportTryOnePage">1ページだけ試す</button>
+                    <button class="ghost-button" type="button" id="contract-pdf-import-try-all" data-i18n="contracts.pdfImportTryAllPages">全ページで試す</button>
+                    <button class="ghost-button" type="button" id="contract-pdf-import-sarashina" data-i18n="contracts.pdfImportSarashinaCompare">Sarashina OCRで比較</button>
+                  </div>
+                </details>
+                <pre class="contract-pdf-import-result" id="contract-pdf-import-result" hidden></pre>
+              </div>
+            </article>
+            <div class="contract-template-row" id="contract-template-row"></div>
+            <div class="contract-review" id="contract-extraction-review"></div>
+            <div class="management-card">
+              <div>
+                <strong class="contract-section-title" data-i18n="contracts.localOnly">契約書一覧</strong>
+                <span data-i18n="contracts.localOnlyHelp">クラウド同期、外部API、メール送信、Slack通知は使いません。保存先はこのPC内のSQLiteです。</span>
+              </div>
+              <div class="contract-ledger-actions">
+                <button class="ghost-button" id="contracts-refresh" type="button" data-i18n="contracts.refresh">一覧を更新</button>
+                <details class="plugin-candidate-details contract-admin-details">
+                  <summary data-i18n="contracts.adminActions">管理</summary>
+                  <div class="contract-ledger-admin-actions">
+                    <button class="ghost-button" id="contracts-export-csv" type="button" data-i18n="contracts.exportCsv">CSV</button>
+                    <button class="ghost-button" id="contracts-export-json" type="button" data-i18n="contracts.exportJson">JSON</button>
+                    <button class="ghost-button" id="contracts-import-json" type="button" data-i18n="contracts.importJson">JSON取り込み</button>
+                    <button class="ghost-button dev-only" id="contracts-delete-dummies" type="button" data-i18n="contracts.deleteDummies" hidden>検索テスト用ダミーを削除</button>
+                  </div>
+                </details>
+                <input id="contracts-import-input" type="file" accept="application/json,.json" hidden />
+              </div>
+            </div>
+            <div class="contract-list-controls">
+              <label>
+                <span data-i18n="contracts.searchLabel">検索</span>
+                <input id="contracts-search" type="search" placeholder="契約名・相手先・メモ" data-i18n-placeholder="contracts.searchPlaceholder" />
+              </label>
+              <label>
+                <span data-i18n="contracts.sortLabel">並び順</span>
+                <select id="contracts-sort">
+                  <option value="notice" data-i18n="contracts.sortNotice">通知期限が近い順</option>
+                  <option value="end" data-i18n="contracts.sortEnd">終了日が近い順</option>
+                  <option value="updated" data-i18n="contracts.sortUpdated">更新が新しい順</option>
+                </select>
+              </label>
+              <label>
+                <span data-i18n="contracts.filterLabel">表示</span>
+                <select id="contracts-filter">
+                  <option value="all" data-i18n="contracts.filterAll">すべて</option>
+                  <option value="attention" data-i18n="contracts.filterAttention">要確認だけ</option>
+                </select>
+              </label>
+              <span id="contracts-alert-summary" class="management-card-meta"></span>
+            </div>
+            <div class="contract-list" id="contracts-list"></div>
+          </div>
+          <p class="management-note" data-i18n="contracts.note">抽出結果は必ず確認してから保存します。画像PDFやOCRが必要な資料は、今後のOCR対応後に精度を上げます。</p>
         </section>
 
         <aside class="workspace-panel" id="workspace-panel" hidden>
@@ -798,6 +915,15 @@
             <button class="ghost-button" id="workspace-codegraph-prepare" type="button" data-i18n="workspace.codeUnderstandingPrepare">準備する</button>
             <small id="workspace-codegraph-status" data-i18n="workspace.codeUnderstandingHelp">このフォルダー内のファイル、関数、参照関係を調べてAIの文脈に使います。</small>
             <div class="workspace-codegraph-files" id="workspace-codegraph-files" hidden></div>
+          </div>
+          <div class="workspace-learning" id="workspace-knowledge-row">
+            <span data-i18n="workspace.knowledgeSearch">資料検索</span>
+            <span class="workspace-toggle-row">
+              <input id="workspace-knowledge-enabled" type="checkbox" />
+              <strong data-i18n="workspace.knowledgeSearchUse">このフォルダーで使う</strong>
+            </span>
+            <button class="ghost-button" id="workspace-knowledge-prepare" type="button" data-i18n="workspace.knowledgeSearchPrepare">準備する</button>
+            <small id="workspace-knowledge-status" data-i18n="workspace.knowledgeSearchHelp">PDF、テキスト、MarkdownをSQLiteに索引化してAIの文脈に使います。</small>
           </div>
           <div class="workspace-learning" id="workspace-search-row" hidden>
             <span data-i18n="workspace.fastSearch">フォルダー内検索</span>
@@ -934,7 +1060,7 @@
       </section>
     </div>
 
-  <script src="/i18n.js?v=0.8.198-huihui-composer1"></script>
+  <script src="/i18n.js?v=0.8.198-mlx17"></script>
   <script src="/utils.js?v=0.8.198-japanese-spacing1"></script>
   <script src="/translation.js?v=0.8.198"></script>
   <script src="/local-tools.js?v=0.8.198"></script>
@@ -943,17 +1069,17 @@
   <script src="/asr.js?v=0.8.198"></script>
   <script src="/attachments.js?v=0.8.198"></script>
   <script src="/composer.js?v=0.8.198"></script>
-  <script src="/workspace.js?v=0.8.198"></script>
+  <script src="/workspace.js?v=0.8.198-knowledge4"></script>
   <script src="/training.js?v=0.8.198"></script>
   <script src="/character.js?v=0.8.198"></script>
-  <script src="/models.js?v=0.8.198-huihui-composer1"></script>
-  <script src="/messages.js?v=0.8.198"></script>
+  <script src="/models.js?v=0.8.198-mlx17"></script>
+  <script src="/messages.js?v=0.8.198-knowledge4"></script>
   <script src="/sidebar.js?v=0.8.198"></script>
-  <script src="/settings.js?v=0.8.198-huihui-composer1"></script>
-  <script src="/management.js?v=0.8.198-study-pack-persist1"></script>
+  <script src="/settings.js?v=0.8.198-mlx17"></script>
+  <script src="/management.js?v=0.8.198-mlx17"></script>
   <script src="/router.js?v=0.8.198"></script>
   <script src="/search.js?v=0.8.198"></script>
-  <script src="/pwa.js?v=0.8.198-pwa1"></script>
-  <script src="/app.js?v=0.8.198-study-pack-persist1"></script>
+  <script src="/pwa.js?v=0.8.198-mlx17"></script>
+  <script src="/app.js?v=0.8.198-mlx17"></script>
 </body>
 </html>

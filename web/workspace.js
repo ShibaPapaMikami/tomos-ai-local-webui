@@ -165,6 +165,19 @@
     };
   }
 
+  function isWorkspaceSourceContentFollowup(text, options = {}) {
+    const normalized = String(text || "").trim();
+    const hasWorkspaceRoot = options.hasWorkspaceRoot !== false;
+    const isCharacterPreferenceRequest = options.isCharacterPreferenceRequest || (() => false);
+    const isExcludedRequest = options.isExcludedRequest || (() => false);
+    if (!normalized || !hasWorkspaceRoot || isCharacterPreferenceRequest(normalized) || isExcludedRequest(normalized)) {
+      return false;
+    }
+    return /^(どんな内容|どんな中身|内容[は？?]*|中身[は？?]*|要約|要約して|読んで|開いて|見せて|何が書いて|何が入って|どんなこと)/.test(normalized)
+      || /(内容|中身|要約|本文).{0,12}(教えて|知りたい|見せて|読んで|確認)/.test(normalized)
+      || /この(?:PDF|ファイル|資料|文書)|さっきの(?:PDF|ファイル|資料|文書)|それの(?:内容|中身|要約)/.test(normalized);
+  }
+
   function renderWorkspacePreviewContent(target, content, activeLine = "") {
     if (!target) return;
     const targetLine = Number(activeLine);
@@ -610,6 +623,14 @@
     return postWorkspaceJson("/api/workspace/codegraph/read", { root });
   }
 
+  function prepareKnowledge({ folderId, root, force = false }) {
+    return postWorkspaceJson("/api/knowledge/index", { folderId, path: root, force });
+  }
+
+  function searchKnowledge({ folderId, query, limit = 5 }) {
+    return postWorkspaceJson("/api/knowledge/search", { folderId, query, limit });
+  }
+
   function searchWorkspace({ root, query }) {
     return postWorkspaceJson("/api/workspace/search", { root, query });
   }
@@ -642,6 +663,23 @@
     }
     if (codegraph.status === "running") return t("workspace.codeUnderstandingPreparing");
     return t("workspace.codeUnderstandingNotReady");
+  }
+
+  function knowledgeStatusText({ folder, t }) {
+    const knowledge = folder?.plugins?.knowledge || {};
+    if (!knowledge.enabled) return t("workspace.knowledgeSearchOff");
+    if (knowledge.status === "ready") {
+      return t("workspace.knowledgeSearchReady", {
+        files: knowledge.fileCount || 0,
+        texts: knowledge.textCount || 0,
+        failed: knowledge.failedCount || 0,
+      });
+    }
+    if (knowledge.status === "error") {
+      return t("workspace.knowledgeSearchError", { error: knowledge.error || "" });
+    }
+    if (knowledge.status === "running") return t("workspace.knowledgeSearchPreparing");
+    return t("workspace.knowledgeSearchNotReady");
   }
 
   function searchCapabilityText({ state, t }) {
@@ -720,6 +758,15 @@
       const summary = activeFolder?.plugins?.codegraph?.summary;
       els.workspaceCodegraphFiles.hidden = !summary || activeFolder?.plugins?.codegraph?.status !== "ready";
       els.workspaceCodegraphFiles.innerHTML = summary ? formatCodegraphFiles({ summary, t }) : "";
+    }
+    if (els.workspaceKnowledgeEnabled) {
+      els.workspaceKnowledgeEnabled.checked = Boolean(activeFolder?.plugins?.knowledge?.enabled);
+    }
+    if (els.workspaceKnowledgePrepare) {
+      els.workspaceKnowledgePrepare.disabled = !state.workspaceRoot || !activeFolder?.plugins?.knowledge?.enabled;
+    }
+    if (els.workspaceKnowledgeStatus) {
+      els.workspaceKnowledgeStatus.textContent = knowledgeStatusText({ folder: activeFolder, t });
     }
     const fastSearchInstalled = Boolean(state.plugins?.["fast-search"]?.installed);
     if (els.workspaceSearchRow) {
@@ -916,6 +963,7 @@
     inferSavePath,
     inferSimpleTextSave,
     isSaveCommand,
+    isWorkspaceSourceContentFollowup,
     lastAssistantMessage,
     loadTree,
     normalizeGeneratedFiles,
@@ -930,10 +978,12 @@
     renderWorkspacePanel,
     revealPath,
     readCodegraph,
+    prepareKnowledge,
     revealWorkspacePathAction,
     loadWorkspaceAction,
     saveWorkspaceFileAction,
     searchWorkspace,
+    searchKnowledge,
     searchWorkspaceAction,
     uniquePath,
     updateWorkspacePreviewSearch,

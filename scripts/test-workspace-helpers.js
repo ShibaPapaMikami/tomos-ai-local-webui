@@ -11,6 +11,7 @@ const {
   extractJsonObject,
   formatSearchResults,
   inferSimpleTextSave,
+  isWorkspaceSourceContentFollowup,
   normalizeWorkspacePlan,
   parseWorkspaceGeneration,
   renderWorkspacePanel,
@@ -56,6 +57,27 @@ assert.equal(
     hasWorkspace: false,
   }),
   null,
+);
+
+assert.equal(
+  isWorkspaceSourceContentFollowup?.("内容を教えて", { hasWorkspaceRoot: true }),
+  true,
+);
+
+assert.equal(
+  isWorkspaceSourceContentFollowup?.(
+    `リライトして
+
+飯嶋様
+
+ご共有いただいたプレスリリース原稿およびメッセージ原稿、誠にありがとうございます。
+こちら拝見し、内容を確認させていただきます。`,
+    {
+      hasWorkspaceRoot: true,
+      isExcludedRequest: (value) => /リライト|添削|校正|書き直|書き換/.test(value),
+    },
+  ),
+  false,
 );
 
 assert.deepEqual(
@@ -147,10 +169,17 @@ const codegraphStatusT = (key, values = {}) => ({
   "workspace.codeUnderstandingPreparing": "コード理解を準備中...",
   "workspace.codeUnderstandingReady": "使用できます: {files}件のコードを解析しました。",
   "workspace.codeUnderstandingError": "準備できませんでした。もう一度準備してください: {error}",
+  "workspace.knowledgeSearchOff": "資料検索OFF",
+  "workspace.knowledgeSearchNotReady": "資料検索ON",
+  "workspace.knowledgeSearchPreparing": "資料検索準備中",
+  "workspace.knowledgeSearchReady": "資料検索OK {files}/{texts}/{failed}",
+  "workspace.knowledgeSearchError": "資料検索エラー {error}",
   "workspace.notConfigured": "{name}のフォルダーを設定してください。",
   "workspace.loaded": "{name}を読み込みました。",
 }[key] || key)
   .replace("{files}", values.files ?? "")
+  .replace("{texts}", values.texts ?? "")
+  .replace("{failed}", values.failed ?? "")
   .replace("{error}", values.error ?? "")
   .replace("{name}", values.name ?? "");
 
@@ -164,6 +193,9 @@ const workspaceEls = {
   workspaceCodegraphPrepare: { disabled: false },
   workspaceCodegraphStatus: { textContent: "" },
   workspaceCodegraphFiles: { hidden: false, innerHTML: "" },
+  workspaceKnowledgeEnabled: { checked: false },
+  workspaceKnowledgePrepare: { disabled: false },
+  workspaceKnowledgeStatus: { textContent: "" },
   workspaceSearchRow: { hidden: true },
   workspaceSearchStatus: { textContent: "", dataset: {} },
   workspaceStatus: { textContent: "" },
@@ -173,7 +205,10 @@ const workspaceEls = {
 renderWorkspacePanel({
   activeFolder: {
     name: "テスト",
-    plugins: { codegraph: { enabled: true, status: "not-ready" } },
+    plugins: {
+      codegraph: { enabled: true, status: "not-ready" },
+      knowledge: { enabled: true, status: "ready", fileCount: 3, textCount: 2, failedCount: 1 },
+    },
   },
   els: workspaceEls,
   state: {
@@ -186,5 +221,8 @@ renderWorkspacePanel({
   t: codegraphStatusT,
 });
 assert.equal(workspaceEls.workspaceCodegraphStatus.textContent, "有効です。準備すると使えます。");
+assert.equal(workspaceEls.workspaceKnowledgeEnabled.checked, true);
+assert.equal(workspaceEls.workspaceKnowledgePrepare.disabled, false);
+assert.equal(workspaceEls.workspaceKnowledgeStatus.textContent, "資料検索OK 3/2/1");
 
 console.log("workspace helper tests passed");
