@@ -29,7 +29,7 @@ namespace Gemma4Launcher
 
             if (mode != "stop-heavy" && string.IsNullOrEmpty(FindOllamaExecutable()))
             {
-                ShowOllamaInstallPrompt();
+                ShowOllamaRequiredMessage();
                 return 1;
             }
 
@@ -130,37 +130,14 @@ namespace Gemma4Launcher
             return string.Empty;
         }
 
-        private static void ShowOllamaInstallPrompt()
+        private static void ShowOllamaRequiredMessage()
         {
-            DialogResult result = MessageBox.Show(
-                "Ollama が見つかりません。\n\nGemma4_12B を使うには Ollama のインストールが必要です。\n公式ダウンロードページを開きますか？\n\nインストール後、Ollama を一度起動してから Gemma4_12B を再実行してください。",
+            MessageBox.Show(
+                "Ollama がインストールされていないため、Gemma4_12B は起動できません。\n\n先に Ollama をインストールし、Ollama を一度起動してから、Gemma4_12B をもう一度起動してください。\n\nダウンロード: https://ollama.com/download",
                 "Gemma4 12B",
-                MessageBoxButtons.YesNo,
+                MessageBoxButtons.OK,
                 MessageBoxIcon.Warning
             );
-
-            if (result != DialogResult.Yes)
-            {
-                return;
-            }
-
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "https://ollama.com/download",
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    "Ollama のダウンロードページを開けませんでした。\n\nhttps://ollama.com/download\n\n" + ex.Message,
-                    "Gemma4 12B",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
-            }
         }
     }
 }

@@ -1846,7 +1846,7 @@ async function startModelPull(model) {
 
 function renderSettingsMeta() {
   if (els.sidebarAppVersion) {
-    const version = state.appInfo.version || "0.8.198";
+    const version = state.appInfo.version || "0.8.203";
     els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
   }
   const deps = {

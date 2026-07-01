@@ -3,7 +3,9 @@ from pathlib import Path
 import base64
 import tempfile
 import zipfile
+import urllib.error
 from datetime import datetime, timezone
+from io import BytesIO
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -680,6 +682,23 @@ def test_iter_subprocess_output_lines_handles_binary_lines() -> None:
     assert lines[1] == "success"
 
 
+def test_ollama_http_error_event_is_stream_json_safe() -> None:
+    exc = urllib.error.HTTPError(
+        "http://127.0.0.1:11434/api/chat",
+        404,
+        "Not Found",
+        {},
+        BytesIO(b'{"error":"model \\"gemma4:12b\\" not found"}'),
+    )
+    event = server.ollama_http_error_event(exc, model="gemma4:12b")
+    assert event["ok"] is False
+    assert event["type"] == "error"
+    assert event["status"] == 404
+    assert event["model"] == "gemma4:12b"
+    assert "HTTP/1.0" not in event["error"]
+    assert "モデルが未取得です: gemma4:12b" in event["error"]
+
+
 if __name__ == "__main__":
     test_contract_pdf_import_status_payload_shape()
     test_contract_pdf_import_connection_test_payload_shape()
@@ -724,4 +743,5 @@ if __name__ == "__main__":
     test_mobile_qr_svg_contains_svg_modules()
     test_decode_subprocess_output_handles_invalid_locale_bytes()
     test_iter_subprocess_output_lines_handles_binary_lines()
+    test_ollama_http_error_event_is_stream_json_safe()
     print("server helper tests passed")

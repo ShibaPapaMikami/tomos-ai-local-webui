@@ -6,7 +6,7 @@ cd /d "%~dp0"
 set WEB_HOST=127.0.0.1
 set WEB_PORT=54876
 set WEB_URL=http://%WEB_HOST%:%WEB_PORT%
-set GEMMA_APP_VERSION=0.8.198
+set GEMMA_APP_VERSION=0.8.203
 if "%GEMMA_MODEL%"=="" set GEMMA_MODEL=gemma4:12b-mlx
 if "%GEMMA_CODING_MODEL%"=="" set GEMMA_CODING_MODEL=%GEMMA_MODEL%
 if "%GEMMA_TRANSLATION_MODEL%"=="" set GEMMA_TRANSLATION_MODEL=auto
@@ -38,8 +38,10 @@ if "%OLLAMA_EXE%"=="" if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "
 if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles%\Ollama\ollama.exe"
 if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles(x86)%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles(x86)%\Ollama\ollama.exe"
 if "%OLLAMA_EXE%"=="" (
-  echo Ollama is not installed or could not be found.
-  echo Install Ollama from https://ollama.com/download, then open Ollama once.
+  echo Gemma4_12B cannot start without Ollama.
+  echo Install Ollama first:
+  echo https://ollama.com/download
+  echo Then open Ollama once and run Gemma4_12B again.
   pause
   exit /b 1
 )
