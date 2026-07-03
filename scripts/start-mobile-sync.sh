@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 WEB_PORT="${GEMMA_MOBILE_SYNC_PORT:-54877}"
 
-echo "Gemma 4 mobile sync を起動します。"
+echo "TOMOS AI mobile sync を起動します。"
 echo "Mode: mobile-sync-only / mobile APIs only"
 echo "Port: $WEB_PORT"
 echo

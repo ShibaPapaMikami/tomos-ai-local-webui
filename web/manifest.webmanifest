@@ -1,7 +1,7 @@
 {
-  "name": "Gemma 4 12B",
-  "short_name": "Gemma 4",
-  "description": "Local chat, study notes, and phone import for Gemma 4 12B.",
+  "name": "TOMOS AI",
+  "short_name": "TOMOS AI",
+  "description": "Local AI chat, study notes, and phone import powered by local models.",
   "lang": "ja",
   "start_url": "/mobile.html",
   "scope": "/",

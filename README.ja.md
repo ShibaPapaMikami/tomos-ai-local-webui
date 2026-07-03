@@ -1,8 +1,8 @@
-# Gemma 4 12B Local Web UI
+# TOMOS AI
 
 [日本語](README.ja.md) / [English](README.en.md)
 
-Gemma 4 12B を Ollama でローカル実行し、ブラウザーから使うための軽量 Web UI です。
+TOMOS AI は、Gemma 4 12B などのローカルAIモデルを Ollama で実行し、ブラウザーから使うための軽量 Web UI です。
 
 学生や授業利用でも導入しやすいように、APIキーなしでチャット、画像入力、Web検索、ローカルフォルダーを使ったコード生成を扱える構成にしています。
 
@@ -48,8 +48,8 @@ Gemma 4 12B の初回ダウンロードは数GBあります。学校のネット
 
 授業や学生配布では、GitHub Releases から OS 別の ZIP をダウンロードする方法が一番簡単です。
 
-- Mac: `Gemma4_12B-vX.X.X-mac.zip`
-- Windows: `Gemma4_12B-vX.X.X-windows.zip`
+- Mac: `TOMOS_AI-vX.X.X-mac.zip`
+- Windows: `TOMOS_AI-vX.X.X-windows.zip`
 
 詳しくは [学生向けインストール手順](docs/install-students.ja.md) を見てください。配布者向けの手順は [GitHub Release 配布手順](docs/github-release-guide.ja.md) にまとめています。
 

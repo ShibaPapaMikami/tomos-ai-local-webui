@@ -8,9 +8,9 @@
 - [ ] Macで `Gemma4_12B_Web.command` が起動する
 - [ ] Windows ZIP版で `Gemma4_12B_All_Start.bat` が起動する
 - [ ] Windows ZIP版で `Gemma4_12B_Web.bat` が起動する
-- [ ] Windows MSIでデスクトップに `Gemma4 12B Web UI` ショートカットが作られる
-- [ ] Windows MSIでスタートメニューに `Gemma4 12B` フォルダーが作られる
-- [ ] スタートメニューから `Gemma4 12B Web UI`、`Gemma4 12B 全部起動`、`Gemma4 12B 重い処理を停止` を選べる
+- [ ] Windows MSIでデスクトップに `TOMOS AI Web UI` ショートカットが作られる
+- [ ] Windows MSIでスタートメニューに `TOMOS AI` フォルダーが作られる
+- [ ] スタートメニューから `TOMOS AI Web UI`、`TOMOS AI 全部起動`、`TOMOS AI 重い処理を停止` を選べる
 - [ ] Windows MSIのショートカットが `.bat` 直指定ではなく `Gemma4_12B_Launcher.exe` を指している
 - [ ] Windows MSI版は Program Files 内の `.bat` を探さなくても起動できる
 - [ ] 起動後、ブラウザーで `http://127.0.0.1:54876/` が開く
@@ -19,10 +19,10 @@
 ## GitHub Release配布
 
 - [ ] `bash scripts/make-release-archives.sh` でMac/Windows ZIPを作成できる
-- [ ] `dist/Gemma4_12B-vX.X.X-mac.zip` が作成される
-- [ ] `dist/Gemma4_12B-vX.X.X-windows.zip` が作成される
-- [ ] GitHub Actionsで `Gemma4_12B-vX.X.X-mac.pkg` が作成される
-- [ ] GitHub Actionsで `Gemma4_12B-vX.X.X-windows.msi` が作成される
+- [ ] `dist/TOMOS_AI-vX.X.X-mac.zip` が作成される
+- [ ] `dist/TOMOS_AI-vX.X.X-windows.zip` が作成される
+- [ ] GitHub Actionsで `TOMOS_AI-vX.X.X-mac.pkg` が作成される
+- [ ] GitHub Actionsで `TOMOS_AI-vX.X.X-windows.msi` が作成される
 - [ ] ZIPに `.git/`、`ComfyUI/`、`.venv/`、`.venv-asr/`、モデルファイルが含まれていない
 - [ ] GitHub ReleaseにMac/WindowsのZIP、PKG、MSIを添付している
 - [ ] 古いReleaseを削除せず残している

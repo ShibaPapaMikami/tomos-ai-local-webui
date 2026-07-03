@@ -308,15 +308,15 @@
     showAiErrorOutput(message);
     if (raw && navigator.share) {
       try {
-        const file = new File([message], "gemma4-mobile-ai-error.json", { type: "application/json" });
+        const file = new File([message], "tomos-ai-mobile-error.json", { type: "application/json" });
         const payload = navigator.canShare?.({ files: [file] })
           ? {
-              title: "Gemma4 スマホAIエラー",
-              text: "Gemma4 スマホAIエラー詳細",
+              title: "TOMOS AI スマホAIエラー",
+              text: "TOMOS AI スマホAIエラー詳細",
               files: [file],
             }
           : {
-              title: "Gemma4 スマホAIエラー",
+              title: "TOMOS AI スマホAIエラー",
               text: message,
             };
         await navigator.share(payload);
@@ -329,7 +329,7 @@
         }
         try {
           await navigator.share({
-            title: "Gemma4 スマホAIエラー",
+            title: "TOMOS AI スマホAIエラー",
             text: message,
           });
           setAiLoadStatus("AIエラー詳細を共有しました。");
@@ -1183,7 +1183,7 @@
 
   normalizeStoredWasmModel();
   if (document.querySelector("#mobile-app-version")) {
-    document.querySelector("#mobile-app-version").textContent = `アプリ版 0.8.204 / スマホ版 ${MOBILE_BUILD_LABEL}`;
+    document.querySelector("#mobile-app-version").textContent = `アプリ版 0.8.205 / スマホ版 ${MOBILE_BUILD_LABEL}`;
   }
 
   sendButton?.addEventListener("click", sendMessage);

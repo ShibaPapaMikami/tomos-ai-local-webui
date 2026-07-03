@@ -6,7 +6,7 @@ cd /d "%~dp0"
 set WEB_HOST=127.0.0.1
 set WEB_PORT=54876
 set WEB_URL=http://%WEB_HOST%:%WEB_PORT%
-set GEMMA_APP_VERSION=0.8.204
+set GEMMA_APP_VERSION=0.8.205
 if "%GEMMA_MODEL%"=="" set GEMMA_MODEL=gemma4:12b-mlx
 if "%GEMMA_CODING_MODEL%"=="" set GEMMA_CODING_MODEL=%GEMMA_MODEL%
 if "%GEMMA_TRANSLATION_MODEL%"=="" set GEMMA_TRANSLATION_MODEL=auto
@@ -15,7 +15,7 @@ if "%GEMMA_ASR_RUNNER%"=="" set GEMMA_ASR_RUNNER=python scripts/asr_nemotron_run
 if "%GEMMA_ASR_WORKER%"=="" set GEMMA_ASR_WORKER=python scripts/asr_nemotron_worker.py
 if "%GEMMA_ASR_LANGUAGE%"=="" set GEMMA_ASR_LANGUAGE=ja-JP
 
-echo Starting Gemma 4 12B + ComfyUI...
+echo Starting TOMOS AI + ComfyUI...
 echo App version: %GEMMA_APP_VERSION%
 echo Chat model: %GEMMA_MODEL%
 echo Coding model: %GEMMA_CODING_MODEL%
@@ -38,10 +38,10 @@ if "%OLLAMA_EXE%"=="" if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "
 if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles%\Ollama\ollama.exe"
 if "%OLLAMA_EXE%"=="" if exist "%ProgramFiles(x86)%\Ollama\ollama.exe" set "OLLAMA_EXE=%ProgramFiles(x86)%\Ollama\ollama.exe"
 if "%OLLAMA_EXE%"=="" (
-  echo Gemma4_12B cannot start without Ollama.
+  echo TOMOS AI cannot start without Ollama.
   echo Install Ollama first:
   echo https://ollama.com/download
-  echo Then open Ollama once and run Gemma4_12B again.
+  echo Then open Ollama once and run TOMOS AI again.
   pause
   exit /b 1
 )

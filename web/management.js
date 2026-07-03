@@ -1020,6 +1020,10 @@ window.GEMMA_MANAGEMENT = (() => {
       openManagementPanel({ els, panel: els.settingsPanel });
       onOpenSettings?.();
     });
+    els.pcDiagnosticsToggle?.addEventListener("click", () => {
+      openManagementPanel({ els, panel: els.settingsPanel });
+      onOpenSettings?.("pc-diagnostics");
+    });
     els.settingsClose?.addEventListener("click", () => {
       if (els.settingsPanel) els.settingsPanel.hidden = true;
       syncManagementLayout({ els });

@@ -54,6 +54,7 @@ const coder = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau
 const hauhauBalanced = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M";
 const huihuiAbliterated = "hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M";
 const gemmaMlx = "gemma4:12b-mlx";
+const qwen2507 = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL";
 const baseModels = {
   chat: "gemma4:12b",
   coding: coder,
@@ -189,6 +190,10 @@ assert.equal(typeof modelPurpose, "function");
 assert.equal(modelPurpose("gemma4:12b"), "標準チャット・画像理解");
 assert.equal(modelPurpose(gemmaMlx), "Apple Silicon向け高速チャット・コード生成");
 assert.equal(modelPurpose("qwen2.5:3b"), "高速チャット・翻訳");
+assert.equal(modelPurpose(qwen2507), "軽量標準・資料検索・学習パック");
+assert.equal(displayModelName(qwen2507), "Qwen3 4B Instruct 2507");
+assert.equal(composerModelLabel(qwen2507, { t: (key) => key }), "Qwen3 2507");
+assert.equal(displayModelName("qwen3:4b"), "Qwen3 4B");
 assert.equal(modelPurpose(coder), "コード生成・修正・デバッグ");
 assert.equal(
   modelPurpose("hf.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF:Q4_K_M"),
@@ -211,6 +216,12 @@ assert.match(serverSource, /Gemma 4 12B MLX 高速版/);
 assert.match(serverSource, /requiresOllama/);
 assert.doesNotMatch(serverSource, /CODING_MODEL_CANDIDATES = \[\s*"hf\.co\/yuxinlu1\/gemma-4-12B-coder-fable5-composer2\.5-v1-GGUF:Q4_K_M"/);
 assert.match(serverSource, /HauhauCS\/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M/);
+assert.match(serverSource, /hf\.co\/unsloth\/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL/);
+assert.doesNotMatch(serverSource, /"model": "Qwen\/Qwen3-4B-Instruct-2507"[\s\S]{0,400}"pullable": False/);
+assert.match(serverSource, /"defaultContext": 8192/);
+assert.match(serverSource, /"maxContext": 32768/);
+assert.match(serverSource, /"advancedContext": 262144/);
+assert.match(serverSource, /PULLABLE_MODEL_NAMES = \{item\["model"\] for item in PULLABLE_MODELS if item\["model"\] and item\.get\("pullable"\) is not False\}/);
 assert.match(serverSource, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated-GGUF:Q4_K_M/);
 assert.match(serverSource, /"experimental": True/);
 assert.match(serverSource, /"defaultVisible": False/);
@@ -219,19 +230,22 @@ assert.match(serverSource, /"safetyLevel": "low"/);
 assert.match(serverSource, /"external-send-check"/);
 assert.doesNotMatch(codingCandidatesBlock, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
 assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
-assert.match(indexSource, /\/i18n\.js\?v=0\.8\.204-mlx19/);
-assert.match(indexSource, /\/utils\.js\?v=0\.8\.204-mlx19/);
-assert.match(indexSource, /\/models\.js\?v=0\.8\.204-mlx19/);
-assert.match(indexSource, /\/settings\.js\?v=0\.8\.204-mlx19/);
-assert.match(indexSource, /\/management\.js\?v=0\.8\.204-mlx19/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.204-mlx19/);
-assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.204-mlx19/);
-assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.204-mlx19/);
-assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.204-mlx19/);
-assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.204-mlx19/);
-assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.204-mlx19/);
-assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.204-mlx19/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.204-mlx19/);
+assert.match(indexSource, /\/i18n\.js\?v=0\.8\.205-tomos1/);
+assert.match(indexSource, /\/utils\.js\?v=0\.8\.205-tomos1/);
+assert.match(indexSource, /\/models\.js\?v=0\.8\.205-tomos1/);
+assert.match(indexSource, /\/settings\.js\?v=0\.8\.205-tomos1/);
+assert.match(indexSource, /\/management\.js\?v=0\.8\.205-tomos1/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.205-tomos1/);
+assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.205-tomos1/);
+assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.205-tomos1/);
+assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.205-tomos1/);
+assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.205-tomos1/);
+assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.205-tomos1/);
+assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.205-tomos1/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.205-tomos1/);
+assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
+assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
+assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
 assert.match(stylesSource, /\.settings-panel \.model-experimental-toggle/);
 assert.match(stylesSource, /\.management-panel \.model-experimental-toggle/);
 assert.match(stylesSource, /\.model-installer > \.model-experimental-toggle/);
@@ -245,6 +259,15 @@ assert.match(stylesSource, /margin: 0/);
 const experimentalPullable = [
   { model: "gemma4:12b", label: "Gemma 4 12B", purpose: "標準チャット・画像理解", family: "Gemma系" },
   { model: gemmaMlx, label: "Gemma 4 12B MLX 高速版", purpose: "Apple Silicon向け高速チャット・コード生成", family: "Gemma系" },
+  { model: coder, label: "Gemma 4 Agentic Coder 12B Q4", purpose: "コード生成・修正・デバッグ", family: "Gemma系" },
+  { model: "qwen2.5:3b", label: "Qwen 2.5 3B", purpose: "高速チャット・翻訳", family: "Qwen系" },
+  {
+    model: qwen2507,
+    label: "Qwen3 4B Instruct 2507",
+    purpose: "軽量標準・資料検索・学習パック",
+    family: "Qwen系",
+    note: "Qwen公式モデルのUnsloth GGUF量子化版です。既存の qwen3:4b とは別候補です。",
+  },
   {
     model: huihuiAbliterated,
     label: "Huihui Gemma 4 Coder 12B Abliterated",
@@ -260,16 +283,46 @@ const experimentalPullable = [
   },
 ];
 const renderInstaller = settingsContext.window.GEMMA_SETTINGS.renderModelInstaller;
+const installerT = (key) => ({
+  "settings.modelDownload": "モデルをダウンロード",
+  "model.installed": "ダウンロード済み",
+  "model.downloading": "ダウンロード中",
+  "model.download": "ダウンロード",
+  "error.prefix": "エラー",
+}[key] || key);
 const hiddenInstaller = new FakeElement("section");
 renderInstaller({
   composerModelLabel,
   els: { modelInstaller: hiddenInstaller },
-  modelIsInstalled: () => false,
-  state: { language: "ja", serverModels: { pullable: experimentalPullable }, modelPullJobs: {}, showExperimentalModels: false },
-  t: (key) => key,
+  modelIsInstalled: (model) => model === "qwen2.5:3b" || model === gemmaMlx || model === coder,
+  state: {
+    language: "ja",
+    appInfo: { pcDiagnostics: { system: { isAppleSilicon: true } } },
+    serverModels: { pullable: experimentalPullable },
+    modelPullJobs: {},
+    showExperimentalModels: false,
+  },
+  t: installerT,
 });
-assert.doesNotMatch(hiddenInstaller.innerHTML, /Huihui Gemma 4 Coder 12B Abliterated/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /Huihui Gemma 4 Coder 12B Abliterated[\s\S]{0,240}model-recommended-card/);
+assert.match(hiddenInstaller.innerHTML, /おすすめモデル/);
+assert.match(hiddenInstaller.innerHTML, /軽量AIモデル/);
+assert.match(hiddenInstaller.innerHTML, /Qwen 2.5 3B/);
+assert.match(hiddenInstaller.innerHTML, /高性能AIモデル/);
+assert.match(hiddenInstaller.innerHTML, /Gemma 4 12B MLX 高速版/);
+assert.match(hiddenInstaller.innerHTML, /プログラミング用AIモデル/);
+assert.match(hiddenInstaller.innerHTML, /Gemma 4 Agentic Coder 12B Q4/);
+assert.match(hiddenInstaller.innerHTML, /翻訳AIモデル/);
+assert.match(hiddenInstaller.innerHTML, /ダウンロード済み/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /使用中/);
+assert.match(hiddenInstaller.innerHTML, /アンインストール/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507[\s\S]{0,240}model-recommended-card/);
+assert.match(hiddenInstaller.innerHTML, /詳細モデルを表示/);
 assert.match(hiddenInstaller.innerHTML, /実験モデルを表示/);
+assert.match(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507/);
+assert.match(hiddenInstaller.innerHTML, /軽量標準・資料検索・学習パック/);
+assert.match(hiddenInstaller.innerHTML, /Qwen公式モデルのUnsloth GGUF量子化版です。既存の qwen3:4b とは別候補です。/);
+assert.match(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507[\s\S]{0,500}ダウンロード/);
 
 const visibleInstaller = new FakeElement("section");
 renderInstaller({
@@ -277,11 +330,30 @@ renderInstaller({
   els: { modelInstaller: visibleInstaller },
   modelIsInstalled: () => false,
   state: { language: "ja", serverModels: { pullable: experimentalPullable }, modelPullJobs: {}, showExperimentalModels: true },
-  t: (key) => key,
+  t: installerT,
 });
 assert.match(visibleInstaller.innerHTML, /Huihui Gemma 4 Coder 12B Abliterated/);
 assert.match(visibleInstaller.innerHTML, /コード実験・制限弱め・上級者向け/);
 assert.match(visibleInstaller.innerHTML, /学生向け標準、社内文書、外部送信前チェックには推奨しません/);
+
+const windowsInstaller = new FakeElement("section");
+renderInstaller({
+  composerModelLabel,
+  els: { modelInstaller: windowsInstaller },
+  modelIsInstalled: (model) => model === "qwen2.5:3b",
+  state: {
+    language: "ja",
+    appInfo: { pcDiagnostics: { system: { isAppleSilicon: false } } },
+    serverModels: { pullable: experimentalPullable },
+    modelPullJobs: {},
+    showExperimentalModels: false,
+  },
+  t: installerT,
+});
+assert.match(windowsInstaller.innerHTML, /高性能AIモデル/);
+assert.match(windowsInstaller.innerHTML, /Gemma 4 12B/);
+const windowsRecommendedOnly = windowsInstaller.innerHTML.split("詳細モデルを表示")[0];
+assert.doesNotMatch(windowsRecommendedOnly, /MLX 高速版/);
 const hiddenComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerModelCandidates({
   state: {
     composerModel: huihuiAbliterated,
@@ -298,6 +370,7 @@ const hiddenComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerM
 });
 assert.equal(hiddenComposerCandidates.includes(huihuiAbliterated), false);
 assert.equal(hiddenComposerCandidates.includes(gemmaMlx), true);
+assert.equal(hiddenComposerCandidates.includes(qwen2507), false);
 const visibleComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerModelCandidates({
   state: {
     composerModel: "",
@@ -313,6 +386,7 @@ const visibleComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composer
   modelIsInstalled: (model) => model === huihuiAbliterated || model === "gemma4:12b" || model === coder || model === "qwen2.5:3b",
 });
 assert.equal(visibleComposerCandidates.includes(huihuiAbliterated), true);
+assert.equal(visibleComposerCandidates.includes(qwen2507), false);
 assert.equal(composerModelLabel(gemmaMlx, { t: (key) => key }), "Gemma 4 MLX");
 assert.equal(composerModelLabel(huihuiAbliterated, { t: (key) => key }), "Huihui 実験");
 
@@ -342,5 +416,33 @@ settingsContext.window.GEMMA_SETTINGS.renderModelSettingsSelects({
   t: (key) => key,
 });
 assert.equal(chatSelect.children.some((option) => option.value === gemmaMlx), true);
+assert.equal(chatSelect.children.some((option) => option.value === qwen2507), false);
+
+const chatSelectWithQwen = new FakeElement("select");
+settingsContext.window.GEMMA_SETTINGS.renderModelSettingsSelects({
+  composerModelLabel,
+  displayModelName,
+  els: {
+    chatModel: chatSelectWithQwen,
+    codingModel: new FakeElement("select"),
+    translationModel: new FakeElement("select"),
+    composerModel: new FakeElement("select"),
+  },
+  modelIsInstalled: (model) => model === gemmaMlx || model === "gemma4:12b" || model === "qwen2.5:3b" || model === qwen2507,
+  state: {
+    composerModel: "",
+    modelOverrides: {},
+    serverModels: {
+      chat: "gemma4:12b",
+      coding: coder,
+      translation: "qwen2.5:3b",
+      recommendedCoding: [gemmaMlx, coder],
+      pullable: experimentalPullable,
+    },
+    showExperimentalModels: false,
+  },
+  t: (key) => key,
+});
+assert.equal(chatSelectWithQwen.children.some((option) => option.value === qwen2507), true);
 
 console.log("model selection tests passed");

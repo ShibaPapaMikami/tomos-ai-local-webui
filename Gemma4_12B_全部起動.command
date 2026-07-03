@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 WEB_HOST="${GEMMA_WEB_HOST:-127.0.0.1}"
 WEB_PORT="${GEMMA_WEB_PORT:-54876}"
 WEB_URL="http://$WEB_HOST:$WEB_PORT"
-APP_VERSION="0.8.204"
+APP_VERSION="0.8.205"
 CHAT_MODEL="${GEMMA_MODEL:-gemma4:12b-mlx}"
 CODING_MODEL="${GEMMA_CODING_MODEL:-$CHAT_MODEL}"
 TRANSLATION_MODEL="${GEMMA_TRANSLATION_MODEL:-auto}"
@@ -50,7 +50,7 @@ stop_old_web_server() {
   sleep 1
 }
 
-echo "Gemma 4 12B + ComfyUI を起動します。"
+echo "TOMOS AI + ComfyUI を起動します。"
 echo "App version: $APP_VERSION"
 echo "Chat model: $CHAT_MODEL"
 echo "Coding model: $CODING_MODEL"

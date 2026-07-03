@@ -21,8 +21,8 @@ fi
 
 TAG="v${APP_VERSION#v}"
 DIST_DIR="$ROOT_DIR/dist"
-MAC_ZIP="$DIST_DIR/Gemma4_12B-${TAG}-mac.zip"
-OUT_PKG="$DIST_DIR/Gemma4_12B-${TAG}-mac.pkg"
+MAC_ZIP="$DIST_DIR/TOMOS_AI-${TAG}-mac.zip"
+OUT_PKG="$DIST_DIR/TOMOS_AI-${TAG}-mac.pkg"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemma4-pkg.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 

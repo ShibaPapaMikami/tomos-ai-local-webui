@@ -86,13 +86,13 @@ find "$MAC_ROOT" -name "*.command" -o -name "*.sh" | while read -r file; do
   chmod +x "$file"
 done
 
-(cd "$WORK_DIR" && zip -qr "$DIST_DIR/Gemma4_12B-${TAG}-mac.zip" "$(basename "$MAC_ROOT")")
-(cd "$WORK_DIR" && zip -qr "$DIST_DIR/Gemma4_12B-${TAG}-windows.zip" "$(basename "$WIN_ROOT")")
+(cd "$WORK_DIR" && zip -qr "$DIST_DIR/TOMOS_AI-${TAG}-mac.zip" "$(basename "$MAC_ROOT")")
+(cd "$WORK_DIR" && zip -qr "$DIST_DIR/TOMOS_AI-${TAG}-windows.zip" "$(basename "$WIN_ROOT")")
 
 cat <<EOF
 作成しました:
-- $DIST_DIR/Gemma4_12B-${TAG}-mac.zip
-- $DIST_DIR/Gemma4_12B-${TAG}-windows.zip
+- $DIST_DIR/TOMOS_AI-${TAG}-mac.zip
+- $DIST_DIR/TOMOS_AI-${TAG}-windows.zip
 
 GitHub Release には、この2つのZIPを添付してください。
 ネイティブインストーラーを使う場合は、別途 .pkg / .msi も添付してください。

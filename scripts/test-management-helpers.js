@@ -197,8 +197,8 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.204-mlx19"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.204-mlx19"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.205-tomos1"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.205-tomos1"/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);

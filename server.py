@@ -12,6 +12,7 @@ import json
 import locale
 import mimetypes
 import os
+import platform
 import queue
 import re
 import shutil
@@ -71,7 +72,7 @@ ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 KNOWLEDGE_DB_PATH = default_db_path(ROOT)
 CONTRACT_DB_PATH = default_contract_db_path(ROOT)
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.204")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.205")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
@@ -209,6 +210,17 @@ PULLABLE_MODELS = [
     },
     {"model": "qwen2.5:3b", "label": "Qwen 2.5 3B", "purpose": "高速チャット・翻訳", "family": "Qwen系"},
     {
+        "model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL",
+        "label": "Qwen3 4B Instruct 2507",
+        "purpose": "軽量標準・資料検索・学習パック",
+        "family": "Qwen系",
+        "role": "lightweight-standard",
+        "defaultContext": 8192,
+        "maxContext": 32768,
+        "advancedContext": 262144,
+        "note": "Qwen公式モデルのUnsloth GGUF量子化版です。既存の qwen3:4b とは別候補です。",
+    },
+    {
         "model": "hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M",
         "label": "Huihui Gemma 4 Coder 12B Abliterated",
         "purpose": "コード実験・制限弱め・上級者向け",
@@ -228,7 +240,7 @@ PULLABLE_MODELS = [
         "warning": "通常の安全調整が弱い可能性があります。学生向け標準、社内文書、外部送信前チェックには推奨しません。",
     },
 ]
-PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"]}
+PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"] and item.get("pullable") is not False}
 MODEL_PULL_JOBS: dict[str, dict[str, object]] = {}
 MODEL_PULL_LOCK = threading.Lock()
 ASR_SETUP_JOB: dict[str, object] = {}
@@ -3188,6 +3200,115 @@ def sanitize_chat_messages(messages: list[dict]) -> list[dict]:
     return cleaned
 
 
+QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
+AGENTIC_CODER_MODEL = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M"
+
+
+def run_sysctl_value(name: str) -> str:
+    if sys.platform != "darwin":
+        return ""
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", name],
+            check=False,
+            capture_output=True,
+            timeout=2,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return decode_subprocess_output(result.stdout).strip()
+
+
+def local_memory_gb() -> int:
+    value = run_sysctl_value("hw.memsize")
+    try:
+        return max(0, round(int(value) / (1024 ** 3)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def local_cpu_name() -> str:
+    value = run_sysctl_value("machdep.cpu.brand_string")
+    if value:
+        return value
+    machine = platform.machine() or ""
+    processor = platform.processor() or ""
+    return " ".join(part for part in [processor, machine] if part).strip() or "不明"
+
+
+def local_pc_system_info(available_models: set[str] | list[str] | None = None, ollama_version: str = "") -> dict[str, object]:
+    cpu_name = local_cpu_name()
+    machine = platform.machine() or ""
+    is_apple_silicon = sys.platform == "darwin" and machine.lower() in {"arm64", "aarch64"}
+    gpu_name = "Apple Silicon GPU" if is_apple_silicon else ""
+    models = sorted(str(model) for model in (available_models or []) if model)
+    return {
+        "os": platform.platform() or sys.platform,
+        "cpu": cpu_name,
+        "machine": machine,
+        "memoryGb": local_memory_gb(),
+        "gpu": gpu_name,
+        "hasGpu": bool(gpu_name),
+        "isAppleSilicon": is_apple_silicon,
+        "ollamaVersion": ollama_version,
+        "availableModels": models,
+    }
+
+
+def pc_diagnostics_recommendation(system_info: dict[str, object]) -> dict[str, object]:
+    memory_gb = int(system_info.get("memoryGb") or 0)
+    is_apple_silicon = bool(system_info.get("isAppleSilicon"))
+    available = {str(model) for model in system_info.get("availableModels") or []}
+    has_mlx = "gemma4:12b-mlx" in available
+    has_agentic = AGENTIC_CODER_MODEL in available
+
+    if memory_gb >= 24 and (is_apple_silicon or has_mlx):
+        level = "comfortable"
+        label = "快適"
+        summary = "このPCでは12B系も使いやすいです。標準はGemma 4 MLX、コードはAgentic Coderを優先できます。"
+        standard = "gemma4:12b-mlx"
+        coding = AGENTIC_CODER_MODEL if has_agentic else "gemma4:12b-mlx"
+        warnings: list[str] = []
+    elif memory_gb >= 12:
+        level = "heavy"
+        label = "重い"
+        summary = "軽量モデル中心がおすすめです。12B系は必要な時だけ使うと安定します。"
+        standard = QWEN3_2507_MODEL
+        coding = AGENTIC_CODER_MODEL if has_agentic else "gemma4:12b-mlx"
+        warnings = ["12B系は応答が重くなる可能性があります。"]
+    else:
+        level = "very-heavy"
+        label = "激重い"
+        summary = "軽いモデル中心がおすすめです。12B系や実験モデルは避ける方が安定します。"
+        standard = "qwen2.5:3b"
+        coding = QWEN3_2507_MODEL
+        warnings = ["12B系、HauhauCS、実験モデルはこのPCでは非推奨です。"]
+
+    return {
+        "level": level,
+        "label": label,
+        "summary": summary,
+        "recommended": {
+            "standard": standard,
+            "coding": coding,
+            "light": QWEN3_2507_MODEL,
+            "translation": "qwen2.5:3b",
+        },
+        "warnings": warnings,
+    }
+
+
+def pc_diagnostics_payload(available_models: set[str] | list[str] | None = None, ollama_version: str = "") -> dict[str, object]:
+    system_info = local_pc_system_info(available_models=available_models, ollama_version=ollama_version)
+    return {
+        "ok": True,
+        "system": system_info,
+        "recommendation": pc_diagnostics_recommendation(system_info),
+    }
+
+
 def health_payload() -> dict:
     try:
         version = ollama_json("/api/version", timeout=3).get("version", "unknown")
@@ -3215,6 +3336,10 @@ def health_payload() -> dict:
                 if model
             )),
             "pullableModels": PULLABLE_MODELS,
+            "pcDiagnostics": pc_diagnostics_payload(
+                available_models=models,
+                ollama_version=str(version),
+            ),
             "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": installed,
             "codingModelInstalled": coding_model in models,
@@ -3240,6 +3365,10 @@ def health_payload() -> dict:
                 if model
             )),
             "pullableModels": PULLABLE_MODELS,
+            "pcDiagnostics": pc_diagnostics_payload(
+                available_models=set(),
+                ollama_version="",
+            ),
             "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": False,
             "codingModelInstalled": False,
@@ -3351,6 +3480,34 @@ def start_model_pull(model: str) -> dict:
     thread = threading.Thread(target=run_model_pull, args=(model,), daemon=True)
     thread.start()
     return {"ok": True, "model": model, "status": "running", "message": "ダウンロードを開始しました。"}
+
+
+def validate_model_remove(model: str) -> str:
+    normalized = str(model or "").strip()
+    if normalized not in PULLABLE_MODEL_NAMES:
+        raise ValueError("このモデルはUIからアンインストールできません。")
+    return normalized
+
+
+def remove_model(model: str) -> dict:
+    normalized = validate_model_remove(model)
+    process = subprocess.run(
+        ["ollama", "rm", normalized],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=120,
+    )
+    if process.returncode != 0:
+        message = (process.stdout or "").strip() or f"ollama rm が終了コード {process.returncode} で失敗しました。"
+        raise RuntimeError(message)
+    models = installed_ollama_models(force_refresh=True)
+    return {
+        "ok": True,
+        "model": normalized,
+        "message": "モデルをアンインストールしました。",
+        "availableModels": sorted(models),
+    }
 
 
 def asr_setup_status() -> dict:
@@ -3660,6 +3817,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/models/pull":
             self.handle_model_pull()
             return
+        if self.path == "/api/models/remove":
+            self.handle_model_remove()
+            return
         if self.path == "/api/llm/check":
             self.handle_llm_check()
             return
@@ -3935,6 +4095,14 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             json_response(self, 400, {"ok": False, "error": str(exc)})
 
+    def handle_model_remove(self) -> None:
+        try:
+            body = read_json_body(self)
+            result = remove_model(str(body.get("model", "")).strip())
+            json_response(self, 200, result)
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc)})
+
     def handle_llm_check(self) -> None:
         try:
             body = read_json_body(self)
@@ -4200,7 +4368,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Local Gemma 4 12B Web UI")
+    parser = argparse.ArgumentParser(description="TOMOS AI local Web UI")
     parser.add_argument("--host", default=os.environ.get("GEMMA_WEB_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GEMMA_WEB_PORT", "54876")))
     parser.add_argument("--open", action="store_true", help="Open the Web UI in the default browser")
@@ -4213,7 +4381,7 @@ def main() -> None:
     address = (args.host, args.port)
     httpd = ThreadingHTTPServer(address, Handler)
     url = f"http://{args.host}:{args.port}"
-    print(f"Gemma 4 12B Web UI: {url}")
+    print(f"TOMOS AI Web UI: {url}")
     if args.static_only or args.mobile_sync_only:
         print("Mode: mobile sync only" if args.mobile_sync_only else "Mode: mobile static preview (write APIs blocked)")
         for preview_url in mobile_preview_urls(args.port):

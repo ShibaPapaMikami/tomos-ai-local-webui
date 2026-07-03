@@ -27,7 +27,7 @@ function renderGemmaMessages(deps) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.innerHTML = `
-      <h2>Gemma 4 12B</h2>
+      <h2>TOMOS AI</h2>
       <div>${escapeHtml(t("chat.emptySubtitle"))}</div>
     `;
     els.messages.append(empty);

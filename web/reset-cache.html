@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TOMOS AI キャッシュ解除</title>
+    <style>
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+        background: #f7f4ed;
+        color: #1d1d1b;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        display: grid;
+        gap: 10px;
+        width: min(520px, calc(100vw - 32px));
+      }
+      strong {
+        font-size: 20px;
+      }
+      p {
+        margin: 0;
+        color: #696965;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <strong>キャッシュを解除しています</strong>
+      <p id="status">少し待ってからアプリを開き直します。</p>
+    </main>
+    <script>
+      (async () => {
+        const status = document.querySelector("#status");
+        try {
+          if ("serviceWorker" in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(registrations.map((registration) => registration.unregister()));
+          }
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((key) => caches.delete(key)));
+          }
+          status.textContent = "完了しました。アプリを開き直します。";
+        } catch (error) {
+          status.textContent = `キャッシュ解除中に問題がありました: ${error.message || error}`;
+        } finally {
+          window.setTimeout(() => {
+            window.location.replace("/?v=0.8.205-tomos1&reset=1");
+          }, 600);
+        }
+      })();
+    </script>
+  </body>
+</html>

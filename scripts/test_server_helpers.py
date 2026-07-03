@@ -699,6 +699,70 @@ def test_ollama_http_error_event_is_stream_json_safe() -> None:
     assert "モデルが未取得です: gemma4:12b" in event["error"]
 
 
+def test_pc_diagnostics_recommendation_levels() -> None:
+    comfortable = server.pc_diagnostics_recommendation({
+        "memoryGb": 32,
+        "isAppleSilicon": True,
+        "ollamaVersion": "0.31.1",
+        "availableModels": [
+            "gemma4:12b-mlx",
+            "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M",
+            "qwen2.5:3b",
+        ],
+    })
+    assert comfortable["level"] == "comfortable"
+    assert comfortable["label"] == "快適"
+    assert comfortable["recommended"]["standard"] == "gemma4:12b-mlx"
+    assert comfortable["recommended"]["coding"].startswith("hf.co/yuxinlu1/gemma-4-12B-agentic")
+
+    heavy = server.pc_diagnostics_recommendation({
+        "memoryGb": 16,
+        "isAppleSilicon": False,
+        "ollamaVersion": "0.31.1",
+        "availableModels": ["qwen2.5:3b"],
+    })
+    assert heavy["level"] == "heavy"
+    assert heavy["label"] == "重い"
+    assert heavy["recommended"]["standard"] == "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
+    assert "12B系" in " ".join(heavy["warnings"])
+
+    very_heavy = server.pc_diagnostics_recommendation({
+        "memoryGb": 8,
+        "isAppleSilicon": False,
+        "ollamaVersion": "",
+        "availableModels": [],
+    })
+    assert very_heavy["level"] == "very-heavy"
+    assert very_heavy["label"] == "激重い"
+    assert very_heavy["recommended"]["standard"] == "qwen2.5:3b"
+
+
+def test_pc_diagnostics_payload_shape() -> None:
+    payload = server.pc_diagnostics_payload(
+        available_models={"gemma4:12b-mlx", "qwen2.5:3b"},
+        ollama_version="0.31.1",
+    )
+    assert payload["ok"] is True
+    assert payload["recommendation"]["label"] in {"快適", "重い", "激重い"}
+    assert "memoryGb" in payload["system"]
+    assert "gpu" in payload["system"]
+    assert "hasGpu" in payload["system"]
+    assert "recommended" in payload["recommendation"]
+
+
+def test_validate_model_remove_rejects_unknown_model() -> None:
+    try:
+        server.validate_model_remove("unknown:model")
+    except ValueError as exc:
+        assert "アンインストールできません" in str(exc)
+    else:
+        raise AssertionError("unknown model should be rejected")
+
+
+def test_validate_model_remove_accepts_pullable_model() -> None:
+    assert server.validate_model_remove("qwen2.5:3b") == "qwen2.5:3b"
+
+
 if __name__ == "__main__":
     test_contract_pdf_import_status_payload_shape()
     test_contract_pdf_import_connection_test_payload_shape()
@@ -744,4 +808,8 @@ if __name__ == "__main__":
     test_decode_subprocess_output_handles_invalid_locale_bytes()
     test_iter_subprocess_output_lines_handles_binary_lines()
     test_ollama_http_error_event_is_stream_json_safe()
+    test_pc_diagnostics_recommendation_levels()
+    test_pc_diagnostics_payload_shape()
+    test_validate_model_remove_rejects_unknown_model()
+    test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")

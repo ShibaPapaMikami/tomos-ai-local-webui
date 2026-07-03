@@ -17,8 +17,8 @@ bash scripts/make-release-archives.sh
 
 作成されるファイル:
 
-- `dist/Gemma4_12B-vX.X.X-mac.zip`
-- `dist/Gemma4_12B-vX.X.X-windows.zip`
+- `dist/TOMOS_AI-vX.X.X-mac.zip`
+- `dist/TOMOS_AI-vX.X.X-windows.zip`
 
 バージョンを明示したい場合:
 
@@ -36,7 +36,7 @@ bash scripts/make-mac-pkg.sh
 
 作成されるファイル:
 
-- `dist/Gemma4_12B-vX.X.X-mac.pkg`
+- `dist/TOMOS_AI-vX.X.X-mac.pkg`
 
 Windows の `.msi` は GitHub Actions の Windows runner で作る想定です。ローカルでは WiX 定義だけ確認できます。
 
@@ -79,11 +79,11 @@ GitHub CLI を使う場合の例:
 
 ```sh
 gh release create v0.8.190 \
-  dist/Gemma4_12B-v0.8.190-mac.zip \
-  dist/Gemma4_12B-v0.8.190-windows.zip \
-  dist/Gemma4_12B-v0.8.190-mac.pkg \
-  dist/Gemma4_12B-v0.8.190-windows.msi \
-  --title "Gemma4_12B v0.8.190" \
+  dist/TOMOS_AI-v0.8.190-mac.zip \
+  dist/TOMOS_AI-v0.8.190-windows.zip \
+  dist/TOMOS_AI-v0.8.190-mac.pkg \
+  dist/TOMOS_AI-v0.8.190-windows.msi \
+  --title "TOMOS AI v0.8.190" \
   --notes "学生向け配布版。Mac/Windows ZIP とネイティブインストーラーを添付。"
 ```
 

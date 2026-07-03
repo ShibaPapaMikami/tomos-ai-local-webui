@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL="${GEMMA_MODEL:-gemma4:12b}"
 CODING_MODEL="${GEMMA_CODING_MODEL:-}"
 
-echo "Gemma 4 local Web UI - macOS setup"
+echo "TOMOS AI - macOS setup"
 echo
 
 if ! command -v python3 >/dev/null 2>&1; then

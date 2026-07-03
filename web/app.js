@@ -13,6 +13,15 @@ function initialAsrPartialMode() {
   return normalized;
 }
 
+function loadComposerModelVisibleModels() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("gemma4.composerModelVisibleModels") || "[]");
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 const state = {
   folders: loadFolders(),
   sessions: loadSessions(),
@@ -60,6 +69,7 @@ const state = {
     translation: localStorage.getItem("gemma4.model.translation") || "",
   },
   composerModel: localStorage.getItem("gemma4.composerModel") || "",
+  composerModelVisibleModels: loadComposerModelVisibleModels(),
   externalLlmUrl: localStorage.getItem("gemma4.externalLlmUrl") || "",
   externalLlmStatus: "",
   activeTrainingSetId: localStorage.getItem("gemma4.activeTrainingSetId") || "",
@@ -79,6 +89,7 @@ const state = {
     version: "",
     commit: "",
     searchCapabilities: null,
+    pcDiagnostics: null,
   },
   asrStatus: {
     status: "checking",
@@ -260,6 +271,8 @@ const els = {
   settingsToggle: document.querySelector("#settings-toggle"),
   settingsClose: document.querySelector("#settings-close"),
   settingsPanel: document.querySelector("#settings-panel"),
+  pcDiagnosticsToggle: document.querySelector("#pc-diagnostics-toggle"),
+  pcDiagnostics: document.querySelector("#pc-diagnostics"),
   mobileConnectToggle: document.querySelector("#mobile-connect-toggle"),
   mobileConnectPanel: document.querySelector("#mobile-connect-panel"),
   mobileConnectClose: document.querySelector("#mobile-connect-close"),
@@ -375,6 +388,7 @@ const els = {
   responseMode: document.querySelector("#response-mode"),
   composerResponseMode: document.querySelector("#composer-response-mode"),
   composerModel: document.querySelector("#composer-model"),
+  composerModelVisibility: document.querySelector("#composer-model-visibility"),
   thinkingMode: document.querySelector("#thinking-mode"),
   chatModel: document.querySelector("#chat-model"),
   codingModel: document.querySelector("#coding-model"),
@@ -1539,6 +1553,15 @@ function setComposerModel(value) {
   if (els.composerModel) els.composerModel.value = state.composerModel;
 }
 
+function setComposerModelVisibleModels(models) {
+  state.composerModelVisibleModels = [...new Set((models || []).filter(Boolean))];
+  localStorage.setItem("gemma4.composerModelVisibleModels", JSON.stringify(state.composerModelVisibleModels));
+  if (state.composerModel && state.composerModelVisibleModels.length > 0 && !state.composerModelVisibleModels.includes(state.composerModel)) {
+    setComposerModel("");
+  }
+  syncModelInputs();
+}
+
 function modelForTask(task, useComposer = false) {
   return window.GEMMA_MODELS.modelForTask(task, {
     useComposer,
@@ -1844,12 +1867,37 @@ async function startModelPull(model) {
   }
 }
 
+async function startModelRemove(model) {
+  const label = displayModelName(model, "chat");
+  const ok = window.confirm(state.language === "en"
+    ? `Uninstall ${label}? You can download it again later.`
+    : `${label} をアンインストールします。後から再ダウンロードできます。実行しますか？`);
+  if (!ok) return;
+  try {
+    const data = await window.GEMMA_SETTINGS.requestModelRemove(model).catch((error) => {
+      throw new Error(error.message || (state.language === "en" ? "Could not uninstall the model." : "モデルをアンインストールできませんでした。"));
+    });
+    if (Array.isArray(data.availableModels)) {
+      state.serverModels.available = data.availableModels;
+    } else {
+      state.serverModels.available = state.serverModels.available.filter((item) => item !== model);
+    }
+    delete state.modelPullJobs[model];
+    renderModelInstaller();
+    syncModelInputs();
+    checkHealth();
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
 function renderSettingsMeta() {
   if (els.sidebarAppVersion) {
-    const version = state.appInfo.version || "0.8.204";
+    const version = state.appInfo.version || "0.8.205";
     els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
   }
   const deps = {
+    composerModelLabel,
     displayModelName,
     els,
     escapeHtml,
@@ -1859,6 +1907,7 @@ function renderSettingsMeta() {
     t,
   };
   window.GEMMA_SETTINGS.renderSettingsMeta(deps);
+  window.GEMMA_SETTINGS.renderPcDiagnosticsPanel?.(deps);
   window.GEMMA_SETTINGS.renderSearchCapabilitiesPanel?.(deps);
   renderExternalLlmSettings();
 }
@@ -4569,37 +4618,13 @@ async function handleWorkspaceBuild(text) {
 }
 
 async function checkHealth() {
+  let data;
   try {
-    const response = await fetch("/api/health");
-    const data = await response.json();
-    state.appInfo.version = data.appVersion || state.appInfo.version;
-    state.appInfo.commit = data.appCommit || state.appInfo.commit;
-    state.appInfo.searchCapabilities = data.searchCapabilities || state.appInfo.searchCapabilities;
-    if (data.models) {
-      state.serverModels.chat = data.models.chat || data.model || state.serverModels.chat;
-      state.serverModels.coding = data.models.coding || data.codingModel || state.serverModels.coding;
-      state.serverModels.translation = data.models.translation || data.translationModel || state.serverModels.translation;
+    let response = await fetch("/api/health", { cache: "no-store" });
+    if (!response.ok) {
+      response = await fetch("http://127.0.0.1:54876/api/health", { cache: "no-store" });
     }
-    state.serverModels.codingInstalled = data.codingModelInstalled !== false;
-    if (Array.isArray(data.recommendedCodingModels)) {
-      state.serverModels.recommendedCoding = data.recommendedCodingModels;
-    }
-    if (Array.isArray(data.pullableModels)) {
-      state.serverModels.pullable = data.pullableModels;
-      renderModelInstaller();
-    }
-    if (Array.isArray(data.availableModels) || state.serverModels.recommendedCoding.length > 0) {
-      state.serverModels.available = data.availableModels || state.serverModels.available;
-      syncModelInputs();
-      renderModelInstaller();
-    }
-    els.statusDot.className = `status-dot ${data.ok && data.modelInstalled ? "ok" : "error"}`;
-    const codingMissing = data.ok && data.codingModel && data.codingModelInstalled === false;
-    els.statusText.textContent = data.ok && data.modelInstalled
-      ? codingMissing ? t("status.codingMissing") : t("status.available")
-      : t("status.modelMissing");
-    renderSettingsMeta();
-    if (!state.busy) renderMessages();
+    data = await response.json();
   } catch {
     state.appInfo.version = state.language === "en" ? "failed" : "取得失敗";
     state.appInfo.commit = "";
@@ -4607,6 +4632,40 @@ async function checkHealth() {
     els.statusText.textContent = t("status.offline");
     renderSettingsMeta();
     renderModelInstaller();
+    return;
+  }
+
+  state.appInfo.version = data.appVersion || state.appInfo.version;
+  state.appInfo.commit = data.appCommit || state.appInfo.commit;
+  state.appInfo.searchCapabilities = data.searchCapabilities || state.appInfo.searchCapabilities;
+  state.appInfo.pcDiagnostics = data.pcDiagnostics || state.appInfo.pcDiagnostics;
+  if (data.models) {
+    state.serverModels.chat = data.models.chat || data.model || state.serverModels.chat;
+    state.serverModels.coding = data.models.coding || data.codingModel || state.serverModels.coding;
+    state.serverModels.translation = data.models.translation || data.translationModel || state.serverModels.translation;
+  }
+  state.serverModels.codingInstalled = data.codingModelInstalled !== false;
+  if (Array.isArray(data.recommendedCodingModels)) {
+    state.serverModels.recommendedCoding = data.recommendedCodingModels;
+  }
+  if (Array.isArray(data.pullableModels)) {
+    state.serverModels.pullable = data.pullableModels;
+  }
+  if (Array.isArray(data.availableModels) || state.serverModels.recommendedCoding.length > 0) {
+    state.serverModels.available = data.availableModels || state.serverModels.available;
+    syncModelInputs();
+  }
+  els.statusDot.className = `status-dot ${data.ok && data.modelInstalled ? "ok" : "error"}`;
+  const codingMissing = data.ok && data.codingModel && data.codingModelInstalled === false;
+  els.statusText.textContent = data.ok && data.modelInstalled
+    ? codingMissing ? t("status.codingMissing") : t("status.available")
+    : t("status.modelMissing");
+  try {
+    renderSettingsMeta();
+    renderModelInstaller();
+    if (!state.busy) renderMessages();
+  } catch (error) {
+    console.warn("Health loaded, but rendering failed", error);
   }
 }
 
@@ -6855,6 +6914,9 @@ window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
     if (target === "asr") {
       window.requestAnimationFrame(() => els.asrSettings?.scrollIntoView({ block: "center" }));
     }
+    if (target === "pc-diagnostics") {
+      window.requestAnimationFrame(() => els.pcDiagnostics?.scrollIntoView({ block: "center" }));
+    }
   },
   onOpenWorkspace: openWorkspaceForPlugin,
   onMobileImport: importMobileChatJson,
@@ -6863,9 +6925,21 @@ window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
 });
 
 els.modelInstaller.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-model-pull]");
+  const removeButton = event.target.closest("[data-model-remove]");
+  if (removeButton) {
+    startModelRemove(removeButton.dataset.modelRemove);
+    return;
+  }
+  const pullButton = event.target.closest("[data-model-pull]");
+  if (!pullButton) return;
+  startModelPull(pullButton.dataset.modelPull);
+});
+els.pcDiagnostics?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-pc-diagnostics-refresh]");
   if (!button) return;
-  startModelPull(button.dataset.modelPull);
+  button.disabled = true;
+  button.textContent = state.language === "en" ? "Checking..." : "診断中...";
+  checkHealth();
 });
 els.modelInstaller.addEventListener("change", (event) => {
   const toggle = event.target.closest("[data-experimental-models-toggle]");
@@ -6874,6 +6948,15 @@ els.modelInstaller.addEventListener("change", (event) => {
   localStorage.setItem("gemma4.showExperimentalModels", String(state.showExperimentalModels));
   renderModelInstaller();
   syncModelInputs();
+});
+els.composerModelVisibility?.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-composer-model-visible]");
+  if (!input) return;
+  const checkedModels = Array.from(els.composerModelVisibility.querySelectorAll("[data-composer-model-visible]"))
+    .filter((item) => item.checked)
+    .map((item) => item.dataset.composerModelVisible)
+    .filter(Boolean);
+  setComposerModelVisibleModels(checkedModels);
 });
 els.externalLlmUrl?.addEventListener("change", () => setExternalLlmUrl(els.externalLlmUrl.value));
 els.externalLlmCheck?.addEventListener("click", checkExternalLlmServer);

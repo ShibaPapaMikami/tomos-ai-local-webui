@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 WEB_PORT="${GEMMA_MOBILE_PREVIEW_PORT:-54876}"
 
-echo "Gemma 4 mobile PWA preview を起動します。"
+echo "TOMOS AI mobile PWA preview を起動します。"
 echo "Mode: static-only / write APIs blocked"
 echo "Port: $WEB_PORT"
 echo

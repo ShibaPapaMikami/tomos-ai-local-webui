@@ -1,10 +1,10 @@
-# Gemma 4 12B Local Web UI
+# TOMOS AI
 
 [日本語](README.ja.md) / [English](README.en.md)
 
-Gemma 4 12B Local Web UI is a lightweight browser UI for running local Ollama models. It is designed to be easy for students and classrooms to install and use without API keys.
+TOMOS AI is a lightweight browser UI for running local Ollama models. It is designed to be easy for students and classrooms to install and use without API keys.
 
-Gemma 4 12B を Ollama でローカル実行し、学生や授業利用でも導入しやすいようにした軽量 Web UI です。
+TOMOS AI は、Gemma 4 12B などのローカルAIモデルを Ollama で実行し、学生や授業利用でも導入しやすいようにした軽量 Web UI です。
 
 ## Quick Links
 

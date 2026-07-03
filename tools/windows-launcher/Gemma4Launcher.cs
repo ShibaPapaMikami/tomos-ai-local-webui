@@ -38,8 +38,8 @@ namespace Gemma4Launcher
             if (!File.Exists(batchPath))
             {
                 MessageBox.Show(
-                    batchFile + " が見つかりません。Gemma4_12B を再インストールしてください。",
-                    "Gemma4 12B",
+                    batchFile + " が見つかりません。TOMOS AI を再インストールしてください。",
+                    "TOMOS AI",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
@@ -63,7 +63,7 @@ namespace Gemma4Launcher
             {
                 MessageBox.Show(
                     "起動できませんでした。\n\n" + ex.Message,
-                    "Gemma4 12B",
+                    "TOMOS AI",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error
                 );
@@ -133,8 +133,8 @@ namespace Gemma4Launcher
         private static void ShowOllamaRequiredMessage()
         {
             MessageBox.Show(
-                "Ollama がインストールされていないため、Gemma4_12B は起動できません。\n\n先に Ollama をインストールし、Ollama を一度起動してから、Gemma4_12B をもう一度起動してください。\n\nダウンロード: https://ollama.com/download",
-                "Gemma4 12B",
+                "Ollama がインストールされていないため、TOMOS AI は起動できません。\n\n先に Ollama をインストールし、Ollama を一度起動してから、TOMOS AI をもう一度起動してください。\n\nダウンロード: https://ollama.com/download",
+                "TOMOS AI",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning
             );

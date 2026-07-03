@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $Model = if ($env:GEMMA_MODEL) { $env:GEMMA_MODEL } else { "gemma4:12b" }
 $CodingModel = if ($env:GEMMA_CODING_MODEL) { $env:GEMMA_CODING_MODEL } else { "" }
 
-Write-Host "Gemma 4 local Web UI - Windows setup"
+Write-Host "TOMOS AI - Windows setup"
 Write-Host ""
 
 function Test-Command($Name) {

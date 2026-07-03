@@ -1,8 +1,8 @@
-# Gemma 4 12B Local Web UI
+# TOMOS AI
 
 [日本語](README.ja.md) / [English](README.en.md)
 
-Gemma 4 12B Local Web UI is a lightweight browser UI for running local Ollama models such as Gemma 4 12B. It is designed for students and classrooms: no API key is required for basic chat, image input, web search, weather lookup, or local-folder coding workflows.
+TOMOS AI is a lightweight browser UI for running local Ollama models such as Gemma 4 12B. It is designed for students and classrooms: no API key is required for basic chat, image input, web search, weather lookup, or local-folder coding workflows.
 
 ## Installation Approach
 
@@ -51,8 +51,8 @@ After launching the app, open `Settings` and use `Download models` to install su
 
 For classroom distribution, download the OS-specific ZIP from GitHub Releases.
 
-- Mac: `Gemma4_12B-vX.X.X-mac.zip`
-- Windows: `Gemma4_12B-vX.X.X-windows.zip`
+- Mac: `TOMOS_AI-vX.X.X-mac.zip`
+- Windows: `TOMOS_AI-vX.X.X-windows.zip`
 
 Japanese install notes are available in [docs/install-students.ja.md](docs/install-students.ja.md). Release packaging notes are in [docs/github-release-guide.ja.md](docs/github-release-guide.ja.md).
 

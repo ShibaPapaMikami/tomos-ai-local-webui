@@ -21,13 +21,13 @@ bash scripts/make-mac-pkg.sh
 作成されるファイル:
 
 ```text
-dist/Gemma4_12B-vX.X.X-mac.pkg
+dist/TOMOS_AI-vX.X.X-mac.pkg
 ```
 
 中身を確認する例:
 
 ```sh
-pkgutil --payload-files dist/Gemma4_12B-vX.X.X-mac.pkg
+pkgutil --payload-files dist/TOMOS_AI-vX.X.X-mac.pkg
 ```
 
 インストール先は `/Applications/Gemma4_12B` です。
@@ -52,17 +52,17 @@ python scripts/make-windows-msi.py
 作成されるファイル:
 
 ```text
-dist/Gemma4_12B-vX.X.X-windows.msi
+dist/TOMOS_AI-vX.X.X-windows.msi
 ```
 
 MSI でインストールすると、以下の起動ショートカットを作ります。
 
-- デスクトップ: `Gemma4 12B Web UI`
-- スタートメニュー: `Gemma4 12B > Gemma4 12B Web UI`
-- スタートメニュー: `Gemma4 12B > Gemma4 12B 全部起動`
-- スタートメニュー: `Gemma4 12B > Gemma4 12B 重い処理を停止`
+- デスクトップ: `TOMOS AI Web UI`
+- スタートメニュー: `TOMOS AI > TOMOS AI Web UI`
+- スタートメニュー: `TOMOS AI > TOMOS AI 全部起動`
+- スタートメニュー: `TOMOS AI > TOMOS AI 重い処理を停止`
 
-通常は `Gemma4 12B Web UI` から起動します。ComfyUI など周辺機能もまとめて起動したい場合だけ `全部起動` を使います。
+通常は `TOMOS AI Web UI` から起動します。ComfyUI など周辺機能もまとめて起動したい場合だけ `全部起動` を使います。
 ショートカットは `Gemma4_12B_Launcher.exe` を起動します。このランチャーが内部で既存の `.bat` を呼び出すため、学生が Program Files 内の `.bat` を探す必要はありません。
 
 ZIP 版は従来どおり `.bat` を直接起動する予備配布です。
@@ -72,15 +72,15 @@ ZIP 版は従来どおり `.bat` を直接起動する予備配布です。
 `.github/workflows/build-installers.yml` を手動実行すると、以下の artifact ができます。
 手動実行時は `version` に `0.8.190` のようなアプリ版を入れてください。Actions の実行名、artifact 名、ジョブ概要に同じバージョンが表示されます。
 
-- `gemma4-mac-pkg-X.X.X`
-- `gemma4-windows-msi-X.X.X`
+- `tomos-ai-mac-pkg-X.X.X`
+- `tomos-ai-windows-msi-X.X.X`
 
 Release に添付する基本セット:
 
-- `Gemma4_12B-vX.X.X-mac.zip`
-- `Gemma4_12B-vX.X.X-windows.zip`
-- `Gemma4_12B-vX.X.X-mac.pkg`
-- `Gemma4_12B-vX.X.X-windows.msi`
+- `TOMOS_AI-vX.X.X-mac.zip`
+- `TOMOS_AI-vX.X.X-windows.zip`
+- `TOMOS_AI-vX.X.X-mac.pkg`
+- `TOMOS_AI-vX.X.X-windows.msi`
 
 ## 注意
 

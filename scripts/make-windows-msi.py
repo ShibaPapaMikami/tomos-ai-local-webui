@@ -238,24 +238,24 @@ def generate_wxs(version: str) -> None:
           <Shortcut
             Id="StartMenuWebShortcut"
             Directory="ApplicationProgramsFolder"
-            Name="Gemma4 12B Web UI"
-            Description="Gemma4 12B Web UIを起動"
+            Name="TOMOS AI Web UI"
+            Description="TOMOS AI Web UIを起動"
             Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
             Arguments="web"
             WorkingDirectory="INSTALLFOLDER" />
           <Shortcut
             Id="StartMenuAllShortcut"
             Directory="ApplicationProgramsFolder"
-            Name="Gemma4 12B 全部起動"
-            Description="Gemma4 12B Web UIと周辺機能を起動"
+            Name="TOMOS AI 全部起動"
+            Description="TOMOS AI Web UIと周辺機能を起動"
             Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
             Arguments="all"
             WorkingDirectory="INSTALLFOLDER" />
           <Shortcut
             Id="StartMenuStopShortcut"
             Directory="ApplicationProgramsFolder"
-            Name="Gemma4 12B 重い処理を停止"
-            Description="Gemma4 12Bの重い処理を停止"
+            Name="TOMOS AI 重い処理を停止"
+            Description="TOMOS AIの重い処理を停止"
             Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
             Arguments="stop-heavy"
             WorkingDirectory="INSTALLFOLDER" />
@@ -266,8 +266,8 @@ def generate_wxs(version: str) -> None:
           <Shortcut
             Id="DesktopWebShortcut"
             Directory="DesktopFolder"
-            Name="Gemma4 12B Web UI"
-            Description="Gemma4 12B Web UIを起動"
+            Name="TOMOS AI Web UI"
+            Description="TOMOS AI Web UIを起動"
             Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"
             Arguments="web"
             WorkingDirectory="INSTALLFOLDER" />
@@ -276,7 +276,7 @@ def generate_wxs(version: str) -> None:
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ApplicationProgramsFolder" Name="Gemma4 12B" />
+      <Directory Id="ApplicationProgramsFolder" Name="TOMOS AI" />
     </StandardDirectory>
     <StandardDirectory Id="DesktopFolder" />
     <CustomAction
@@ -306,7 +306,7 @@ def build_msi(version: str) -> Path:
         raise SystemExit(
             "WiX Toolset が見つかりません。Windowsで `dotnet tool install --global wix` を実行してください。"
         )
-    out_path = DIST / f"Gemma4_12B-v{version}-windows.msi"
+    out_path = DIST / f"TOMOS_AI-v{version}-windows.msi"
     subprocess.run([wix, "build", str(WXS_PATH), "-arch", "x64", "-out", str(out_path)], check=True)
     return out_path
 

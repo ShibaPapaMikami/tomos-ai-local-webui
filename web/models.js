@@ -28,6 +28,7 @@ function gemmaDisplayModelName(model, task = "chat", helpers = {}) {
     if (task === "translation") return `Qwen 2.5 3B (${translate("model.qwenTranslation")})`;
     return `Qwen 2.5 3B (${translate("model.qwenFast")})`;
   }
+  if (model === "Qwen/Qwen3-4B-Instruct-2507" || model.includes("Qwen3-4B-Instruct-2507-GGUF")) return "Qwen3 4B Instruct 2507";
   if (model === "phi3:latest") return "Phi-3";
   if (model === "llama3:latest") return "Llama 3";
   if (model === "qwen3:4b") return "Qwen3 4B";
@@ -51,6 +52,7 @@ function gemmaComposerModelLabel(model, helpers = {}) {
   if (model === "gemma4:12b-mlx") return "Gemma 4 MLX";
   if (model === "gemma4:12b") return "Gemma 4";
   if (model === "qwen2.5:3b") return "Qwen";
+  if (model === "Qwen/Qwen3-4B-Instruct-2507" || model.includes("Qwen3-4B-Instruct-2507-GGUF")) return "Qwen3 2507";
   if (model === "phi3:latest") return "Phi-3";
   if (model === "llama3:latest") return "Llama";
   if (model === "qwen3:4b") return "Qwen3";
@@ -69,6 +71,7 @@ function gemmaModelPurpose(model, task = "chat", helpers = {}) {
   if (model === "gemma4:12b-mlx") return "Apple Silicon向け高速チャット・コード生成";
   if (model === "gemma4:12b") return "標準チャット・画像理解";
   if (model === "qwen2.5:3b") return "高速チャット・翻訳";
+  if (model === "Qwen/Qwen3-4B-Instruct-2507" || model.includes("Qwen3-4B-Instruct-2507-GGUF")) return "軽量標準・資料検索・学習パック";
   if (task === "coding") return "コード生成";
   if (task === "translation") return "翻訳";
   return "";
