@@ -19,21 +19,24 @@ function createContext(withCore = true) {
   if (withCore) {
     context.window.TOMOS_CHARACTER_CORE = {
       buildRuntimePrompt(input) {
-        assert.equal(input.character.name, "しばぱぱ");
-        assert.equal(input.situation, "daily-chat");
-        assert.equal(input.emotion, "calm");
-        assert.equal(input.relationshipStage, "trusted");
+        assert.equal(input.character.displayName, "しばぱぱ");
+        assert.ok(input.character.voice.firstPerson);
+        assert.equal(input.context.situation, "daily-chat");
+        assert.equal(input.context.emotion, "calm");
+        assert.equal(input.context.relationshipStage, "trusted");
         return {
           text: "CORE_PROMPT_TEXT",
           sections: [{ id: "voice", text: "CORE_SECTION" }],
           warnings: [{ code: "prompt.too_long", severity: "warning" }],
         };
       },
-      validateCharacterVoice(profile) {
-        assert.equal(profile.name, "しばぱぱ");
+      validateCharacterVoice(profile, options) {
+        assert.equal(profile.displayName, "しばぱぱ");
+        assert.ok(Array.isArray(options.recentLines));
         return [{ code: "voice.too_formal", severity: "info" }];
       },
-      resolveReactionRule(state) {
+      resolveReactionRule(profile, state) {
+        assert.equal(profile.displayName, "しばぱぱ");
         assert.equal(state.situation, "daily-chat");
         assert.equal(state.emotion, "calm");
         assert.equal(state.relationshipStage, "trusted");
@@ -66,6 +69,16 @@ const corePrompt = coreContext.window.GEMMA_CHARACTER.buildCharacterSystemPrompt
 assert.match(corePrompt, /あなたの表示名は「しばぱぱ」/);
 assert.match(corePrompt, /character-core追加指示/);
 assert.match(corePrompt, /CORE_PROMPT_TEXT/);
+const mapped = coreContext.window.TOMOS_CHARACTER_CORE_ADAPTER.buildRuntimePromptInput({
+  character: { name: "しばぱぱ", userName: "まさふみ", selfName: "ぼく" },
+  conversationState: { situation: "daily-chat", emotion: "calm", relationshipStage: "trusted" },
+  recentMessages: [{ role: "user", content: "おはよ" }],
+});
+assert.equal(mapped.character.displayName, "しばぱぱ");
+assert.equal(mapped.character.preferredCallName, "まさふみ");
+assert.equal(mapped.character.voice.firstPerson, "ぼく");
+assert.equal(mapped.context.situation, "daily-chat");
+assert.ok(mapped.context.recentLines.some((line) => line.includes("おはよ")));
 
 const addition = coreContext.window.TOMOS_CHARACTER_CORE_ADAPTER.buildRuntimePromptAddition({
   character: { name: "しばぱぱ" },
@@ -75,6 +88,8 @@ assert.equal(addition.source, "character-core");
 assert.equal(addition.sections[0].id, "voice");
 assert.equal(addition.warnings.length, 2);
 assert.equal(addition.reactionRule.id, "reaction-smile");
+assert.equal(addition.input.character.displayName, "しばぱぱ");
+assert.equal(addition.input.context.project, "TOMOS AI");
 
 const fallbackContext = createContext(false);
 const fallbackPrompt = fallbackContext.window.GEMMA_CHARACTER.buildCharacterSystemPrompt({ name: "しばぱぱ" });
