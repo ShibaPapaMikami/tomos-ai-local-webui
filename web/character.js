@@ -128,7 +128,7 @@ window.GEMMA_CHARACTER = (() => {
     return map[gender] || "";
   }
 
-  function buildCharacterSystemPrompt(character) {
+  function buildCharacterSystemPrompt(character, options = {}) {
     const normalized = normalizeCharacter(character);
     const lines = [
       "",
@@ -144,7 +144,16 @@ window.GEMMA_CHARACTER = (() => {
       "分からないことは作らず、分からないと伝えてください。",
       "あなたはAIであり、人間であるように装わないでください。",
     ].filter(Boolean);
-    return `\n\n${lines.join("\n")}`;
+    const basePrompt = `\n\n${lines.join("\n")}`;
+    const adapter = window.TOMOS_CHARACTER_CORE_ADAPTER;
+    if (!adapter || typeof adapter.buildRuntimePromptAddition !== "function") {
+      return basePrompt;
+    }
+    const addition = adapter.buildRuntimePromptAddition({
+      ...options,
+      character: normalized,
+    });
+    return `${basePrompt}${adapter.formatPromptAddition?.(addition) || ""}`;
   }
 
   function buildMemorySystemPrompt(memorySet) {

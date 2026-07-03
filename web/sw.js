@@ -16,6 +16,7 @@ const APP_SHELL = [
   "/composer.js?v=0.8.205-tomos1",
   "/workspace.js?v=0.8.205-tomos1",
   "/training.js?v=0.8.205-tomos1",
+  "/character-core-adapter.js?v=0.8.205-tomos1",
   "/character.js?v=0.8.205-tomos1",
   "/models.js?v=0.8.205-tomos1",
   "/messages.js?v=0.8.205-tomos1",

@@ -2295,10 +2295,15 @@ function activeCharacterMemorySet() {
 }
 
 function characterContextSystemPrompt() {
-  const characterPrompt = window.GEMMA_CHARACTER?.buildCharacterSystemPrompt?.(state.character) || "";
+  const memorySet = activeCharacterMemorySet();
+  const session = activeSession();
+  const characterPrompt = window.GEMMA_CHARACTER?.buildCharacterSystemPrompt?.(state.character, {
+    memorySet,
+    recentMessages: Array.isArray(session?.messages) ? session.messages : [],
+  }) || "";
   const memoryPrompt = state.character?.memoryMode === "off"
     ? ""
-    : (window.GEMMA_CHARACTER?.buildMemorySystemPrompt?.(activeCharacterMemorySet()) || "");
+    : (window.GEMMA_CHARACTER?.buildMemorySystemPrompt?.(memorySet) || "");
   return `${characterPrompt}${memoryPrompt}`;
 }
 
