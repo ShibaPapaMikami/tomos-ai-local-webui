@@ -7,6 +7,7 @@ WEB_HOST="${GEMMA_WEB_HOST:-127.0.0.1}"
 WEB_PORT="${GEMMA_WEB_PORT:-54876}"
 WEB_URL="http://$WEB_HOST:$WEB_PORT"
 APP_VERSION="0.8.205"
+APP_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)"
 CHAT_MODEL="${GEMMA_MODEL:-gemma4:12b-mlx}"
 CODING_MODEL="${GEMMA_CODING_MODEL:-$CHAT_MODEL}"
 TRANSLATION_MODEL="${GEMMA_TRANSLATION_MODEL:-auto}"
@@ -29,18 +30,22 @@ export GEMMA_APP_VERSION="$APP_VERSION"
 
 stop_old_web_server() {
   local running_version
-  running_version="$(curl -s "$WEB_URL/api/health" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("appVersion",""))' 2>/dev/null || true)"
+  local running_commit
+  local running_info
+  running_info="$(curl -s "$WEB_URL/api/health" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("appVersion","")); print(data.get("appCommit",""))' 2>/dev/null || true)"
+  running_version="$(printf "%s\n" "$running_info" | sed -n '1p')"
+  running_commit="$(printf "%s\n" "$running_info" | sed -n '2p')"
   if ! command -v lsof >/dev/null 2>&1; then
     return
   fi
   if ! lsof -tiTCP:"$WEB_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     return
   fi
-  if [ "$running_version" = "$APP_VERSION" ]; then
+  if [ "$running_version" = "$APP_VERSION" ] && { [ -z "$APP_COMMIT" ] || [ "$running_commit" = "$APP_COMMIT" ]; }; then
     return
   fi
   if [ -n "$running_version" ]; then
-    echo "古いWeb UI ($running_version) が起動中のため停止します。"
+    echo "古いWeb UI ($running_version ${running_commit:-no-commit}) が起動中のため停止します。"
   else
     echo "ポート $WEB_PORT を使用中の別サーバーを停止します。"
   fi
@@ -52,6 +57,7 @@ stop_old_web_server() {
 
 echo "TOMOS AI + ComfyUI を起動します。"
 echo "App version: $APP_VERSION"
+echo "App commit: ${APP_COMMIT:-no-git}"
 echo "Chat model: $CHAT_MODEL"
 echo "Coding model: $CODING_MODEL"
 echo "Translation model: $TRANSLATION_MODEL"

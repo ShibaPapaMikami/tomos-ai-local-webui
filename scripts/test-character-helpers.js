@@ -48,6 +48,8 @@ assert.equal(character.userName, "三上さん");
 assert.equal(character.selfName, "私");
 assert.equal(character.gender, "female");
 assert.equal(normalizeCharacter({ memoryMode: "auto" }).memoryMode, "auto");
+assert.equal(normalizeCharacter({}).characterCoreEnabled, true);
+assert.equal(normalizeCharacter({ characterCoreEnabled: false }).characterCoreEnabled, false);
 assert.equal(normalizeCharacter({ gender: "unknown" }).gender, "unspecified");
 assert.match(buildCharacterSystemPrompt(character), /あなたの表示名は「ミカ」/);
 assert.match(buildCharacterSystemPrompt(character), /ユーザーの呼び方は「三上さん」/);

@@ -14,6 +14,7 @@ window.GEMMA_CHARACTER = (() => {
     systemPromptAddon: "",
     memorySetId: "character-memory-default",
     memoryMode: "suggest",
+    characterCoreEnabled: true,
   };
 
   const DEFAULT_MEMORY_SET = {
@@ -50,6 +51,7 @@ window.GEMMA_CHARACTER = (() => {
       systemPromptAddon: String(character.systemPromptAddon || "").trim(),
       memoryMode: ["off", "suggest", "auto"].includes(character.memoryMode) ? character.memoryMode : "suggest",
       memorySetId: character.memorySetId || DEFAULT_CHARACTER.memorySetId,
+      characterCoreEnabled: character.characterCoreEnabled !== false,
     };
   }
 
@@ -145,7 +147,7 @@ window.GEMMA_CHARACTER = (() => {
       "あなたはAIであり、人間であるように装わないでください。",
     ].filter(Boolean);
     const basePrompt = `\n\n${lines.join("\n")}`;
-    const adapter = window.TOMOS_CHARACTER_CORE_ADAPTER;
+    const adapter = normalized.characterCoreEnabled ? window.TOMOS_CHARACTER_CORE_ADAPTER : null;
     if (!adapter || typeof adapter.buildRuntimePromptAddition !== "function") {
       return basePrompt;
     }

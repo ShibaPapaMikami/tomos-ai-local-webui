@@ -307,6 +307,7 @@ const els = {
   characterAvatarClear: document.querySelector("#character-avatar-clear"),
   characterAvatarFile: document.querySelector("#character-avatar-file"),
   characterTone: document.querySelector("#character-tone"),
+  characterCoreEnabled: document.querySelector("#character-core-enabled"),
   characterMemoryMode: document.querySelector("#character-memory-mode"),
   characterMemoryModeChoices: document.querySelectorAll("input[name='character-memory-mode-choice']"),
   characterPersonality: document.querySelector("#character-personality"),
@@ -2412,6 +2413,7 @@ function renderCharacterPanel() {
   if (els.characterAvatar) els.characterAvatar.value = state.character?.avatar || "";
   renderCharacterPreview();
   if (els.characterTone) els.characterTone.value = state.character?.tonePreset || "friendly";
+  if (els.characterCoreEnabled) els.characterCoreEnabled.checked = state.character?.characterCoreEnabled !== false;
   if (els.characterMemoryMode) els.characterMemoryMode.value = state.character?.memoryMode || "suggest";
   els.characterMemoryModeChoices?.forEach((input) => {
     input.checked = input.value === (state.character?.memoryMode || "suggest");
@@ -2518,6 +2520,7 @@ function saveCharacterSettings() {
     gender: els.characterGender?.value || "unspecified",
     avatar: els.characterAvatar?.value || "",
     tonePreset: els.characterTone?.value || "friendly",
+    characterCoreEnabled: els.characterCoreEnabled?.checked !== false,
     memoryMode: checkedMemoryMode || els.characterMemoryMode?.value || "suggest",
     personality: els.characterPersonality?.value || "",
     systemPromptAddon: els.characterSystemAddon?.value || "",
@@ -6762,6 +6765,9 @@ els.characterSelfName?.addEventListener("input", () => {
 });
 els.characterGender?.addEventListener("change", () => {
   state.character.gender = els.characterGender.value || "unspecified";
+});
+els.characterCoreEnabled?.addEventListener("change", () => {
+  state.character.characterCoreEnabled = els.characterCoreEnabled.checked;
 });
 els.characterMemoryModeChoices?.forEach((input) => {
   input.addEventListener("change", () => {

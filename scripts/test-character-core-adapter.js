@@ -69,6 +69,19 @@ const corePrompt = coreContext.window.GEMMA_CHARACTER.buildCharacterSystemPrompt
 assert.match(corePrompt, /あなたの表示名は「しばぱぱ」/);
 assert.match(corePrompt, /character-core追加指示/);
 assert.match(corePrompt, /CORE_PROMPT_TEXT/);
+const disabledPrompt = coreContext.window.GEMMA_CHARACTER.buildCharacterSystemPrompt({
+  name: "しばぱぱ",
+  characterCoreEnabled: false,
+}, {
+  conversationState: {
+    situation: "daily-chat",
+    emotion: "calm",
+    relationshipStage: "trusted",
+  },
+});
+assert.match(disabledPrompt, /あなたの表示名は「しばぱぱ」/);
+assert.doesNotMatch(disabledPrompt, /character-core追加指示/);
+assert.doesNotMatch(disabledPrompt, /CORE_PROMPT_TEXT/);
 const mapped = coreContext.window.TOMOS_CHARACTER_CORE_ADAPTER.buildRuntimePromptInput({
   character: { name: "しばぱぱ", userName: "まさふみ", selfName: "ぼく" },
   conversationState: { situation: "daily-chat", emotion: "calm", relationshipStage: "trusted" },
