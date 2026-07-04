@@ -7,8 +7,8 @@ assert.match(index, /rel="manifest" href="\/manifest\.webmanifest"/);
 assert.match(index, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"/);
 assert.match(index, /name="theme-color"/);
 assert.match(index, /apple-mobile-web-app-capable/);
-assert.match(index, /src="\/pwa\.js\?v=0\.8\.205-tomos2"/);
-assert.match(index, /src="\/app\.js\?v=0\.8\.205-tomos2"/);
+assert.match(index, /src="\/pwa\.js\?v=0\.8\.206-tomos1"/);
+assert.match(index, /src="\/app\.js\?v=0\.8\.206-tomos1"/);
 assert.match(appJs, /localStorage\.getItem\("gemma4\.theme"\) \|\| "light"/);
 assert.match(appJs, /function openInitialManagementPanelFromUrl/);
 assert.match(appJs, /function isWorkspaceCountRequest/);
@@ -50,10 +50,10 @@ const sw = fs.readFileSync("web/sw.js", "utf8");
 assert.match(sw, /offline\.html/);
 assert.match(sw, /mobile\.html/);
 assert.match(sw, /manifest\.webmanifest/);
-assert.match(sw, /gemma4-pwa-0\.8\.205-tomos2/);
+assert.match(sw, /gemma4-pwa-0\.8\.206-tomos1/);
 assert.match(sw, /cache\.put\(event\.request/);
 const pwaJs = fs.readFileSync("web/pwa.js", "utf8");
-assert.match(pwaJs, /\/sw\.js\?v=0\.8\.205-tomos2/);
+assert.match(pwaJs, /\/sw\.js\?v=0\.8\.206-tomos1/);
 
 const mobileHtml = fs.readFileSync("web/mobile.html", "utf8");
 assert.match(mobileHtml, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"/);
@@ -64,7 +64,7 @@ assert.match(mobileHtml, /id="mobile-desktop-notice"/);
 assert.match(mobileHtml, /PC版のスマホ接続を開く/);
 assert.match(mobileHtml, /\/pc-mobile-connect/);
 assert.match(mobileHtml, /id="mobile-app-version"/);
-assert.match(mobileHtml, /アプリ版 0\.8\.205/);
+assert.match(mobileHtml, /アプリ版 0\.8\.206/);
 assert.match(mobileHtml, /id="mobile-ai-plan"/);
 assert.match(mobileHtml, /id="mobile-ai-mode"/);
 assert.match(mobileHtml, /id="mobile-ai-model"/);
@@ -86,11 +86,11 @@ assert.match(mobileHtml, /id="mobile-chat-mark-imported"/);
 assert.match(mobileHtml, /id="mobile-chat-clear"/);
 assert.match(mobileHtml, /id="mobile-import-summary"/);
 assert.match(mobileHtml, /id="mobile-chat-export-output"/);
-assert.match(mobileHtml, /src="\/pwa\.js\?v=0\.8\.205-tomos2"/);
+assert.match(mobileHtml, /src="\/pwa\.js\?v=0\.8\.206-tomos1"/);
 assert.match(mobileHtml, /Xenova\/LaMini-Flan-T5-77M/);
 assert.match(mobileHtml, /HuggingFaceTB\/SmolLM2-135M-Instruct/);
 assert.match(mobileHtml, /onnx-community\/Qwen2\.5-0\.5B-Instruct/);
-assert.match(mobileHtml, /src="\/mobile-standalone\.js\?v=0\.8\.205-tomos2"/);
+assert.match(mobileHtml, /src="\/mobile-standalone\.js\?v=0\.8\.206-tomos1"/);
 
 const offlineHtml = fs.readFileSync("web/offline.html", "utf8");
 assert.match(offlineHtml, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"/);
@@ -238,7 +238,7 @@ assert.match(mobileSyncScript, /--mobile-sync-only/);
   "Gemma4_12B_All_Start.bat",
 ].forEach((path) => {
   const launcher = fs.readFileSync(path, "utf8");
-  assert.match(launcher, /0\.8\.205/, `${path} should use the current app version`);
+  assert.match(launcher, /0\.8\.206/, `${path} should use the current app version`);
   assert.doesNotMatch(launcher, /0\.8\.196/, `${path} should not pin the old app version`);
 });
 
