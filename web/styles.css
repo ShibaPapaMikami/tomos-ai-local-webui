@@ -826,6 +826,28 @@ h1 {
   font-weight: 700;
 }
 
+.context-memory-body {
+  gap: 14px;
+}
+
+.context-memory-toolbar,
+.context-memory-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.context-memory-list {
+  display: grid;
+  gap: 10px;
+}
+
+.context-memory-card textarea {
+  min-height: 86px;
+  resize: vertical;
+}
+
 .contract-template-row,
 .contract-actions,
 .contract-card-actions,

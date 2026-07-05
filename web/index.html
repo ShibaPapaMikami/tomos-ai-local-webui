@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=0.8.206-tomos1" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.206-tomos2" />
   </head>
   <body>
     <div class="app-shell">
@@ -56,6 +56,7 @@
             <span data-i18n="management.extensions">拡張</span>
             <button class="ghost-button" id="study-packs-toggle" type="button" data-i18n="management.studyPacks">教材パック</button>
             <button class="ghost-button" id="training-panel-toggle" type="button" data-i18n="management.trainingSets">学習セット</button>
+            <button class="ghost-button" id="context-memory-toggle" type="button" data-i18n="management.contextMemory">追懐</button>
             <button class="ghost-button" id="plugins-toggle" type="button" data-i18n="management.plugins">プラグイン</button>
           </div>
           <div class="sidebar-settings-group" id="apps-group" hidden>
@@ -374,6 +375,24 @@
             <button class="ghost-button" id="training-management-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
           <div class="management-panel-body" id="training-management-body"></div>
+        </section>
+
+        <section class="management-panel" id="context-memory-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.contextMemory">追懐</strong>
+              <span data-i18n="management.contextMemoryHelp">このPCに保存されたAIの記憶を確認、編集、削除します。</span>
+            </div>
+            <button class="ghost-button" id="context-memory-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="management-note" data-i18n="management.contextMemoryNote">追懐はローカル保存です。不要な内容や誤った内容は削除してください。</div>
+          <div class="management-panel-body context-memory-body">
+            <div class="context-memory-toolbar">
+              <button class="ghost-button" id="context-memory-refresh" type="button" data-i18n="management.contextMemoryRefresh">再読み込み</button>
+              <small id="context-memory-status" data-i18n="management.contextMemoryIdle">未読み込み</small>
+            </div>
+            <div class="context-memory-list" id="context-memory-list"></div>
+          </div>
         </section>
 
         <section class="management-panel" id="mobile-connect-panel" hidden>
@@ -1071,28 +1090,28 @@
       </section>
     </div>
 
-  <script src="/i18n.js?v=0.8.206-tomos1"></script>
-  <script src="/utils.js?v=0.8.206-tomos1"></script>
-  <script src="/translation.js?v=0.8.206-tomos1"></script>
-  <script src="/local-tools.js?v=0.8.206-tomos1"></script>
-  <script src="/weather.js?v=0.8.206-tomos1"></script>
-  <script src="/image-tools.js?v=0.8.206-tomos1"></script>
-  <script src="/asr.js?v=0.8.206-tomos1"></script>
-  <script src="/attachments.js?v=0.8.206-tomos1"></script>
-  <script src="/composer.js?v=0.8.206-tomos1"></script>
-  <script src="/workspace.js?v=0.8.206-tomos1"></script>
-  <script src="/training.js?v=0.8.206-tomos1"></script>
-  <script src="/tomos-character-core.js?v=0.8.206-tomos1"></script>
-  <script src="/character-core-adapter.js?v=0.8.206-tomos1"></script>
-  <script src="/character.js?v=0.8.206-tomos1"></script>
-  <script src="/models.js?v=0.8.206-tomos1"></script>
-  <script src="/messages.js?v=0.8.206-tomos1"></script>
-  <script src="/sidebar.js?v=0.8.206-tomos1"></script>
-  <script src="/settings.js?v=0.8.206-tomos1"></script>
-  <script src="/management.js?v=0.8.206-tomos1"></script>
-  <script src="/router.js?v=0.8.206-tomos1"></script>
-  <script src="/search.js?v=0.8.206-tomos1"></script>
-  <script src="/pwa.js?v=0.8.206-tomos1"></script>
-  <script src="/app.js?v=0.8.206-tomos1"></script>
+  <script src="/i18n.js?v=0.8.206-tomos2"></script>
+  <script src="/utils.js?v=0.8.206-tomos2"></script>
+  <script src="/translation.js?v=0.8.206-tomos2"></script>
+  <script src="/local-tools.js?v=0.8.206-tomos2"></script>
+  <script src="/weather.js?v=0.8.206-tomos2"></script>
+  <script src="/image-tools.js?v=0.8.206-tomos2"></script>
+  <script src="/asr.js?v=0.8.206-tomos2"></script>
+  <script src="/attachments.js?v=0.8.206-tomos2"></script>
+  <script src="/composer.js?v=0.8.206-tomos2"></script>
+  <script src="/workspace.js?v=0.8.206-tomos2"></script>
+  <script src="/training.js?v=0.8.206-tomos2"></script>
+  <script src="/tomos-character-core.js?v=0.8.206-tomos2"></script>
+  <script src="/character-core-adapter.js?v=0.8.206-tomos2"></script>
+  <script src="/character.js?v=0.8.206-tomos2"></script>
+  <script src="/models.js?v=0.8.206-tomos2"></script>
+  <script src="/messages.js?v=0.8.206-tomos2"></script>
+  <script src="/sidebar.js?v=0.8.206-tomos2"></script>
+  <script src="/settings.js?v=0.8.206-tomos2"></script>
+  <script src="/management.js?v=0.8.206-tomos2"></script>
+  <script src="/router.js?v=0.8.206-tomos2"></script>
+  <script src="/search.js?v=0.8.206-tomos2"></script>
+  <script src="/pwa.js?v=0.8.206-tomos2"></script>
+  <script src="/app.js?v=0.8.206-tomos2"></script>
 </body>
 </html>

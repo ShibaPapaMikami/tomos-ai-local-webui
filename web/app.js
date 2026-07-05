@@ -110,6 +110,7 @@ const state = {
   pendingFiles: [],
   correctionDraft: null,
   memoryCandidate: null,
+  contextMemoryRecords: [],
 };
 
 let stopMicLevelMonitor = null;
@@ -328,6 +329,12 @@ const els = {
   trainingManagementPanel: document.querySelector("#training-management-panel"),
   trainingManagementClose: document.querySelector("#training-management-close"),
   trainingManagementBody: document.querySelector("#training-management-body"),
+  contextMemoryToggle: document.querySelector("#context-memory-toggle"),
+  contextMemoryPanel: document.querySelector("#context-memory-panel"),
+  contextMemoryClose: document.querySelector("#context-memory-close"),
+  contextMemoryRefresh: document.querySelector("#context-memory-refresh"),
+  contextMemoryStatus: document.querySelector("#context-memory-status"),
+  contextMemoryList: document.querySelector("#context-memory-list"),
   pluginsToggle: document.querySelector("#plugins-toggle"),
   pluginsPanel: document.querySelector("#plugins-panel"),
   pluginsClose: document.querySelector("#plugins-close"),
@@ -435,6 +442,89 @@ function t(key, params = {}) {
     text = text.replaceAll(`{${name}}`, String(value));
   }
   return text;
+}
+
+function contextMemoryScope() {
+  return {
+    scopeType: "user",
+    scopeId: "local",
+  };
+}
+
+function setContextMemoryStatus(text) {
+  if (els.contextMemoryStatus) els.contextMemoryStatus.textContent = text || "";
+}
+
+async function contextMemoryApi(path, options = {}) {
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || data.reason || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+function renderContextMemoryPanel() {
+  window.GEMMA_MANAGEMENT?.renderContextMemoryList?.({
+    els,
+    records: state.contextMemoryRecords,
+    t,
+  });
+}
+
+async function loadContextMemory() {
+  if (!els.contextMemoryList) return;
+  const scope = contextMemoryScope();
+  setContextMemoryStatus(t("management.contextMemoryLoading"));
+  try {
+    const query = new URLSearchParams(scope);
+    const data = await contextMemoryApi(`/api/context/memory/list?${query.toString()}`);
+    state.contextMemoryRecords = Array.isArray(data.records) ? data.records : [];
+    renderContextMemoryPanel();
+    setContextMemoryStatus(t("management.contextMemoryLoaded", { count: state.contextMemoryRecords.length }));
+  } catch (error) {
+    setContextMemoryStatus(t("management.contextMemoryError", { error: error.message }));
+  }
+}
+
+async function saveContextMemoryRecord(recordId) {
+  const textarea = els.contextMemoryList?.querySelector(`[data-context-memory-text="${CSS.escape(recordId)}"]`);
+  if (!textarea) return;
+  try {
+    const data = await contextMemoryApi("/api/context/memory/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: recordId,
+        updates: {
+          text: textarea.value,
+          snippet: textarea.value,
+        },
+      }),
+    });
+    state.contextMemoryRecords = state.contextMemoryRecords.map((record) => (
+      record.id === recordId ? data.record : record
+    ));
+    renderContextMemoryPanel();
+    setContextMemoryStatus(t("management.contextMemorySaved"));
+  } catch (error) {
+    setContextMemoryStatus(t("management.contextMemoryError", { error: error.message }));
+  }
+}
+
+async function forgetContextMemoryRecord(recordId) {
+  try {
+    await contextMemoryApi("/api/context/memory/forget", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: recordId, reason: "user_deleted_from_ui" }),
+    });
+    state.contextMemoryRecords = state.contextMemoryRecords.filter((record) => record.id !== recordId);
+    renderContextMemoryPanel();
+    setContextMemoryStatus(t("management.contextMemoryForgot"));
+  } catch (error) {
+    setContextMemoryStatus(t("management.contextMemoryError", { error: error.message }));
+  }
 }
 
 function applyI18n() {
@@ -6928,6 +7018,9 @@ window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
     if (target === "pc-diagnostics") {
       window.requestAnimationFrame(() => els.pcDiagnostics?.scrollIntoView({ block: "center" }));
     }
+    if (target === "context-memory") {
+      loadContextMemory();
+    }
   },
   onOpenWorkspace: openWorkspaceForPlugin,
   onMobileImport: importMobileChatJson,
@@ -6951,6 +7044,18 @@ els.pcDiagnostics?.addEventListener("click", (event) => {
   button.disabled = true;
   button.textContent = state.language === "en" ? "Checking..." : "診断中...";
   checkHealth();
+});
+els.contextMemoryRefresh?.addEventListener("click", loadContextMemory);
+els.contextMemoryList?.addEventListener("click", (event) => {
+  const saveButton = event.target.closest("[data-context-memory-save]");
+  if (saveButton) {
+    saveContextMemoryRecord(saveButton.dataset.contextMemorySave || "");
+    return;
+  }
+  const forgetButton = event.target.closest("[data-context-memory-forget]");
+  if (forgetButton) {
+    forgetContextMemoryRecord(forgetButton.dataset.contextMemoryForget || "");
+  }
 });
 els.modelInstaller.addEventListener("change", (event) => {
   const toggle = event.target.closest("[data-experimental-models-toggle]");

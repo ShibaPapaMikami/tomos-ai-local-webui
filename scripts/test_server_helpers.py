@@ -444,6 +444,136 @@ def test_workspace_context_instructs_source_citation() -> None:
         assert "検索結果にない内容は推測せず" in context
 
 
+def test_workspace_context_uses_context_record_adapter_for_knowledge() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        db_path = Path(tmp) / "knowledge.sqlite"
+        previous_db_path = server.KNOWLEDGE_DB_PATH
+        try:
+            server.KNOWLEDGE_DB_PATH = db_path
+            (root / "memo.md").write_text("教材パックの確認は本日中に行います。\n", encoding="utf-8")
+            server.index_knowledge_folder(
+                db_path=db_path,
+                folder_id="folder-1",
+                root_path=root,
+                extract_text=server.extract_knowledge_text,
+            )
+            context = server.build_workspace_context({
+                "root": str(root),
+                "files": [],
+                "folderId": "folder-1",
+                "knowledge": True,
+                "searchQuery": "教材パック",
+            })
+        finally:
+            server.KNOWLEDGE_DB_PATH = previous_db_path
+
+    assert "ローカル資料から取得した文脈" in context
+    assert "memo.md" in context
+    assert "教材パック" in context
+    assert "SQLite索引" in context
+
+
+def test_context_memory_payloads_save_list_and_forget() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "context.sqlite"
+        previous_context_db = server.CONTEXT_DB_PATH
+        try:
+            server.CONTEXT_DB_PATH = db_path
+            saved = server.context_memory_save_payload({
+                "item": {
+                    "text": "ユーザーは短い箇条書きを好む",
+                    "memoryType": "preference",
+                    "sourceType": "manual",
+                    "sourceId": "manual-1",
+                },
+                "scope": {
+                    "scopeType": "folder",
+                    "scopeId": "folder-1",
+                    "ownerType": "user",
+                    "ownerId": "local-user",
+                },
+            })
+            assert saved["ok"] is True
+            assert saved["record"]["metadata"]["memoryType"] == "preference"
+
+            listed = server.context_memory_list_payload({"scopeType": "folder", "scopeId": "folder-1"})
+            assert listed["ok"] is True
+            assert len(listed["records"]) == 1
+            assert listed["records"][0]["snippet"] == "ユーザーは短い箇条書きを好む"
+
+            forgotten = server.context_memory_forget_payload({"id": saved["record"]["id"], "reason": "不要"})
+            assert forgotten["ok"] is True
+            assert forgotten["record"]["status"] == "deleted"
+
+            after = server.context_memory_list_payload({"scopeType": "folder", "scopeId": "folder-1"})
+            assert after["records"] == []
+        finally:
+            server.CONTEXT_DB_PATH = previous_context_db
+
+
+def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "context.sqlite"
+        previous_context_db = server.CONTEXT_DB_PATH
+        try:
+            server.CONTEXT_DB_PATH = db_path
+            server.context_memory_save_payload({
+                "item": {
+                    "text": "ユーザーは短い箇条書きを好む",
+                    "memoryType": "preference",
+                    "sourceType": "manual",
+                    "sourceId": "manual-1",
+                },
+                "scope": {"scopeType": "folder", "scopeId": "folder-1"},
+            })
+            server.context_memory_save_payload({
+                "item": {
+                    "text": "今日は追懐機能の実装を進めた",
+                    "memoryType": "activity",
+                    "sourceType": "chat",
+                    "sourceId": "message-1",
+                },
+                "scope": {"scopeType": "folder", "scopeId": "folder-1"},
+            })
+            payload = server.context_memory_profile_payload({"scopeType": "folder", "scopeId": "folder-1"})
+        finally:
+            server.CONTEXT_DB_PATH = previous_context_db
+
+    assert payload["ok"] is True
+    assert payload["stableFacts"][0]["snippet"] == "ユーザーは短い箇条書きを好む"
+    assert payload["recentActivities"][0]["snippet"] == "今日は追懐機能の実装を進めた"
+
+
+def test_context_memory_update_payload_updates_saved_memory() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "context.sqlite"
+        previous_context_db = server.CONTEXT_DB_PATH
+        try:
+            server.CONTEXT_DB_PATH = db_path
+            saved = server.context_memory_save_payload({
+                "item": {
+                    "text": "ユーザーは短い箇条書きを好む",
+                    "memoryType": "preference",
+                    "sourceType": "manual",
+                    "sourceId": "manual-1",
+                },
+                "scope": {"scopeType": "folder", "scopeId": "folder-1"},
+            })
+            updated = server.context_memory_update_payload({
+                "id": saved["record"]["id"],
+                "text": "ユーザーは短く具体的な箇条書きを好む",
+                "memoryType": "preference",
+            })
+            listed = server.context_memory_list_payload({"scopeType": "folder", "scopeId": "folder-1"})
+        finally:
+            server.CONTEXT_DB_PATH = previous_context_db
+
+    assert updated["ok"] is True
+    assert updated["record"]["snippet"] == "ユーザーは短く具体的な箇条書きを好む"
+    assert listed["records"][0]["snippet"] == "ユーザーは短く具体的な箇条書きを好む"
+
+
 def test_workspace_context_uses_codegraph_summary_when_ready() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -790,6 +920,10 @@ if __name__ == "__main__":
     test_pdf_text_falls_back_to_mdls()
     test_workspace_search_reads_pdf_text_with_mdls()
     test_workspace_context_instructs_source_citation()
+    test_workspace_context_uses_context_record_adapter_for_knowledge()
+    test_context_memory_payloads_save_list_and_forget()
+    test_context_memory_profile_payload_separates_stable_and_recent()
+    test_context_memory_update_payload_updates_saved_memory()
     test_workspace_context_uses_codegraph_summary_when_ready()
     test_workspace_search_capabilities_shape()
     test_external_llm_url_allows_only_localhost()

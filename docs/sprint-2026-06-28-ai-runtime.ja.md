@@ -505,6 +505,95 @@ PilotDeck本体コードは取り込まない。
 - 外部MCPの本格接続
 - ユーザー確認なしのファイル作成、変更、削除
 
+### Task 8: Supermemory参考のLocal Context Core設計
+
+目的: Supermemoryの「Memory + Profile + Hybrid Search + Connectorsを1つのContext APIで扱う」思想を参考にしつつ、TOMOSではローカルSQLite、原文根拠、Dating reality showへの再利用を優先した共通基盤を設計する。
+
+このタスクでは、Supermemory本体を直接導入しない。
+既存のKnowledge Layer MVPを壊さず、その上に載る次段の設計として扱う。
+
+#### まず作る設計メモ
+
+- [ ] `docs/local-context-core-roadmap.ja.md` を作る
+- [ ] `RAG`、`Memory`、`Profile`、`Graph`、`Context` の責務を分ける
+- [ ] `search()` / `remember()` / `forget()` / `profile()` / `context()` の最小APIを定義する
+- [ ] `scopeType`、`scopeId`、`ownerType`、`ownerId`、`visibility`、`projectId` を先に固定する
+- [ ] Entity/Relationより前に `ContextRecord` 共通型を定義する
+- [ ] 既存の `knowledge_layer.py`、キャラクター記憶、学習セット、契約書管理、CodeGraphとの接続点を書く
+- [ ] Dating reality showで再利用できる範囲と、使わない範囲を書く
+
+#### MVPの実装順
+
+1. 現状維持
+   - [ ] 既存のSQLite/n-gram資料検索MVPを壊さない
+   - [ ] 検索結果には `sourcePath`、`page`、`snippet`、`sourceType` を必ず残す
+   - [ ] 契約書や会社資料は、Graphだけで判断しない
+
+2. ContextRecord共通型を追加
+   - [ ] `ContextRecord` に `recordType`、`sourceType`、`sourceId`、`sourcePath`、`page`、`snippet`、`confidence`、`scope` を持たせる
+   - [ ] `deletedAt`、`deleteReason`、`hardDeleteEligible` を持たせる
+   - [ ] 既存DBはすぐ移行せず、adapterで共通形式へ変換する
+   - [ ] `context()` は削除済み、期限切れ、別scopeのrecordを返さない
+
+3. Entity抽出テーブルを追加
+   - [ ] 最初はSQLiteで `context_entities` を作る
+   - [ ] Entity typeは `person`、`company`、`project`、`document`、`contract`、`repository`、`character` から始める
+   - [ ] `name`、`aliases`、`sourceType`、`sourceId`、`confidence`、`scope` を持たせる
+   - [ ] LLM抽出ではなく、まずファイル名、契約書候補、CSV列、明示保存された記憶から作る
+
+4. Relation抽出テーブルを追加
+   - [ ] 最初はSQLiteで `context_relations` を作る
+   - [ ] Relation typeは `mentions`、`belongs_to`、`works_on`、`relates_to`、`source_of`、`supersedes` から始める
+   - [ ] Relationの向きは `fromEntityId -> relationType -> toEntityId` として固定する
+   - [ ] Relationには必ず `fromEntityId`、`toEntityId`、`relationType`、`sourceId`、`snippet`、`confidence`、`deletedAt` を持たせる
+   - [ ] 誤抽出を削除/無効化できるように `deletedAt`、`deleteReason`、`hardDeleteEligible` を持たせる
+
+5. Memory/Profileを分ける
+   - [ ] Memory typeは `fact`、`preference`、`activity`、`temporary` に分ける
+   - [ ] Memory statusは `active`、`expired`、`superseded`、`deleted`、`conflict` に分ける
+   - [ ] 期限付き記憶には `expiresAt` を持たせる
+   - [ ] 古い情報を上書きせず、`supersedes` で追跡する
+   - [ ] `profile()` は安定した事実と最近の活動を分けて返す
+   - [ ] `remember()` はセンシティブ情報を自動保存せず、保存前確認に回す
+
+6. Unified Context APIの薄い実装
+   - [ ] `search(query, scope)` はまずKnowledge Layer検索を呼ぶだけでよい
+   - [ ] `remember(item, scope)` は既存のキャラクター記憶/学習セット保存へ橋渡しするだけでよい
+   - [ ] `forget(id, reason)` は論理削除から始め、将来の物理削除候補として `hardDeleteEligible` を扱う
+   - [ ] `profile(scope)` はキャラクター記憶または学習セットから要約候補を返す
+   - [ ] `context(query, scope)` はAIへ渡す文脈を最小化する
+
+#### Dating reality showで使いやすくする条件
+
+- [ ] Context CoreはUI、Firebase、DB、LLM providerへ直接依存しない
+- [ ] Dating側では `@tomos-ai/character-core` と同じく、packageまたはadapterで受け取れる形にする
+- [ ] Dating側の対象はキャラクター記憶、口調候補、理想返答/NG返答、Prompt version、AI同士模擬チャット評価に限定する
+- [ ] 共通型を作る場合は `ContextEntity`、`ContextRelation`、`ContextMemory` のようにゲーム固有名を避ける
+
+#### やらないこと
+
+- [ ] Supermemory本体の組み込み
+- [ ] 外部Memory API依存
+- [ ] Neo4jなど重いGraph DBの導入
+- [ ] LLMによる全自動Entity抽出
+- [ ] Graphだけを根拠にした契約書判断
+- [ ] Dating側の本番DB/Firebase/AGO/決済への接続
+
+#### 受け入れ条件
+
+- [ ] `docs/local-context-core-roadmap.ja.md` に設計がまとまっている
+- [ ] Knowledge Layer MVPとの境界が明確
+- [ ] Graph導入がSQLiteから始まる
+- [ ] 原文根拠を必ず保持する方針が明記されている
+- [ ] scope定義が明記されている
+- [ ] Entity/Relationより前に `ContextRecord` が定義されている
+- [ ] `context()` は削除済み、期限切れ、別scopeの記憶を返さない
+- [ ] 契約書、会社資料の回答では必ず原文snippet/source/pageを返す
+- [ ] `profile()` は安定事実と最近の活動を混ぜない
+- [ ] `remember()` はセンシティブ情報を自動保存しない、または保存前確認に回す
+- [ ] Dating reality showで再利用する対象/しない対象が明記されている
+- [ ] 既存機能を壊す実装に進んでいない
+
 ## 学習パック制作担当向けタスク
 
 ### Task 1: MVV本文の社内確認

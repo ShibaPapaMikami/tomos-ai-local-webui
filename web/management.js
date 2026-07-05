@@ -218,6 +218,71 @@ window.GEMMA_MANAGEMENT = (() => {
     };
   }
 
+  function contextMemoryListModel({ records = [], t } = {}) {
+    return (records || [])
+      .filter((record) => String(record?.status || "active") === "active")
+      .sort((left, right) => Number(right?.updatedAt || right?.createdAt || 0) - Number(left?.updatedAt || left?.createdAt || 0))
+      .map((record) => ({
+        id: String(record?.id || ""),
+        text: String(record?.text || record?.snippet || "").trim(),
+        sourceType: String(record?.sourceType || "memory"),
+        memoryType: String(record?.memoryType || record?.metadata?.memoryType || ""),
+        status: String(record?.status || "active"),
+        statusLabel: t?.("management.contextMemoryStatusActive") || "有効",
+        canEdit: Boolean(record?.id),
+        canDelete: Boolean(record?.id),
+      }))
+      .filter((row) => row.id && row.text);
+  }
+
+  function renderContextMemoryList({ els, records = [], t } = {}) {
+    if (!els?.contextMemoryList) return;
+    const rows = contextMemoryListModel({ records, t });
+    els.contextMemoryList.replaceChildren();
+    if (rows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "management-note";
+      empty.textContent = t?.("management.contextMemoryEmpty") || "保存された追懐はありません。";
+      els.contextMemoryList.appendChild(empty);
+      return;
+    }
+    for (const row of rows) {
+      const card = document.createElement("article");
+      card.className = "management-card context-memory-card";
+      card.dataset.contextMemoryId = row.id;
+      const body = document.createElement("div");
+      const meta = document.createElement("small");
+      meta.textContent = row.memoryType
+        ? `${row.statusLabel} / ${row.memoryType}`
+        : row.statusLabel;
+      const textarea = document.createElement("textarea");
+      textarea.rows = 3;
+      textarea.value = row.text;
+      textarea.dataset.contextMemoryText = row.id;
+      body.appendChild(meta);
+      body.appendChild(textarea);
+      const actions = document.createElement("div");
+      actions.className = "context-memory-actions";
+      const save = document.createElement("button");
+      save.className = "ghost-button";
+      save.type = "button";
+      save.dataset.contextMemorySave = row.id;
+      save.disabled = !row.canEdit;
+      save.textContent = t?.("common.save") || "保存";
+      const remove = document.createElement("button");
+      remove.className = "ghost-button";
+      remove.type = "button";
+      remove.dataset.contextMemoryForget = row.id;
+      remove.disabled = !row.canDelete;
+      remove.textContent = t?.("management.contextMemoryForget") || "削除";
+      actions.appendChild(save);
+      actions.appendChild(remove);
+      card.appendChild(body);
+      card.appendChild(actions);
+      els.contextMemoryList.appendChild(card);
+    }
+  }
+
   function toggleStudyPackModeValue(selectedValues = [], value = "", checked = false) {
     const selected = new Set((selectedValues || []).filter(Boolean));
     if (checked) selected.add(value);
@@ -586,6 +651,7 @@ window.GEMMA_MANAGEMENT = (() => {
       els.characterPanel,
       els.studyPacksPanel,
       els.trainingManagementPanel,
+      els.contextMemoryPanel,
       els.pluginsPanel,
       els.contractsPanel,
       els.languageModelsPanel,
@@ -624,6 +690,7 @@ window.GEMMA_MANAGEMENT = (() => {
       els.characterPanel,
       els.studyPacksPanel,
       els.trainingManagementPanel,
+      els.contextMemoryPanel,
       els.pluginsPanel,
       els.contractsPanel,
       els.languageModelsPanel,
@@ -1106,6 +1173,15 @@ window.GEMMA_MANAGEMENT = (() => {
       syncManagementLayout({ els });
     });
 
+    els.contextMemoryToggle?.addEventListener("click", () => {
+      openManagementPanel({ els, panel: els.contextMemoryPanel });
+      onOpenSettings?.("context-memory");
+    });
+    els.contextMemoryClose?.addEventListener("click", () => {
+      if (els.contextMemoryPanel) els.contextMemoryPanel.hidden = true;
+      syncManagementLayout({ els });
+    });
+
     els.pluginsToggle?.addEventListener("click", () => openManagementPanel({ els, panel: els.pluginsPanel }));
     els.pluginsClose?.addEventListener("click", () => {
       if (els.pluginsPanel) els.pluginsPanel.hidden = true;
@@ -1168,6 +1244,8 @@ window.GEMMA_MANAGEMENT = (() => {
     studyPackMenuGroups,
     studyPackSelectionModel,
     studyPackMultiSelectionModel,
+    contextMemoryListModel,
+    renderContextMemoryList,
     toggleStudyPackModeValue,
     compactStudyPackPrompt,
     shouldApplyStudyPackForText,

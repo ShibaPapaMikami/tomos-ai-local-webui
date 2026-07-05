@@ -53,6 +53,15 @@ from knowledge_layer import (
     knowledge_status,
     search_knowledge,
 )
+from context_core import build_context as build_local_context
+from context_core import context_db_path
+from context_core import forget_context_record
+from context_core import knowledge_result_to_records
+from context_core import list_context_records
+from context_core import profile as context_profile
+from context_core import remember
+from context_core import save_context_record
+from context_core import update_context_record
 from contract_ledger import (
     default_contract_db_path,
     delete_contract,
@@ -71,6 +80,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
 KNOWLEDGE_DB_PATH = default_db_path(ROOT)
+CONTEXT_DB_PATH = context_db_path(ROOT)
 CONTRACT_DB_PATH = default_contract_db_path(ROOT)
 APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.206")
 GEMMA_BASE_MODEL = "gemma4:12b"
@@ -2873,39 +2883,56 @@ def build_workspace_context(workspace: dict) -> str:
             ) if use_knowledge else search_workspace_files(str(root_path), search_query)
             results = search_data.get("results", [])
             result_count = len(results) if isinstance(results, list) else 0
-            search_lines = [
-                "",
-                "--- 資料検索結果 ---" if use_knowledge else "--- フォルダー内検索結果 ---",
-                (
-                    "以下はユーザーのフォルダー内を検索した結果です。回答するときは、この結果から分かることだけを短く答えてください。"
-                    "本文一致の根拠は `path:line`、ファイル名一致の根拠は `path` だけで示してください。"
-                    "複数候補がある場合は、候補を2〜4件に絞って短い理由を並べてください。"
-                    "検索結果にない内容は推測せず、見つからないと伝えてください。"
-                ),
-                f"検索語: {search_query}",
-                (
-                    f"ヒット数: {result_count}件 / SQLite索引"
-                    if use_knowledge
-                    else f"ヒット数: {result_count}件 / 調査したファイル: {search_data.get('scanned', 0)}件 / スキップ: {search_data.get('skipped', 0)}件"
-                ),
-            ]
-            for item in results[:12]:
-                if not isinstance(item, dict):
-                    continue
-                path_value = item.get("path", "")
-                if use_knowledge:
-                    page = f" p.{item.get('page')}" if item.get("page") else ""
-                    heading = f" [{item.get('heading')}]" if item.get("heading") else ""
-                    search_lines.append(f"- {path_value}{page}{heading} {item.get('snippet', '')}")
-                elif item.get("matchType") == "filename":
-                    search_lines.append(f"- {path_value} (ファイル名一致) {item.get('preview', '')}")
-                else:
-                    search_lines.append(f"- {path_value}:{item.get('line', '')} {item.get('preview', '')}")
-            if not use_knowledge and search_data.get("truncated"):
-                search_lines.append("- 結果が多いため一部だけ表示しています。")
-            if not result_count:
-                search_lines.append("- 一致する文字は見つかりませんでした。")
-            parts.append("\n".join(search_lines))
+            if use_knowledge:
+                records = knowledge_result_to_records(
+                    search_data,
+                    scope_type="folder",
+                    scope_id=str(workspace.get("folderId", "")).strip(),
+                    owner_type="user",
+                    owner_id="local-user",
+                    project_id=str(workspace.get("projectId", "") or ""),
+                )
+                context_data = build_local_context(
+                    records,
+                    query=search_query,
+                    scope={"scopeType": "folder", "scopeId": str(workspace.get("folderId", "")).strip()},
+                    limit=8,
+                )
+                search_lines = [
+                    "",
+                    "--- 資料検索結果 ---",
+                    str(context_data.get("text") or ""),
+                    f"ヒット数: {result_count}件 / SQLite索引",
+                ]
+                if not result_count:
+                    search_lines.append("- 一致する文字は見つかりませんでした。")
+                parts.append("\n".join(line for line in search_lines if line))
+            else:
+                search_lines = [
+                    "",
+                    "--- フォルダー内検索結果 ---",
+                    (
+                        "以下はユーザーのフォルダー内を検索した結果です。回答するときは、この結果から分かることだけを短く答えてください。"
+                        "本文一致の根拠は `path:line`、ファイル名一致の根拠は `path` だけで示してください。"
+                        "複数候補がある場合は、候補を2〜4件に絞って短い理由を並べてください。"
+                        "検索結果にない内容は推測せず、見つからないと伝えてください。"
+                    ),
+                    f"検索語: {search_query}",
+                    f"ヒット数: {result_count}件 / 調査したファイル: {search_data.get('scanned', 0)}件 / スキップ: {search_data.get('skipped', 0)}件",
+                ]
+                for item in results[:12]:
+                    if not isinstance(item, dict):
+                        continue
+                    path_value = item.get("path", "")
+                    if item.get("matchType") == "filename":
+                        search_lines.append(f"- {path_value} (ファイル名一致) {item.get('preview', '')}")
+                    else:
+                        search_lines.append(f"- {path_value}:{item.get('line', '')} {item.get('preview', '')}")
+                if search_data.get("truncated"):
+                    search_lines.append("- 結果が多いため一部だけ表示しています。")
+                if not result_count:
+                    search_lines.append("- 一致する文字は見つかりませんでした。")
+                parts.append("\n".join(search_lines))
         except Exception as exc:
             parts.append(f"\n--- フォルダー内検索結果 ---\n[検索に失敗しました: {exc}]")
     used = sum(len(part) for part in parts)
@@ -2927,6 +2954,62 @@ def build_workspace_context(workspace: dict) -> str:
         parts.append(block)
         used += len(block)
     return "\n".join(parts)
+
+
+def context_memory_list_payload(query: dict[str, object]) -> dict[str, object]:
+    include_inactive = str(query.get("includeInactive") or "").lower() in {"1", "true", "yes"}
+    records = list_context_records(
+        CONTEXT_DB_PATH,
+        scope={
+            "scopeType": str(query.get("scopeType") or ""),
+            "scopeId": str(query.get("scopeId") or ""),
+        },
+        include_inactive=include_inactive,
+    )
+    return {
+        "ok": True,
+        "records": [record.to_dict() for record in records],
+    }
+
+
+def context_memory_profile_payload(query: dict[str, object]) -> dict[str, object]:
+    scope = {
+        "scopeType": str(query.get("scopeType") or ""),
+        "scopeId": str(query.get("scopeId") or ""),
+    }
+    records = list_context_records(CONTEXT_DB_PATH, scope=scope)
+    return context_profile(records, scope=scope)
+
+
+def context_memory_save_payload(body: dict[str, object]) -> dict[str, object]:
+    item = body.get("item") if isinstance(body.get("item"), dict) else body
+    scope = body.get("scope") if isinstance(body.get("scope"), dict) else {
+        "scopeType": body.get("scopeType", ""),
+        "scopeId": body.get("scopeId", ""),
+        "ownerType": body.get("ownerType", "user"),
+        "ownerId": body.get("ownerId", "local"),
+        "projectId": body.get("projectId", ""),
+    }
+    result = remember(item if isinstance(item, dict) else {}, scope=scope)
+    if not result.get("ok"):
+        return result
+    save_context_record(CONTEXT_DB_PATH, result["record"])
+    return result
+
+
+def context_memory_forget_payload(body: dict[str, object]) -> dict[str, object]:
+    record_id = str(body.get("id") or "").strip()
+    if not record_id:
+        return {"ok": False, "error": "id is required"}
+    return forget_context_record(CONTEXT_DB_PATH, record_id, reason=str(body.get("reason") or ""))
+
+
+def context_memory_update_payload(body: dict[str, object]) -> dict[str, object]:
+    record_id = str(body.get("id") or "").strip()
+    if not record_id:
+        return {"ok": False, "error": "id is required"}
+    updates = body.get("updates") if isinstance(body.get("updates"), dict) else body
+    return update_context_record(CONTEXT_DB_PATH, record_id, updates if isinstance(updates, dict) else {})
 
 
 def object_choice(object_info: dict, node: str, field: str, fallback: str) -> list[str]:
@@ -3764,6 +3847,21 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/knowledge/status":
             self.handle_knowledge_status(parsed.query)
             return
+        if parsed.path == "/api/context/memory/list":
+            query = urllib.parse.parse_qs(parsed.query)
+            json_response(self, 200, context_memory_list_payload({
+                "scopeType": (query.get("scopeType") or [""])[0],
+                "scopeId": (query.get("scopeId") or [""])[0],
+                "includeInactive": (query.get("includeInactive") or [""])[0],
+            }))
+            return
+        if parsed.path == "/api/context/memory/profile":
+            query = urllib.parse.parse_qs(parsed.query)
+            json_response(self, 200, context_memory_profile_payload({
+                "scopeType": (query.get("scopeType") or [""])[0],
+                "scopeId": (query.get("scopeId") or [""])[0],
+            }))
+            return
         if parsed.path == "/api/contracts/list":
             self.handle_contracts_list(parsed.query)
             return
@@ -3893,6 +3991,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/api/knowledge/"):
             self.handle_knowledge()
+            return
+        if self.path == "/api/context/memory/save":
+            try:
+                payload = context_memory_save_payload(read_json_body(self))
+                json_response(self, 200 if payload.get("ok") else 400, payload)
+            except Exception as exc:
+                json_response(self, 500, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/context/memory/forget":
+            try:
+                payload = context_memory_forget_payload(read_json_body(self))
+                json_response(self, 200 if payload.get("ok") else 400, payload)
+            except Exception as exc:
+                json_response(self, 500, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/context/memory/update":
+            try:
+                payload = context_memory_update_payload(read_json_body(self))
+                json_response(self, 200 if payload.get("ok") else 400, payload)
+            except Exception as exc:
+                json_response(self, 500, {"ok": False, "error": str(exc)})
             return
         if self.path.startswith("/api/contracts/"):
             self.handle_contracts()

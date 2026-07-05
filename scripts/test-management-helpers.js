@@ -41,6 +41,7 @@ const {
   renderPluginsPanel,
   togglePluginCandidate,
   studyPackById,
+  contextMemoryListModel,
 } = context.window.GEMMA_MANAGEMENT;
 
 const els = {
@@ -48,6 +49,7 @@ const els = {
   mobileConnectPanel: { hidden: true },
   studyPacksPanel: { hidden: true },
   trainingManagementPanel: { hidden: true },
+  contextMemoryPanel: { hidden: true },
   pluginsPanel: { hidden: true },
 };
 const state = { workspaceOpen: true };
@@ -77,6 +79,10 @@ openManagementPanel({ els, panel: els.studyPacksPanel });
 assert.equal(els.mobileConnectPanel.hidden, true);
 assert.equal(els.pluginsPanel.hidden, true);
 assert.equal(els.studyPacksPanel.hidden, false);
+
+openManagementPanel({ els, panel: els.contextMemoryPanel });
+assert.equal(els.studyPacksPanel.hidden, true);
+assert.equal(els.contextMemoryPanel.hidden, false);
 
 const labels = {
   "management.add": "追加",
@@ -197,8 +203,8 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.206-tomos1"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.206-tomos1"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.206-tomos2"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.206-tomos2"/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);
@@ -211,6 +217,11 @@ assert.match(indexHtml, /id="mobile-connect-toggle"[^>]*disabled/);
 assert.match(indexHtml, /class="ghost-button is-testing" id="mobile-connect-toggle"/);
 assert.match(indexHtml, /data-i18n="management\.mobileConnectTesting"/);
 assert.match(i18nJs, /"management\.mobileConnectTesting": "スマホ接続（テスト中）"/);
+assert.match(indexHtml, /id="context-memory-toggle"/);
+assert.match(indexHtml, /id="context-memory-panel"/);
+assert.match(indexHtml, /id="context-memory-list"/);
+assert.match(indexHtml, /id="context-memory-refresh"/);
+assert.match(indexHtml, /data-i18n="management\.contextMemory"/);
 assert.match(stylesCss, /\.sidebar-settings-menu \.ghost-button:disabled/);
 assert.match(stylesCss, /\.sidebar-settings-menu \.ghost-button\.is-testing:disabled/);
 assert.match(indexHtml, /id="mobile-connect-panel"/);
@@ -258,6 +269,33 @@ assert.match(indexHtml, /class="contract-section-title"/);
 assert.doesNotMatch(indexHtml, /id="contracts-extract"/);
 assert.match(indexHtml, /class="contract-pdf-import-status-row"/);
 assert.match(indexHtml, /class="contract-pdf-import-button-row contract-import-action-row"/);
+
+const contextMemoryRows = contextMemoryListModel({
+  records: [
+    {
+      id: "mem-1",
+      text: "ユーザーは短い返信を好む",
+      sourceType: "memory",
+      memoryType: "preference",
+      status: "active",
+      updatedAt: 100,
+      createdAt: 100,
+    },
+    {
+      id: "mem-2",
+      text: "削除済み",
+      sourceType: "memory",
+      status: "deleted",
+      createdAt: 90,
+    },
+  ],
+  t,
+});
+assert.equal(contextMemoryRows.length, 1);
+assert.equal(contextMemoryRows[0].id, "mem-1");
+assert.equal(contextMemoryRows[0].canEdit, true);
+assert.equal(contextMemoryRows[0].canDelete, true);
+assert.equal(contextMemoryRows[0].text, "ユーザーは短い返信を好む");
 assert.match(indexHtml, /class="ghost-button contract-import-action-button"[\s\S]{0,120}id="contract-pdf-import-pick-pdf"/);
 assert.match(indexHtml, /class="ghost-button contract-import-action-button"[\s\S]{0,120}id="contract-pdf-import-auto"/);
 assert.match(indexHtml, /id="contracts-gap-check"/);
