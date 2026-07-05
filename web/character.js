@@ -71,6 +71,11 @@ window.GEMMA_CHARACTER = (() => {
       .replace(/^ユーザーは(.{1,24})は(.{1,36})が(好き|苦手)$/u, "$1は$2が$3");
   }
 
+  function memorySensitivity(text, sensitivity = "") {
+    if (String(sensitivity || "").trim() === "protected") return "protected";
+    return isSensitiveMemoryText(text) ? "protected" : "normal";
+  }
+
   function normalizeMemorySet(set = {}, character = DEFAULT_CHARACTER) {
     const memories = Array.isArray(set.memories) ? set.memories : [];
     return {
@@ -88,6 +93,7 @@ window.GEMMA_CHARACTER = (() => {
         updatedAt: memory.updatedAt || memory.createdAt || new Date().toISOString(),
         tags: Array.isArray(memory.tags) ? memory.tags : [],
         pinned: Boolean(memory.pinned),
+        sensitivity: memorySensitivity(memory.text, memory.sensitivity),
       })).filter((memory) => memory.text),
     };
   }
@@ -158,14 +164,23 @@ window.GEMMA_CHARACTER = (() => {
     return `${basePrompt}${adapter.formatPromptAddition?.(addition) || ""}`;
   }
 
-  function buildMemorySystemPrompt(memorySet) {
-    const memories = Array.isArray(memorySet?.memories) ? memorySet.memories.filter((memory) => memory.text).slice(-12) : [];
+  function buildMemorySystemPrompt(memorySet, options = {}) {
+    const includeProtected = Boolean(options?.includeProtected);
+    const memories = Array.isArray(memorySet?.memories)
+      ? memorySet.memories
+        .filter((memory) => memory.text && (includeProtected || memory.sensitivity !== "protected"))
+        .slice(-12)
+      : [];
     if (!memories.length) return "";
-    return `\n\nキャラクター記憶:\n${memories.map((memory) => `- ${memory.text}`).join("\n")}\n記憶はユーザー支援のヒントです。根拠のない事実を補完しないでください。`;
+    const label = includeProtected ? "キャラクター記憶（保護された記憶を含む）" : "キャラクター記憶";
+    const caution = includeProtected
+      ? "保護された記憶は、ユーザーが必要だと分かる場面でだけ参照してください。"
+      : "";
+    return `\n\n${label}:\n${memories.map((memory) => `- ${memory.text}`).join("\n")}\n記憶はユーザー支援のヒントです。根拠のない事実を補完しないでください。${caution}`;
   }
 
   function isSensitiveMemoryText(text) {
-    return /(パスワード|api\s*キー|api[_ -]?key|住所|電話番号|クレカ|カード番号|銀行|認証|secret|token|暗証番号|マイナンバー|保険証|病気|診断|家族|恋人|性的|sexual|password|credit card|bank)/i.test(String(text || ""));
+    return /(パスワード|api\s*キー|api[_ -]?key|住所|電話番号|クレカ|カード番号|銀行|認証|secret|token|暗証番号|マイナンバー|保険証|病気|診断|家族|恋人|性的|社外秘|機密|契約|金額|見積|請求|未公開|案件名|会社名|取引先|顧客|url|https?:\/\/|sexual|password|credit card|bank)/i.test(String(text || ""));
   }
 
   function explicitMemoryCandidateFromText(text) {
@@ -173,15 +188,13 @@ window.GEMMA_CHARACTER = (() => {
     if (!value || !/(覚えて|おぼえて|記憶して|保存しておいて)/.test(value)) return null;
     const cleaned = value
       .replace(/^(これを|これ|以下を|次を)?\s*(覚えて|おぼえて|記憶して|保存しておいて)[：:\s]*/u, "")
-      .replace(/[。.!！]?\s*(覚えて|おぼえて|記憶して|保存しておいて)[。.!！]?$/u, "")
+      .replace(/[。.!！]?\s*(を)?(覚えて|おぼえて|記憶して|保存しておいて)[。.!！]?$/u, "")
       .trim();
     const textValue = cleaned || value;
-    if (isSensitiveMemoryText(textValue)) {
-      return null;
-    }
     return {
       id: crypto.randomUUID(),
       text: textValue,
+      sensitivity: memorySensitivity(textValue),
     };
   }
 
@@ -218,6 +231,14 @@ window.GEMMA_CHARACTER = (() => {
       {
         pattern: /(英検|受験|試験|テスト|レポート|宿題|課題|Python|JavaScript|数学|英語|国語|理科|社会).{0,24}(勉強|学習|練習|提出|取り組ん)/u,
         build: (match) => `ユーザーは${match[1].trim()}に取り組んでいる`,
+      },
+      {
+        pattern: /(Web検索|ウェブ検索|翻訳|画像生成|音声入力|読み上げ|コード生成).{0,20}(よく使う|使うことが多い|使いたい)/u,
+        build: (match) => `ユーザーは${match[1].trim()}をよく使う`,
+      },
+      {
+        pattern: /(メール|Slack|報告文|依頼文|文章).{0,18}(短め|丁寧|自然|やわらかく|具体的).{0,12}(して|整えて|書いて|リライト)/u,
+        build: (match) => `ユーザーは${match[1].trim()}を${match[2].trim()}に整えることを好む`,
       },
     ];
     for (const rule of rules) {
@@ -294,10 +315,11 @@ window.GEMMA_CHARACTER = (() => {
       memoryType: characterMemoryType(memory),
       sourceType: "character",
       sourceId: memoryId,
+      sensitivity: memorySensitivity(text, memory?.sensitivity),
     };
   }
 
-  function addMemory({ memorySets, character, text, sourceSessionId = "", sourceFolderId = "", createId = () => crypto.randomUUID(), nowIso = () => new Date().toISOString() }) {
+  function addMemory({ memorySets, character, text, sourceSessionId = "", sourceFolderId = "", sensitivity = "", createId = () => crypto.randomUUID(), nowIso = () => new Date().toISOString() }) {
     const value = normalizeMemoryText(text);
     if (!value) return memorySets;
     const nextSets = (Array.isArray(memorySets) && memorySets.length ? memorySets : loadMemorySets(character))
@@ -316,6 +338,7 @@ window.GEMMA_CHARACTER = (() => {
       updatedAt: now,
       tags: [],
       pinned: false,
+      sensitivity: memorySensitivity(value, sensitivity),
     });
     return saveMemorySets(nextSets);
   }

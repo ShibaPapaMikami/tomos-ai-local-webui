@@ -285,7 +285,8 @@ def remember(item: dict[str, object], *, scope: dict[str, object] | None = None)
     text = str(item.get("text") or "").strip() if isinstance(item, dict) else ""
     if not text:
         return {"ok": False, "error": "記憶する内容がありません。"}
-    if contains_sensitive_text(text):
+    item_sensitivity = str(item.get("sensitivity") or "").strip() if isinstance(item, dict) else ""
+    if contains_sensitive_text(text) and item_sensitivity != "protected":
         return {
             "ok": False,
             "needsReview": True,
@@ -320,6 +321,7 @@ def remember(item: dict[str, object], *, scope: dict[str, object] | None = None)
             "memoryType": memory_type,
             "sourceType": source_type,
             "sourceId": source_id,
+            "sensitivity": item_sensitivity or "normal",
         },
     )
     return {"ok": True, "record": record.to_dict()}

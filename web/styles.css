@@ -1773,6 +1773,12 @@ h1 {
   padding: 2px 7px;
 }
 
+.memory-tag.protected {
+  border-color: var(--danger);
+  background: var(--panel-soft);
+  color: var(--danger);
+}
+
 .character-memory-item textarea {
   width: 100%;
   min-height: 44px;

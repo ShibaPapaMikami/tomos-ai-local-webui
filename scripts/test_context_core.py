@@ -149,6 +149,20 @@ with tempfile.TemporaryDirectory() as tmp:
     assert sensitive["needsReview"] is True
     assert "センシティブ" in sensitive["reason"]
 
+    protected = remember(
+        {
+            "id": "character:character-memory-default:protected-1",
+            "text": "APIキーは sk-123456 です",
+            "memoryType": "fact",
+            "sourceType": "character",
+            "sourceId": "protected-1",
+            "sensitivity": "protected",
+        },
+        scope={"scopeType": "character", "scopeId": "character-memory-default", "ownerType": "character", "ownerId": "default-character"},
+    )
+    assert protected["ok"] is True
+    assert protected["record"]["metadata"]["sensitivity"] == "protected"
+
     character_memory = remember(
         {
             "id": "character:character-memory-default:memory-1",

@@ -114,6 +114,7 @@ const state = {
 };
 
 let stopMicLevelMonitor = null;
+let noticeTimer = null;
 
 const WORKSPACE_PLAN_TIMEOUT_MS = 120000;
 const WORKSPACE_FILE_TIMEOUT_MS = 300000;
@@ -2417,13 +2418,15 @@ function activeCharacterMemorySet() {
 function characterContextSystemPrompt() {
   const memorySet = activeCharacterMemorySet();
   const session = activeSession();
+  const lastUserMessage = [...(session?.messages || [])].reverse().find((message) => message.role === "user");
+  const includeProtectedMemory = /保護された記憶|機密の記憶|社外秘の記憶|protected memory/i.test(String(lastUserMessage?.content || ""));
   const characterPrompt = window.GEMMA_CHARACTER?.buildCharacterSystemPrompt?.(state.character, {
     memorySet,
     recentMessages: Array.isArray(session?.messages) ? session.messages : [],
   }) || "";
   const memoryPrompt = state.character?.memoryMode === "off"
     ? ""
-    : (window.GEMMA_CHARACTER?.buildMemorySystemPrompt?.(memorySet) || "");
+    : (window.GEMMA_CHARACTER?.buildMemorySystemPrompt?.(memorySet, { includeProtected: includeProtectedMemory }) || "");
   return `${characterPrompt}${memoryPrompt}`;
 }
 
@@ -2600,6 +2603,8 @@ function characterizeToolAnswer(answer, { type = "" } = {}) {
 function characterMemoryCategories() {
   return [
     { id: "all", label: t("character.memoryCategoryAll") },
+    { id: "normal", label: t("character.memoryCategoryNormal") },
+    { id: "protected", label: t("character.memoryCategoryProtected") },
     { id: "profile", label: t("character.memoryCategoryProfile") },
     { id: "preference", label: t("character.memoryCategoryPreference") },
     { id: "study", label: t("character.memoryCategoryStudy") },
@@ -2617,8 +2622,13 @@ function renderCharacterMemoryFilters(memories) {
     const category = classifyCharacterMemory(memory);
     acc[category] = (acc[category] || 0) + 1;
     acc.all += 1;
+    if (memory.sensitivity === "protected") {
+      acc.protected += 1;
+    } else {
+      acc.normal += 1;
+    }
     return acc;
-  }, { all: 0, profile: 0, preference: 0, study: 0, settings: 0 });
+  }, { all: 0, normal: 0, protected: 0, profile: 0, preference: 0, study: 0, settings: 0 });
   els.characterMemoryFilters.innerHTML = characterMemoryCategories().map((category) => `
     <button
       class="memory-filter${state.characterMemoryFilter === category.id ? " active" : ""}"
@@ -2702,7 +2712,10 @@ function renderCharacterMemoryList() {
   }
   const query = (state.characterMemoryQuery || "").trim().toLowerCase();
   const visibleMemories = memories.filter((memory) => {
-    const categoryMatches = state.characterMemoryFilter === "all" || classifyCharacterMemory(memory) === state.characterMemoryFilter;
+    const categoryMatches = state.characterMemoryFilter === "all"
+      || (state.characterMemoryFilter === "normal" && memory.sensitivity !== "protected")
+      || (state.characterMemoryFilter === "protected" && memory.sensitivity === "protected")
+      || classifyCharacterMemory(memory) === state.characterMemoryFilter;
     const queryMatches = !query || `${memory?.text || ""} ${(memory?.tags || []).join(" ")}`.toLowerCase().includes(query);
     return categoryMatches && queryMatches;
   });
@@ -2725,6 +2738,7 @@ function renderCharacterMemoryList() {
         </div>
       </div>
       <div class="character-memory-meta">
+        ${memory.sensitivity === "protected" ? `<span class="memory-tag protected">${escapeHtml(t("character.memoryProtectedTag"))}</span>` : ""}
         <span class="memory-tag">${escapeHtml(category?.label || t("character.memoryTagGeneral"))}</span>
         <span>${escapeHtml(t("character.memorySource"))}: ${escapeHtml(memory.sourceSessionId ? t("character.memorySourceChat") : t("character.memorySourceManual"))}</span>
       </div>
@@ -2816,7 +2830,10 @@ function openMemoryCandidate(candidate) {
     const afterSet = activeCharacterMemorySet();
     const added = (afterSet?.memories || []).find((memory) => !(beforeSet?.memories || []).some((before) => before.id === memory.id))
       || (afterSet?.memories || []).at(-1);
-    if (added) syncCharacterMemoryToContext(added, afterSet);
+    if (added) {
+      syncCharacterMemoryToContext(added, afterSet);
+      showNotice(t("character.memoryAutoSavedNotice"));
+    }
     renderCharacterMemoryList();
     if (els.trainingStatus) els.trainingStatus.textContent = t("character.memoryAutoSaved");
     return;
@@ -2850,6 +2867,7 @@ function saveMemoryCandidate(textOverride = "") {
     memorySets: state.characterMemorySets,
     character: state.character,
     text,
+    sensitivity: state.memoryCandidate.sensitivity || "",
     sourceSessionId: state.memoryCandidate.sourceSessionId || "",
     sourceFolderId: state.memoryCandidate.sourceFolderId || "",
     createId: () => crypto.randomUUID(),
@@ -3043,11 +3061,22 @@ async function prepareKnowledgeForActiveFolder() {
 function showUndo(kind, label) {
   const target = kind === "folder" ? t("sidebar.folderButton") : t("task.chat");
   els.undoText.textContent = t("undo.deleted", { target, label });
+  if (els.undoDelete) els.undoDelete.hidden = false;
   els.undoToast.hidden = false;
+}
+
+function showNotice(message) {
+  if (!els.undoToast || !els.undoText) return;
+  window.clearTimeout(noticeTimer);
+  els.undoText.textContent = message;
+  if (els.undoDelete) els.undoDelete.hidden = true;
+  els.undoToast.hidden = false;
+  noticeTimer = window.setTimeout(hideUndo, 2800);
 }
 
 function hideUndo() {
   els.undoToast.hidden = true;
+  if (els.undoDelete) els.undoDelete.hidden = false;
 }
 
 function restoreLastDeleted() {

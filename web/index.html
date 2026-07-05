@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=0.8.206-tomos5" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.206-tomos7" />
   </head>
   <body>
     <div class="app-shell">
@@ -523,7 +523,7 @@
           <div class="character-tabs" role="tablist" aria-label="マイキャラ設定">
             <label for="character-tab-profile" data-i18n="character.tabProfile">プロフィール</label>
             <label for="character-tab-tone" data-i18n="character.tabTone">話し方</label>
-            <label for="character-tab-memory" data-i18n="character.tabMemory">記憶</label>
+            <label for="character-tab-memory" data-i18n="character.tabMemory">マイキャラの記憶</label>
           </div>
 
           <section class="character-view character-view-profile">
@@ -608,19 +608,19 @@
               <div class="character-memory-mode-options">
                 <label><input type="radio" name="character-memory-mode-choice" value="off" /> <span data-i18n="character.memoryOff">記憶しない</span></label>
                 <label><input type="radio" name="character-memory-mode-choice" value="suggest" /> <span data-i18n="character.memorySuggest">確認してから覚える</span></label>
-                <label><input type="radio" name="character-memory-mode-choice" value="auto" /> <span data-i18n="character.memoryAuto">自動で覚える beta</span></label>
+                <label><input type="radio" name="character-memory-mode-choice" value="auto" /> <span data-i18n="character.memoryAuto">安全な内容だけ自動で覚える beta</span></label>
               </div>
               <select id="character-memory-mode" hidden>
                 <option value="suggest">suggest</option>
                 <option value="auto">auto</option>
                 <option value="off">off</option>
               </select>
-              <small data-i18n="character.memoryModeHelp">「確認してから覚える」は候補を確認して保存します。「自動で覚える」は名前・好み・勉強目標など安全な内容だけを自動保存します。</small>
+              <small data-i18n="character.memoryModeHelp">通常の記憶は会話で自動参照します。社外秘や契約、金額、URLなどは保護された記憶として分け、通常会話には自動で混ぜません。</small>
             </section>
             <section class="character-memory">
               <div class="training-title">
                 <strong data-i18n="character.memoryTitle">マイキャラの記憶</strong>
-                <span data-i18n="character.memoryHelp">マイキャラが覚えていることを確認・編集・削除できます。</span>
+                <span data-i18n="character.memoryHelp">このPC内に保存されるマイキャラの長期記憶です。保護された記憶は通常会話には自動で混ぜません。</span>
               </div>
               <div class="character-memory-filters" id="character-memory-filters" aria-label="記憶カテゴリ"></div>
               <input class="character-memory-search" id="character-memory-search" type="search" placeholder="記憶を検索" data-i18n-placeholder="character.memorySearchPlaceholder" />
@@ -1089,28 +1089,28 @@
       </section>
     </div>
 
-  <script src="/i18n.js?v=0.8.206-tomos5"></script>
-  <script src="/utils.js?v=0.8.206-tomos5"></script>
-  <script src="/translation.js?v=0.8.206-tomos5"></script>
-  <script src="/local-tools.js?v=0.8.206-tomos5"></script>
-  <script src="/weather.js?v=0.8.206-tomos5"></script>
-  <script src="/image-tools.js?v=0.8.206-tomos5"></script>
-  <script src="/asr.js?v=0.8.206-tomos5"></script>
-  <script src="/attachments.js?v=0.8.206-tomos5"></script>
-  <script src="/composer.js?v=0.8.206-tomos5"></script>
-  <script src="/workspace.js?v=0.8.206-tomos5"></script>
-  <script src="/training.js?v=0.8.206-tomos5"></script>
-  <script src="/tomos-character-core.js?v=0.8.206-tomos5"></script>
-  <script src="/character-core-adapter.js?v=0.8.206-tomos5"></script>
-  <script src="/character.js?v=0.8.206-tomos5"></script>
-  <script src="/models.js?v=0.8.206-tomos5"></script>
-  <script src="/messages.js?v=0.8.206-tomos5"></script>
-  <script src="/sidebar.js?v=0.8.206-tomos5"></script>
-  <script src="/settings.js?v=0.8.206-tomos5"></script>
-  <script src="/management.js?v=0.8.206-tomos5"></script>
-  <script src="/router.js?v=0.8.206-tomos5"></script>
-  <script src="/search.js?v=0.8.206-tomos5"></script>
-  <script src="/pwa.js?v=0.8.206-tomos5"></script>
-  <script src="/app.js?v=0.8.206-tomos5"></script>
+  <script src="/i18n.js?v=0.8.206-tomos7"></script>
+  <script src="/utils.js?v=0.8.206-tomos7"></script>
+  <script src="/translation.js?v=0.8.206-tomos7"></script>
+  <script src="/local-tools.js?v=0.8.206-tomos7"></script>
+  <script src="/weather.js?v=0.8.206-tomos7"></script>
+  <script src="/image-tools.js?v=0.8.206-tomos7"></script>
+  <script src="/asr.js?v=0.8.206-tomos7"></script>
+  <script src="/attachments.js?v=0.8.206-tomos7"></script>
+  <script src="/composer.js?v=0.8.206-tomos7"></script>
+  <script src="/workspace.js?v=0.8.206-tomos7"></script>
+  <script src="/training.js?v=0.8.206-tomos7"></script>
+  <script src="/tomos-character-core.js?v=0.8.206-tomos7"></script>
+  <script src="/character-core-adapter.js?v=0.8.206-tomos7"></script>
+  <script src="/character.js?v=0.8.206-tomos7"></script>
+  <script src="/models.js?v=0.8.206-tomos7"></script>
+  <script src="/messages.js?v=0.8.206-tomos7"></script>
+  <script src="/sidebar.js?v=0.8.206-tomos7"></script>
+  <script src="/settings.js?v=0.8.206-tomos7"></script>
+  <script src="/management.js?v=0.8.206-tomos7"></script>
+  <script src="/router.js?v=0.8.206-tomos7"></script>
+  <script src="/search.js?v=0.8.206-tomos7"></script>
+  <script src="/pwa.js?v=0.8.206-tomos7"></script>
+  <script src="/app.js?v=0.8.206-tomos7"></script>
 </body>
 </html>
