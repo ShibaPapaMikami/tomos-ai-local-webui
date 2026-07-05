@@ -258,6 +258,45 @@ window.GEMMA_CHARACTER = (() => {
     return priority.reduce((best, category) => (scores[category] > scores[best] ? category : best), "profile");
   }
 
+  function characterMemoryContextId(memorySetId, memoryId) {
+    return `character:${String(memorySetId || DEFAULT_MEMORY_SET.id)}:${String(memoryId || "")}`;
+  }
+
+  function characterMemoryContextScope(character = DEFAULT_CHARACTER, memorySet = DEFAULT_MEMORY_SET) {
+    const normalized = normalizeCharacter(character);
+    const set = normalizeMemorySet(memorySet, normalized);
+    return {
+      scopeType: "character",
+      scopeId: set.id,
+      ownerType: "character",
+      ownerId: normalized.id,
+      visibility: "private",
+      projectId: "",
+    };
+  }
+
+  function characterMemoryType(memory) {
+    const category = classifyMemory(memory);
+    if (category === "preference" || category === "settings") return "preference";
+    if (category === "study") return "activity";
+    return "fact";
+  }
+
+  function characterMemoryToContextItem({ character = DEFAULT_CHARACTER, memorySet = DEFAULT_MEMORY_SET, memory = {} } = {}) {
+    const normalized = normalizeCharacter(character);
+    const set = normalizeMemorySet(memorySet, normalized);
+    const memoryId = String(memory?.id || "").trim();
+    const text = normalizeMemoryText(memory?.text || "");
+    if (!memoryId || !text) return null;
+    return {
+      id: characterMemoryContextId(set.id, memoryId),
+      text,
+      memoryType: characterMemoryType(memory),
+      sourceType: "character",
+      sourceId: memoryId,
+    };
+  }
+
   function addMemory({ memorySets, character, text, sourceSessionId = "", sourceFolderId = "", createId = () => crypto.randomUUID(), nowIso = () => new Date().toISOString() }) {
     const value = normalizeMemoryText(text);
     if (!value) return memorySets;
@@ -309,6 +348,9 @@ window.GEMMA_CHARACTER = (() => {
     addMemory,
     buildCharacterSystemPrompt,
     buildMemorySystemPrompt,
+    characterMemoryContextId,
+    characterMemoryContextScope,
+    characterMemoryToContextItem,
     classifyMemory,
     isSensitiveMemoryText,
     deleteMemory,

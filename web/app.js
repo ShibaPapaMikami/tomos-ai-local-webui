@@ -527,6 +527,35 @@ async function forgetContextMemoryRecord(recordId) {
   }
 }
 
+function syncCharacterMemoryToContext(memory, memorySet = activeCharacterMemorySet()) {
+  const item = window.GEMMA_CHARACTER?.characterMemoryToContextItem?.({
+    character: state.character,
+    memorySet,
+    memory,
+  });
+  const scope = window.GEMMA_CHARACTER?.characterMemoryContextScope?.(state.character, memorySet);
+  if (!item || !scope) return;
+  contextMemoryApi("/api/context/memory/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item, scope }),
+  }).catch((error) => {
+    console.warn("Failed to sync character memory to context", error);
+  });
+}
+
+function forgetCharacterMemoryFromContext(memoryId, memorySet = activeCharacterMemorySet()) {
+  const recordId = window.GEMMA_CHARACTER?.characterMemoryContextId?.(memorySet?.id, memoryId);
+  if (!recordId) return;
+  contextMemoryApi("/api/context/memory/forget", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: recordId, reason: "character_memory_deleted" }),
+  }).catch((error) => {
+    console.warn("Failed to forget character memory from context", error);
+  });
+}
+
 function applyI18n() {
   document.documentElement.lang = state.language;
   document.querySelectorAll("[data-i18n]").forEach((element) => {
@@ -2714,6 +2743,7 @@ function renderCharacterMemoryList() {
 function addManualCharacterMemory() {
   const text = els.characterMemoryNew?.value || "";
   if (!text.trim()) return;
+  const beforeSet = activeCharacterMemorySet();
   state.characterMemorySets = window.GEMMA_CHARACTER?.addMemory?.({
     memorySets: state.characterMemorySets,
     character: state.character,
@@ -2723,6 +2753,10 @@ function addManualCharacterMemory() {
     createId: () => crypto.randomUUID(),
     nowIso: () => new Date().toISOString(),
   }) || state.characterMemorySets;
+  const afterSet = activeCharacterMemorySet();
+  const added = (afterSet?.memories || []).find((memory) => !(beforeSet?.memories || []).some((before) => before.id === memory.id))
+    || (afterSet?.memories || []).at(-1);
+  if (added) syncCharacterMemoryToContext(added, afterSet);
   if (els.characterMemoryNew) els.characterMemoryNew.value = "";
   flashSavedButton(els.characterMemoryAdd);
   renderCharacterMemoryList();
@@ -2742,6 +2776,9 @@ function saveCharacterMemoryEdit(memoryId, button = null) {
     text,
     nowIso: () => new Date().toISOString(),
   }) || state.characterMemorySets;
+  const updatedSet = activeCharacterMemorySet();
+  const updatedMemory = (updatedSet?.memories || []).find((memory) => memory.id === memoryId);
+  if (updatedMemory) syncCharacterMemoryToContext(updatedMemory, updatedSet);
   flashSavedButton(button);
   window.setTimeout(renderCharacterMemoryList, 450);
   if (els.trainingStatus) els.trainingStatus.textContent = t("character.memoryUpdated");
@@ -2750,6 +2787,7 @@ function saveCharacterMemoryEdit(memoryId, button = null) {
 function deleteCharacterMemory(memoryId) {
   const set = activeCharacterMemorySet();
   if (!set) return;
+  forgetCharacterMemoryFromContext(memoryId, set);
   state.characterMemorySets = window.GEMMA_CHARACTER?.deleteMemory?.({
     memorySets: state.characterMemorySets,
     memorySetId: set.id,
@@ -2765,6 +2803,7 @@ function openMemoryCandidate(candidate) {
   const text = String(candidate.text || "").trim();
   const unsafe = window.GEMMA_CHARACTER?.isSensitiveMemoryText?.(text);
   if (memoryMode === "auto" && text && !unsafe) {
+    const beforeSet = activeCharacterMemorySet();
     state.characterMemorySets = window.GEMMA_CHARACTER?.addMemory?.({
       memorySets: state.characterMemorySets,
       character: state.character,
@@ -2774,6 +2813,10 @@ function openMemoryCandidate(candidate) {
       createId: () => crypto.randomUUID(),
       nowIso: () => new Date().toISOString(),
     }) || state.characterMemorySets;
+    const afterSet = activeCharacterMemorySet();
+    const added = (afterSet?.memories || []).find((memory) => !(beforeSet?.memories || []).some((before) => before.id === memory.id))
+      || (afterSet?.memories || []).at(-1);
+    if (added) syncCharacterMemoryToContext(added, afterSet);
     renderCharacterMemoryList();
     if (els.trainingStatus) els.trainingStatus.textContent = t("character.memoryAutoSaved");
     return;
@@ -2802,6 +2845,7 @@ function closeMemoryCandidate() {
 function saveMemoryCandidate(textOverride = "") {
   const text = textOverride || els.memoryCandidateText?.value || "";
   if (!state.memoryCandidate || !text.trim()) return;
+  const beforeSet = activeCharacterMemorySet();
   state.characterMemorySets = window.GEMMA_CHARACTER?.addMemory?.({
     memorySets: state.characterMemorySets,
     character: state.character,
@@ -2811,6 +2855,10 @@ function saveMemoryCandidate(textOverride = "") {
     createId: () => crypto.randomUUID(),
     nowIso: () => new Date().toISOString(),
   }) || state.characterMemorySets;
+  const afterSet = activeCharacterMemorySet();
+  const added = (afterSet?.memories || []).find((memory) => !(beforeSet?.memories || []).some((before) => before.id === memory.id))
+    || (afterSet?.memories || []).at(-1);
+  if (added) syncCharacterMemoryToContext(added, afterSet);
   closeMemoryCandidate();
   renderCharacterMemoryList();
   renderMessages();

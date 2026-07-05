@@ -149,6 +149,26 @@ with tempfile.TemporaryDirectory() as tmp:
     assert sensitive["needsReview"] is True
     assert "センシティブ" in sensitive["reason"]
 
+    character_memory = remember(
+        {
+            "id": "character:character-memory-default:memory-1",
+            "text": "ユーザーは短い説明を好む",
+            "memoryType": "preference",
+            "sourceType": "character",
+            "sourceId": "memory-1",
+        },
+        scope={
+            "scopeType": "character",
+            "scopeId": "character-memory-default",
+            "ownerType": "character",
+            "ownerId": "default-character",
+        },
+    )
+    assert character_memory["ok"] is True
+    assert character_memory["record"]["id"] == "character:character-memory-default:memory-1"
+    assert character_memory["record"]["scopeType"] == "character"
+    assert character_memory["record"]["ownerType"] == "character"
+
     activity = remember(
         {
             "text": "今日は契約書の確認を進めた",

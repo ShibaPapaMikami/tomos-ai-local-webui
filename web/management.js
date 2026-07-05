@@ -242,7 +242,7 @@ window.GEMMA_MANAGEMENT = (() => {
     if (rows.length === 0) {
       const empty = document.createElement("div");
       empty.className = "management-note";
-      empty.textContent = t?.("management.contextMemoryEmpty") || "保存された追懐はありません。";
+      empty.textContent = t?.("management.contextMemoryEmpty") || "保存された長期記憶はありません。";
       els.contextMemoryList.appendChild(empty);
       return;
     }

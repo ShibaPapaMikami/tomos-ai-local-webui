@@ -529,7 +529,7 @@ def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
             })
             server.context_memory_save_payload({
                 "item": {
-                    "text": "今日は追懐機能の実装を進めた",
+                    "text": "今日は長期記憶機能の実装を進めた",
                     "memoryType": "activity",
                     "sourceType": "chat",
                     "sourceId": "message-1",
@@ -542,7 +542,7 @@ def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
 
     assert payload["ok"] is True
     assert payload["stableFacts"][0]["snippet"] == "ユーザーは短い箇条書きを好む"
-    assert payload["recentActivities"][0]["snippet"] == "今日は追懐機能の実装を進めた"
+    assert payload["recentActivities"][0]["snippet"] == "今日は長期記憶機能の実装を進めた"
 
 
 def test_context_memory_update_payload_updates_saved_memory() -> None:

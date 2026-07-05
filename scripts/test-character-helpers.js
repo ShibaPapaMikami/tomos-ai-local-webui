@@ -24,6 +24,9 @@ const {
   buildCharacterSystemPrompt,
   buildMemorySystemPrompt,
   classifyMemory,
+  characterMemoryContextId,
+  characterMemoryContextScope,
+  characterMemoryToContextItem,
   deleteMemory,
   loadCharacter,
   loadMemorySets,
@@ -32,6 +35,8 @@ const {
   saveCharacter,
   updateMemory,
 } = context.window.GEMMA_CHARACTER;
+
+const appJs = fs.readFileSync("web/app.js", "utf8");
 
 assert.equal(loadCharacter().name, "Gemma");
 const character = saveCharacter({
@@ -85,6 +90,26 @@ sets = addMemory({
 });
 assert.equal(sets[0].memories[1].text, "まさふみはメロンとマンゴーが好き");
 
+assert.equal(characterMemoryContextId(sets[0].id, "memory-normalized"), "character:character-memory-default:memory-normalized");
+assert.deepEqual(JSON.parse(JSON.stringify(characterMemoryContextScope(character, sets[0]))), {
+  scopeType: "character",
+  scopeId: "character-memory-default",
+  ownerType: "character",
+  ownerId: "default-character",
+  visibility: "private",
+  projectId: "",
+});
+assert.deepEqual(
+  JSON.parse(JSON.stringify(characterMemoryToContextItem({ character, memorySet: sets[0], memory: sets[0].memories[1] }))),
+  {
+    id: "character:character-memory-default:memory-normalized",
+    text: "まさふみはメロンとマンゴーが好き",
+    memoryType: "preference",
+    sourceType: "character",
+    sourceId: "memory-normalized",
+  },
+);
+
 sets = updateMemory({
   memorySets: sets,
   memorySetId: sets[0].id,
@@ -109,5 +134,10 @@ assert.equal(classifyMemory({ text: "ガンダムが好き" }), "preference");
 assert.equal(classifyMemory({ text: "Python課題を進めている" }), "study");
 assert.equal(classifyMemory({ text: "高速モードとWeb検索をよく使う" }), "settings");
 assert.equal(classifyMemory({ text: "分類よりタグを優先", tags: ["勉強"] }), "study");
+assert.match(appJs, /function syncCharacterMemoryToContext/);
+assert.match(appJs, /characterMemoryContextScope/);
+assert.match(appJs, /characterMemoryToContextItem/);
+assert.match(appJs, /\/api\/context\/memory\/save/);
+assert.match(appJs, /\/api\/context\/memory\/forget/);
 
 console.log("character helper tests passed");
