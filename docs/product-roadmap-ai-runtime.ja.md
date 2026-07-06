@@ -81,6 +81,26 @@ Supermemoryは、Memory、User Profile、Hybrid Search、Connectors、File Proce
 - 最初から重いGraph DBを必須にする設計
 - 原文根拠なしで抽出したGraphだけを信じる設計
 
+### Agent-Reachを参考にする範囲
+
+Agent-Reachは、AI AgentにWeb、GitHub、YouTube字幕、RSS、SNSなどの外部調査能力を追加するCapability Layerとして参考にする。
+TOMOSでは、この考え方を `Internet Layer` として扱う。
+
+採用する考え方:
+
+- Internet Layer: ローカル資料では足りない場合に、外部Webや公開情報を調査する層をKnowledge/Memoryと分ける。
+- Channel routing: Web、GitHub、YouTube、RSS、Reddit、Xなどを調査チャンネルとして分ける。
+- Doctor: 各チャンネルが使えるかを診断し、使えない場合は理由と次の対応を出す。
+- Optional install: 外部調査機能は標準ONにせず、上級者向けの任意追加から始める。
+- Read-first: 最初は読む、検索する、要約する範囲に限定し、投稿やフォーム送信などの操作は対象外にする。
+
+採用しないもの:
+
+- Agent-Reach本体の即時同梱
+- Cookieやログイン状態をユーザー確認なしで使う導線
+- 外部調査結果をMemoryへ自動保存する設計
+- 社内資料、教材パック、契約書と外部検索結果を自動で混ぜる設計
+
 ## すぐには採用しないもの
 
 - UI-TARSによるPC操作
@@ -336,6 +356,7 @@ Dating側で使わないもの:
 7. 常駐エージェント、バックグラウンド自律実行、外部MCP連携は安定後に回す。
 8. Supermemory的な発想は、まず「RAGとMemoryの分離」「Profile」「Hybrid Search」「忘れる機能」だけを小さく入れる。
 9. Graphは最終形だが、MVPではSQLite/n-gram検索と原文根拠を優先する。
+10. Agent-Reach的な発想は、まずInternet Layerとしてdocsに位置づけ、標準同梱やCookie利用は後段にする。
 
 ### アーキテクチャ上の分離
 
@@ -354,6 +375,14 @@ Knowledge
 - 教材パック
 - ローカル文書
 - CSV/Excel/PDF/Markdown
+
+Internet Layer
+- Web
+- GitHub
+- YouTube字幕
+- RSS
+- SNS/掲示板
+- Agent-Reachは設計参考または任意プラグイン候補
 
 Context Core
 - Unified Context API

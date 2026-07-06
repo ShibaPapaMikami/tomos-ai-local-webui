@@ -594,6 +594,56 @@ PilotDeck本体コードは取り込まない。
 - [ ] Dating reality showで再利用する対象/しない対象が明記されている
 - [ ] 既存機能を壊す実装に進んでいない
 
+### Task 8.5: Agent-Reach参考のInternet Layer設計
+
+目的: Agent-Reachの「AI Agentに外部調査能力を追加する」考え方を参考にし、TOMOSのInternet Layer候補として整理する。
+
+このタスクでは、Agent-Reach本体を直接同梱しない。
+まず、CodeGraph、Knowledge Layer、Memoryと分けた外部調査レイヤーとして扱う。
+
+#### まず作る設計メモ
+
+- [ ] Agent-ReachをInternet Layer候補としてdocsに追記する
+- [ ] Internet LayerをCodeGraph、Knowledge Layer、Memoryと分ける
+- [ ] Web、GitHub、YouTube字幕、RSS、Reddit、Xなどを調査チャンネルとして整理する
+- [ ] `doctor` 的な接続診断を、将来のPC診断/プラグイン診断へ接続できるようにする
+- [ ] Cookieやログイン状態を使う機能は、標準ONにしない方針を書く
+
+#### MVPの実装順
+
+1. docs反映
+   - [ ] Internet Layerの責務を明記する
+   - [ ] Agent-Reachは設計参考または任意プラグイン候補として扱う
+   - [ ] 外部調査結果をMemoryへ自動保存しない
+
+2. 調査チャンネル設計
+   - [ ] Webページを読む
+   - [ ] GitHubリポジトリを調べる
+   - [ ] YouTube字幕を要約する
+   - [ ] RSSを読む
+   - [ ] Reddit/XなどSNS系は権限と利用規約確認後に扱う
+
+3. 診断設計
+   - [ ] 利用可能なチャンネルを表示する
+   - [ ] 未設定、未インストール、ログイン必要、利用不可を分けて表示する
+   - [ ] ユーザーが次に何をすればよいかを短く出す
+
+#### やらないこと
+
+- [ ] Agent-Reach本体の即時同梱
+- [ ] Cookieやログイン状態の無断利用
+- [ ] 外部サイトへの投稿、フォーム送信、操作自動化
+- [ ] 外部調査結果のMemory自動保存
+- [ ] 社内資料、教材パック、契約書と外部検索結果の自動混合
+
+#### 受け入れ条件
+
+- [ ] Agent-Reachの位置づけがInternet Layerとして明記されている
+- [ ] Knowledge Layer、Memory、CodeGraphとの境界が明確
+- [ ] 標準同梱ではなく任意プラグイン候補として扱われている
+- [ ] Cookie、ログイン、SNS利用は明示許可制になっている
+- [ ] 外部調査結果を勝手に長期記憶へ保存しない方針が明記されている
+
 ## 学習パック制作担当向けタスク
 
 ### Task 1: MVV本文の社内確認

@@ -29,7 +29,23 @@ Graph
 
 Context
 = AIへ渡す最小文脈を組み立てる
+
+Internet Layer
+= Web、GitHub、YouTube字幕、RSS、SNSなどの外部公開情報を調べる
 ```
+
+## Internet Layerとの境界
+
+Agent-Reachの考え方は、Internet Layerの設計参考として扱う。
+ただし、Local Context CoreやMemoryとは責務を分ける。
+
+- Internet Layerは外部公開情報を読む、検索する、要約する。
+- Knowledge Layerはローカル資料、PDF、契約書、教材、会社資料を扱う。
+- Memoryはユーザー、キャラクター、好み、作業履歴を保存する。
+- CodeGraphはローカルコード構造を扱う。
+- Internet Layerの取得結果は、ユーザー確認なしでMemoryへ保存しない。
+- Cookie、ログイン状態、SNS閲覧は任意設定かつ明示許可制にする。
+- Dating scopeでは、外部調査結果とキャラクター記憶を自動混合しない。
 
 ## 最小API
 
