@@ -1197,6 +1197,41 @@ h1 {
   margin-top: 12px;
 }
 
+.internet-diagnostics {
+  align-items: stretch;
+}
+
+.internet-diagnostics > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.internet-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.internet-channel-grid div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 8px;
+}
+
+.internet-channel-grid strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.internet-channel-grid span {
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .plugin-candidate-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

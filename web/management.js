@@ -506,6 +506,21 @@ window.GEMMA_MANAGEMENT = (() => {
     return Boolean(PLUGIN_CANDIDATES[pluginId]?.implemented);
   }
 
+  function internetLayerDiagnosticsModel(t) {
+    return {
+      title: t("management.internetLayerTitle"),
+      help: t("management.internetLayerHelp"),
+      memoryNote: t("management.internetLayerMemoryNote"),
+      channels: [
+        { id: "web", label: t("management.internetLayerWeb"), status: t("management.internetLayerDesigning") },
+        { id: "github", label: t("management.internetLayerGitHub"), status: t("management.internetLayerDesigning") },
+        { id: "youtube", label: t("management.internetLayerYouTube"), status: t("management.internetLayerDesigning") },
+        { id: "rss", label: t("management.internetLayerRss"), status: t("management.internetLayerDesigning") },
+        { id: "sns", label: t("management.internetLayerSns"), status: t("management.internetLayerPermissionRequired") },
+      ],
+    };
+  }
+
   function syncInstalledAppsVisibility({ state, els }) {
     const contractsInstalled = Boolean(state.plugins?.contracts?.installed);
     if (els.contractsToggle) els.contractsToggle.hidden = !contractsInstalled;
@@ -1253,6 +1268,7 @@ window.GEMMA_MANAGEMENT = (() => {
     loadPlugins,
     savePlugins,
     formatPluginSearchCapabilities,
+    internetLayerDiagnosticsModel,
     closeManagementPanels,
     setSidebarSettingsMode,
     handleEscapeKey,

@@ -711,6 +711,35 @@
               <strong data-i18n="management.pluginCandidates">追加できる機能</strong>
               <span data-i18n="management.pluginCandidatesHelp">1クリックで追加できます。コード理解はすぐ使えます。その他は先にメニューへ追加する準備枠です。</span>
             </div>
+            <section class="management-card internet-diagnostics" id="internet-layer-diagnostics">
+              <div>
+                <strong data-i18n="management.internetLayerTitle">Internet Layer診断</strong>
+                <span data-i18n="management.internetLayerHelp">外部調査はまだ標準機能ではありません。Agent-Reachなどの外部調査ツールを、将来ここから確認できるようにします。</span>
+              </div>
+              <div class="internet-channel-grid" aria-label="Internet Layer診断">
+                <div data-internet-channel="web">
+                  <strong data-i18n="management.internetLayerWeb">Webページ</strong>
+                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                </div>
+                <div data-internet-channel="github">
+                  <strong data-i18n="management.internetLayerGitHub">GitHub</strong>
+                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                </div>
+                <div data-internet-channel="youtube">
+                  <strong data-i18n="management.internetLayerYouTube">YouTube字幕</strong>
+                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                </div>
+                <div data-internet-channel="rss">
+                  <strong data-i18n="management.internetLayerRss">RSS</strong>
+                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                </div>
+                <div data-internet-channel="sns">
+                  <strong data-i18n="management.internetLayerSns">SNS</strong>
+                  <span data-i18n="management.internetLayerPermissionRequired">明示許可が必要</span>
+                </div>
+              </div>
+              <small data-i18n="management.internetLayerMemoryNote">外部調査結果は、自動で長期記憶に保存されません。</small>
+            </section>
             <div class="plugin-candidate-grid">
               <article class="plugin-candidate-card plugin-available">
                 <strong data-i18n="management.codeUnderstanding">コード理解</strong>
