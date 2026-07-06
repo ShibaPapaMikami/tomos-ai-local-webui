@@ -195,6 +195,7 @@ assert.match(indexHtml, /data-internet-channel="youtube"/);
 assert.match(indexHtml, /data-internet-channel="rss"/);
 assert.match(indexHtml, /data-internet-channel="sns"/);
 assert.match(i18nJs, /"management\.internetLayerTitle": "Internet Layer診断"/);
+assert.match(stylesCss, /\.internet-diagnostics\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s);
 assert.match(i18nJs, /"management\.internetLayerMemoryNote": "外部調査結果は、自動で長期記憶に保存されません。"/);
 assert.match(stylesCss, /\.internet-diagnostics/);
 assert.match(fs.readFileSync("web/management.js", "utf8"), /internetLayerDiagnosticsModel/);
