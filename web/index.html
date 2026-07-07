@@ -895,6 +895,7 @@
                   </ol>
                   <div class="plugin-candidate-actions">
                     <button class="ghost-button" id="internet-layer-setup" type="button" data-i18n="management.internetLayerSetupInTomos">TOMOSで安全導入</button>
+                    <small id="internet-layer-setup-status" data-i18n="management.internetLayerDoctorIdle">未実行</small>
                   </div>
                   <div class="plugin-setup-progress" id="internet-layer-setup-progress" hidden>
                     <div class="plugin-setup-progress-head">
@@ -918,6 +919,16 @@
                   <div class="plugin-candidate-actions">
                     <button class="ghost-button" id="internet-layer-doctor" type="button" data-i18n="management.internetLayerRunDoctor">診断を実行</button>
                     <small id="internet-layer-doctor-status" data-i18n="management.internetLayerDoctorIdle">未実行</small>
+                  </div>
+                  <div class="plugin-setup-progress" id="internet-layer-doctor-progress" hidden>
+                    <div class="plugin-setup-progress-head">
+                      <strong data-i18n="management.internetLayerDoctorProgress">診断進行状況</strong>
+                      <span id="internet-layer-doctor-progress-label">0%</span>
+                    </div>
+                    <div class="plugin-setup-bar" aria-hidden="true">
+                      <span id="internet-layer-doctor-progress-bar"></span>
+                    </div>
+                    <ol class="plugin-setup-log" id="internet-layer-doctor-log"></ol>
                   </div>
                 </div>
               </details>

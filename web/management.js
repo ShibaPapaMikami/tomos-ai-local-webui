@@ -646,20 +646,28 @@ window.GEMMA_MANAGEMENT = (() => {
 
   function renderInternetLayerSetupState({ state, t }) {
     const button = document.querySelector("#internet-layer-setup");
+    const status = document.querySelector("#internet-layer-setup-status");
     const progress = document.querySelector("#internet-layer-setup-progress");
     const progressLabel = document.querySelector("#internet-layer-setup-progress-label");
     const progressBar = document.querySelector("#internet-layer-setup-progress-bar");
     const progressLog = document.querySelector("#internet-layer-setup-log");
     const job = state.internetLayerSetupJob || {};
     const running = job.status === "queued" || job.status === "running";
+    const done = job.status === "done";
+    const error = job.status === "error";
     if (button) {
       button.textContent = running ? t("management.internetLayerSetupRunning") : t("management.internetLayerSetupInTomos");
       button.disabled = running;
     }
+    if (status) {
+      status.textContent = job.message || (done ? t("management.internetLayerSetupDone") : error ? t("management.internetLayerSetupError", { error: "" }) : t("management.internetLayerDoctorIdle"));
+      status.dataset.internetLayerSetupState = job.status || "idle";
+    }
     if (!progress) return;
     const logs = Array.isArray(job.logs) ? job.logs : [];
-    const percent = Math.max(0, Math.min(100, Number(job.percent || (running ? 5 : 0))));
-    progress.hidden = !running && logs.length === 0;
+    const displayLines = logs.length > 0 ? logs : job.message ? [job.message] : [];
+    const percent = Math.max(0, Math.min(100, Number(job.percent || (done ? 100 : running ? 5 : 0))));
+    progress.hidden = !running && !done && !error && displayLines.length === 0;
     if (progressLabel) {
       const step = Number(job.step || 0);
       const total = Number(job.total || 0);
@@ -670,11 +678,34 @@ window.GEMMA_MANAGEMENT = (() => {
     if (progressBar) progressBar.style.width = `${percent}%`;
     if (progressLog) {
       progressLog.innerHTML = "";
-      logs.slice(-5).forEach((line) => {
+      displayLines.slice(-5).forEach((line) => {
         const item = document.createElement("li");
         item.textContent = String(line);
         progressLog.appendChild(item);
       });
+    }
+  }
+
+  function renderInternetLayerDoctorProgress({ status = "idle", message = "", percent = 0, t } = {}) {
+    const progress = document.querySelector("#internet-layer-doctor-progress");
+    const progressLabel = document.querySelector("#internet-layer-doctor-progress-label");
+    const progressBar = document.querySelector("#internet-layer-doctor-progress-bar");
+    const progressLog = document.querySelector("#internet-layer-doctor-log");
+    if (!progress) return;
+    const running = status === "running";
+    const done = status === "done";
+    const error = status === "error" || status === "not-installed";
+    progress.hidden = !running && !done && !error && !message;
+    const safePercent = Math.max(0, Math.min(100, Number(percent || (done ? 100 : running ? 20 : 0))));
+    if (progressLabel) progressLabel.textContent = `${safePercent}%`;
+    if (progressBar) progressBar.style.width = `${safePercent}%`;
+    if (progressLog) {
+      progressLog.innerHTML = "";
+      if (message) {
+        const item = document.createElement("li");
+        item.textContent = message;
+        progressLog.appendChild(item);
+      }
     }
   }
 
@@ -695,6 +726,12 @@ window.GEMMA_MANAGEMENT = (() => {
       status.textContent = t("management.internetLayerDoctorRunning");
       status.dataset.internetLayerDoctorState = "running";
     }
+    renderInternetLayerDoctorProgress({
+      status: "running",
+      percent: 20,
+      message: t("management.internetLayerDoctorStarted"),
+      t,
+    });
     try {
       const response = await fetch("/api/internet-layer/doctor", { cache: "no-store" });
       const payload = await response.json();
@@ -715,13 +752,23 @@ window.GEMMA_MANAGEMENT = (() => {
             : t("management.internetLayerDoctorError", { error: payload.message || payload.status || "" });
         status.dataset.internetLayerDoctorState = payload.ok ? "ready" : payload.status || "error";
       }
+      renderInternetLayerDoctorProgress({
+        status: payload.ok ? "done" : payload.status || "error",
+        percent: 100,
+        message: payload.ok
+          ? t("management.internetLayerDoctorReady")
+          : t("management.internetLayerDoctorError", { error: payload.message || payload.status || "" }),
+        t,
+      });
       renderInternetLayerDiagnostics({ state, t });
       return payload;
     } catch (error) {
+      const message = t("management.internetLayerDoctorError", { error: error?.message || String(error) });
       if (status) {
-        status.textContent = t("management.internetLayerDoctorError", { error: error?.message || String(error) });
+        status.textContent = message;
         status.dataset.internetLayerDoctorState = "error";
       }
+      renderInternetLayerDoctorProgress({ status: "error", percent: 100, message, t });
       return null;
     } finally {
       if (button) button.disabled = false;
@@ -752,7 +799,12 @@ window.GEMMA_MANAGEMENT = (() => {
 
   async function startInternetLayerSetup({ state, els, t }) {
     if (!window.confirm(t("management.internetLayerSetupConfirm"))) return;
-    state.internetLayerSetupJob = { status: "queued", message: t("management.internetLayerSetupRunning") };
+    state.internetLayerSetupJob = {
+      status: "queued",
+      message: t("management.internetLayerSetupQueued"),
+      percent: 5,
+      logs: [t("management.internetLayerSetupQueued")],
+    };
     renderPluginsPanel({ state, els, t });
     try {
       const response = await fetch("/api/internet-layer/setup", { method: "POST" });

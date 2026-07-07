@@ -147,6 +147,9 @@ const labels = {
   "management.internetLayerSetupInTomos": "TOMOSで安全導入",
   "management.internetLayerSetupConfirm": "エージェントリーチをTOMOS内の専用環境に導入します。GitHubからのダウンロードが発生します。開始しますか？",
   "management.internetLayerSetupRunning": "安全導入中",
+  "management.internetLayerSetupQueued": "安全導入を開始しました",
+  "management.internetLayerSetupDone": "安全導入が完了しました",
+  "management.internetLayerSetupError": "安全導入エラー: {error}",
   "management.internetLayerContract": "連携仕様",
   "management.internetLayerDoctorCommand": "診断コマンド: agent-reach doctor",
   "management.internetLayerResultSchema": "返却形式: tomos-internet-layer-result-v0.1",
@@ -154,6 +157,8 @@ const labels = {
   "management.internetLayerRunDoctor": "診断を実行",
   "management.internetLayerDoctorRunning": "診断中",
   "management.internetLayerDoctorReady": "診断完了",
+  "management.internetLayerDoctorProgress": "診断進行状況",
+  "management.internetLayerDoctorStarted": "診断を開始しました",
   "management.internetLayerDoctorMissing": "エージェントリーチ未導入",
   "management.internetLayerDoctorError": "診断エラー: {error}",
   "studyPack.mode.codeReviewShort": "コードレビュー",
@@ -293,12 +298,16 @@ assert.doesNotMatch(indexHtml, /id="internet-layer-install-prompt"/);
 assert.doesNotMatch(indexHtml, /id="internet-layer-copy-install"/);
 assert.doesNotMatch(indexHtml, /Codex|Claude Code|依頼文をコピー/);
 assert.match(indexHtml, /id="internet-layer-setup"/);
+assert.match(indexHtml, /id="internet-layer-setup-status"/);
 assert.match(indexHtml, /id="internet-layer-setup-progress"/);
 assert.match(indexHtml, /data-i18n="management\.internetLayerStepUse"/);
 assert.match(indexHtml, /data-i18n="management\.internetLayerContract"/);
 assert.match(indexHtml, /tomos-internet-layer-result-v0\.1/);
 assert.match(indexHtml, /id="internet-layer-doctor"/);
 assert.match(indexHtml, /id="internet-layer-doctor-status"/);
+assert.match(indexHtml, /id="internet-layer-doctor-progress"/);
+assert.match(indexHtml, /id="internet-layer-doctor-progress-bar"/);
+assert.match(indexHtml, /id="internet-layer-doctor-log"/);
 assert.match(indexHtml, /id="composer-external-research"/);
 assert.match(indexHtml, /src="\/person-relationship\.js\?v=0\.8\.206-tomos48"/);
 assert.match(indexHtml, /src="\/person-name-fortune\.js\?v=0\.8\.206-tomos48"/);
@@ -326,9 +335,13 @@ assert.match(i18nJs, /"management\.internetLayerStepInstall": "「TOMOSで安全
 assert.doesNotMatch(i18nJs, /CodexやClaude Code/);
 assert.match(i18nJs, /"management\.internetLayerSetupInTomos": "TOMOSで安全導入"/);
 assert.match(i18nJs, /"management\.internetLayerSetupConfirm": "エージェントリーチをTOMOS内の専用環境に導入します。/);
+assert.match(i18nJs, /"management\.internetLayerSetupQueued": "安全導入を開始しました"/);
+assert.match(i18nJs, /"management\.internetLayerSetupError": "安全導入エラー: \{error\}"/);
 assert.match(i18nJs, /"management\.internetLayerDoctorCommand": "診断コマンド: agent-reach doctor"/);
 assert.match(i18nJs, /"management\.internetLayerResultSchema": "返却形式: tomos-internet-layer-result-v0\.1"/);
 assert.match(i18nJs, /"management\.internetLayerRunDoctor": "診断を実行"/);
+assert.match(i18nJs, /"management\.internetLayerDoctorProgress": "診断進行状況"/);
+assert.match(i18nJs, /"management\.internetLayerDoctorStarted": "診断を開始しました"/);
 assert.match(i18nJs, /"management\.internetLayerDoctorMissing": "エージェントリーチ未導入"/);
 assert.match(i18nJs, /"management\.internetLayerMemoryNote": "外部調査結果は、自動で長期記憶に保存されません。"/);
 assert.match(i18nJs, /"composer\.externalResearch": "外部調査"/);
