@@ -886,18 +886,15 @@
               <details class="plugin-candidate-details internet-layer-guide">
                 <summary data-i18n="management.internetLayerSetupGuide">導入案内</summary>
                 <div class="plugin-state-note">
-                  <span data-i18n="management.internetLayerSetupNote">未検出の場合は、エージェントリーチなどの外部調査ツールを別途導入してから再起動してください。この画面からは自動インストールしません。</span>
+                  <span data-i18n="management.internetLayerSetupNote">未導入の場合は、この画面のボタンからTOMOS内の専用環境へ安全導入できます。</span>
                   <ol class="internet-layer-steps">
-                    <li data-i18n="management.internetLayerStepInstall">下の依頼文をコピーして、CodexやClaude Codeなどのコーディングエージェントに渡します。</li>
-                    <li data-i18n="management.internetLayerStepRestart">導入が終わったら、このアプリを再起動します。</li>
-                    <li data-i18n="management.internetLayerStepDoctor">プラグイン画面で「診断を実行」を押し、利用可能か確認します。</li>
+                    <li data-i18n="management.internetLayerStepInstall">「TOMOSで安全導入」を押します。</li>
+                    <li data-i18n="management.internetLayerStepRestart">導入が終わるまで、この画面で進行状況を確認します。</li>
+                    <li data-i18n="management.internetLayerStepDoctor">必要に応じて「診断を実行」で利用可能か確認します。</li>
                     <li data-i18n="management.internetLayerStepUse">チャット欄の「外部調査」をONにして送信します。</li>
                   </ol>
-                  <code id="internet-layer-install-prompt" data-i18n="management.internetLayerInstallPrompt">エージェントリーチを安全モードで導入してください: https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/install.md</code>
                   <div class="plugin-candidate-actions">
-                    <button class="ghost-button" id="internet-layer-copy-install" type="button" data-i18n="management.internetLayerCopyInstallPrompt">依頼文をコピー</button>
                     <button class="ghost-button" id="internet-layer-setup" type="button" data-i18n="management.internetLayerSetupInTomos">TOMOSで安全導入</button>
-                    <small id="internet-layer-copy-status" data-i18n="management.internetLayerCopyIdle">未コピー</small>
                   </div>
                   <div class="plugin-setup-progress" id="internet-layer-setup-progress" hidden>
                     <div class="plugin-setup-progress-head">

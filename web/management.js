@@ -728,27 +728,6 @@ window.GEMMA_MANAGEMENT = (() => {
     }
   }
 
-  async function copyInternetLayerInstallPrompt(t) {
-    const prompt = document.querySelector("#internet-layer-install-prompt");
-    const status = document.querySelector("#internet-layer-copy-status");
-    const text = String(prompt?.textContent || "").trim();
-    if (!text) return false;
-    try {
-      await navigator.clipboard.writeText(text);
-      if (status) {
-        status.textContent = t("management.internetLayerCopyDone");
-        status.dataset.internetLayerCopyState = "done";
-      }
-      return true;
-    } catch {
-      if (status) {
-        status.textContent = t("management.internetLayerCopyFailed");
-        status.dataset.internetLayerCopyState = "error";
-      }
-      return false;
-    }
-  }
-
   async function reloadInternetLayerSetupStatus(state) {
     const response = await fetch("/api/internet-layer/setup/status", { cache: "no-store" });
     const payload = await response.json();
@@ -1440,9 +1419,6 @@ window.GEMMA_MANAGEMENT = (() => {
     document.querySelector("#internet-layer-doctor")?.addEventListener("click", () => {
       runInternetLayerDoctor({ state, t });
     });
-    document.querySelector("#internet-layer-copy-install")?.addEventListener("click", () => {
-      copyInternetLayerInstallPrompt(t);
-    });
     document.querySelector("#internet-layer-setup")?.addEventListener("click", () => {
       startInternetLayerSetup({ state, els, t });
     });
@@ -1497,7 +1473,6 @@ window.GEMMA_MANAGEMENT = (() => {
     toggleStudyPack,
     renderPluginsPanel,
     runInternetLayerDoctor,
-    copyInternetLayerInstallPrompt,
     startInternetLayerSetup,
     toggleCodegraphPlugin,
     togglePluginCandidate,

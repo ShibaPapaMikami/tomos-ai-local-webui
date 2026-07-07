@@ -1786,17 +1786,6 @@ h1 {
   line-height: 1.5;
 }
 
-#internet-layer-install-prompt {
-  display: block;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
-  padding: 8px;
-  white-space: normal;
-  word-break: break-word;
-}
-
 .plugin-candidate-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
