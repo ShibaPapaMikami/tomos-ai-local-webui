@@ -30,6 +30,12 @@ const state = {
   characterMemorySets: window.GEMMA_CHARACTER?.loadMemorySets?.() || [],
   characterMemoryFilter: "all",
   characterMemoryQuery: "",
+  people: window.GEMMA_PERSON_RELATIONSHIP?.loadPeople?.() || [],
+  selfProfile: window.GEMMA_PERSON_RELATIONSHIP?.loadSelfProfile?.() || { name: "自分" },
+  selectedPersonId: "",
+  editingPersonId: "",
+  personRelationshipTab: "register",
+  personRelationshipSort: "total",
   studyPacks: window.GEMMA_MANAGEMENT?.loadStudyPacks?.() || {},
   selectedStudyPackMode: loadSelectedStudyPackModes()[0] || "",
   selectedStudyPackModes: loadSelectedStudyPackModes(),
@@ -212,6 +218,7 @@ const els = {
   messages: document.querySelector("#messages"),
   prompt: document.querySelector("#prompt"),
   composer: document.querySelector("#composer"),
+  composerRecipient: document.querySelector("#composer-recipient"),
   progressLine: document.querySelector("#progress-line"),
   progressText: document.querySelector("#progress-text"),
   imageStrip: document.querySelector("#image-strip"),
@@ -232,6 +239,7 @@ const els = {
   statusText: document.querySelector("#status-text"),
   clearChat: document.querySelector("#clear-chat"),
   webSearchToggle: document.querySelector("#web-search-toggle"),
+  composerExternalResearch: document.querySelector("#composer-external-research"),
   workspacePanel: document.querySelector("#workspace-panel"),
   workspaceClose: document.querySelector("#workspace-close"),
   workspaceFolderName: document.querySelector("#workspace-folder-name"),
@@ -320,6 +328,44 @@ const els = {
   characterMemoryFilters: document.querySelector("#character-memory-filters"),
   characterMemorySearch: document.querySelector("#character-memory-search"),
   characterMemoryList: document.querySelector("#character-memory-list"),
+  personRelationshipToggle: document.querySelector("#person-relationship-toggle"),
+  personRelationshipPanel: document.querySelector("#person-relationship-panel"),
+  personRelationshipClose: document.querySelector("#person-relationship-close"),
+  personTabButtons: document.querySelectorAll("[data-person-tab]"),
+  personTabPanels: document.querySelectorAll("[data-person-tab-panel]"),
+  personList: document.querySelector("#person-list"),
+  selfLastName: document.querySelector("#self-last-name"),
+  selfFirstName: document.querySelector("#self-first-name"),
+  selfDisplayName: document.querySelector("#self-display-name"),
+  selfNickname: document.querySelector("#self-nickname"),
+  selfBirthdate: document.querySelector("#self-birthdate"),
+  selfGender: document.querySelector("#self-gender"),
+  selfBloodType: document.querySelector("#self-blood-type"),
+  selfPersonalityType: document.querySelector("#self-personality-type"),
+  selfPersonalitySummary: document.querySelector("#self-personality-summary"),
+  selfNotes: document.querySelector("#self-notes"),
+  selfSave: document.querySelector("#self-save"),
+  selfSaveStatus: document.querySelector("#self-save-status"),
+  personLastName: document.querySelector("#person-last-name"),
+  personFirstName: document.querySelector("#person-first-name"),
+  personDisplayName: document.querySelector("#person-display-name"),
+  personNickname: document.querySelector("#person-nickname"),
+  personCategory: document.querySelector("#person-category"),
+  personRelationDetail: document.querySelector("#person-relation-detail"),
+  personPhoto: document.querySelector("#person-photo"),
+  personPhotoPreview: document.querySelector("#person-photo-preview"),
+  personPhotoPick: document.querySelector("#person-photo-pick"),
+  personPhotoClear: document.querySelector("#person-photo-clear"),
+  personPhotoFile: document.querySelector("#person-photo-file"),
+  personBirthdate: document.querySelector("#person-birthdate"),
+  personGender: document.querySelector("#person-gender"),
+  personBloodType: document.querySelector("#person-blood-type"),
+  personPersonalityType: document.querySelector("#person-personality-type"),
+  personRelationshipMemo: document.querySelector("#person-relationship-memo"),
+  personRelationshipMap: document.querySelector("#person-relationship-map"),
+  personBiorhythmView: document.querySelector("#person-biorhythm-view"),
+  personClear: document.querySelector("#person-clear"),
+  personSave: document.querySelector("#person-save"),
   studyPacksToggle: document.querySelector("#study-packs-toggle"),
   studyPacksPanel: document.querySelector("#study-packs-panel"),
   studyPacksClose: document.querySelector("#study-packs-close"),
@@ -445,6 +491,11 @@ function t(key, params = {}) {
   return text;
 }
 
+function tWithDomFallback(key, fallback = "") {
+  const translated = t(key);
+  return translated === key && fallback ? fallback : translated;
+}
+
 function contextMemoryScope() {
   return {
     scopeType: "user",
@@ -560,16 +611,16 @@ function forgetCharacterMemoryFromContext(memoryId, memorySet = activeCharacterM
 function applyI18n() {
   document.documentElement.lang = state.language;
   document.querySelectorAll("[data-i18n]").forEach((element) => {
-    element.textContent = t(element.dataset.i18n);
+    element.textContent = tWithDomFallback(element.dataset.i18n, element.textContent.trim());
   });
   document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
-    element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder));
+    element.setAttribute("placeholder", tWithDomFallback(element.dataset.i18nPlaceholder, element.getAttribute("placeholder") || ""));
   });
   document.querySelectorAll("[data-i18n-title]").forEach((element) => {
-    element.setAttribute("title", t(element.dataset.i18nTitle));
+    element.setAttribute("title", tWithDomFallback(element.dataset.i18nTitle, element.getAttribute("title") || ""));
   });
   document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
-    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+    element.setAttribute("aria-label", tWithDomFallback(element.dataset.i18nAriaLabel, element.getAttribute("aria-label") || ""));
   });
   if (els.languageSelect) els.languageSelect.value = state.language;
 }
@@ -706,6 +757,8 @@ function setLanguage(language) {
   renderAsrSettingsPanel();
   renderStudyPacksPanel();
   renderPluginsPanel();
+  renderPersonRelationshipPanel();
+  renderComposerRecipients();
   renderWeatherLocationStatus();
   render();
 }
@@ -2527,6 +2580,459 @@ function studyPackContextSystemPrompt(requestText = "") {
   return `${activeLine}選択された教材パックのモードを次の回答に使います。\n${modePrompts}${replyDraftOutputLimit}${isReplyDraftRequest(requestText) ? "" : multiPackOutputLimit}教材パック本体は書き換えません。\n`;
 }
 
+function renderComposerRecipients() {
+  if (!els.composerRecipient) return;
+  const current = state.selectedPersonId || "";
+  els.composerRecipient.innerHTML = [
+    `<option value="">${escapeHtml(t("person.recipientNone"))}</option>`,
+    ...state.people.map((person) => `<option value="${escapeHtml(person.id)}">${escapeHtml(person.name)}</option>`),
+  ].join("");
+  const selectedStillExists = state.people.some((person) => person.id === current);
+  state.selectedPersonId = selectedStillExists ? current : "";
+  els.composerRecipient.value = state.selectedPersonId;
+}
+
+function selectedRecipientContextPrompt() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api || !state.selectedPersonId) return "";
+  const person = state.people.find((item) => item.id === state.selectedPersonId);
+  return person ? api.buildRecipientContextPrompt(person) : "";
+}
+
+function personRelationshipContextSystemPrompt() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api?.buildPeopleContextPrompt) return "";
+  return api.buildPeopleContextPrompt(state.selfProfile, state.people);
+}
+
+function renderSelectOptions(select, options, current = "") {
+  if (!select) return;
+  select.innerHTML = options
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`)
+    .join("");
+  select.value = options.some((item) => item.id === current) ? current : "";
+}
+
+function renderPersonRelationDetails(current = "") {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api || !els.personRelationDetail) return;
+  const category = els.personCategory?.value || "friend";
+  const details = api.relationshipDetails(category);
+  const next = details.some((item) => item.id === current) ? current : details[0]?.id || "other";
+  renderSelectOptions(els.personRelationDetail, details, next);
+}
+
+function renderPersonProfileSelects(person = {}) {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api) return;
+  renderSelectOptions(els.personGender, api.genderOptions(), person.gender || els.personGender?.value || "");
+  renderSelectOptions(els.personBloodType, api.bloodTypeOptions(), person.bloodType || els.personBloodType?.value || "");
+  renderSelectOptions(els.personPersonalityType, api.personalityTypes(), person.personalityType || els.personPersonalityType?.value || "");
+}
+
+function renderPersonPhotoPreview(src = "") {
+  if (!els.personPhotoPreview) return;
+  const value = String(src || els.personPhoto?.value || "");
+  els.personPhotoPreview.innerHTML = value ? `<img src="${escapeHtml(value)}" alt="">` : escapeHtml(t("person.photoInitial"));
+}
+
+function pickPersonPhotoFile() {
+  els.personPhotoFile?.click();
+}
+
+function clearPersonPhoto() {
+  if (els.personPhoto) els.personPhoto.value = "";
+  if (els.personPhotoFile) els.personPhotoFile.value = "";
+  renderPersonPhotoPreview("");
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",", 2)[1] : result);
+    });
+    reader.addEventListener("error", () => reject(reader.error || new Error("file read failed")));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handlePersonPhotoFileChange() {
+  const file = els.personPhotoFile?.files?.[0];
+  if (!file) return;
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+    window.alert(t("person.photoUnsupported"));
+    els.personPhotoFile.value = "";
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    window.alert(t("person.photoTooLarge"));
+    els.personPhotoFile.value = "";
+    return;
+  }
+  try {
+    const base64 = await fileToBase64(file);
+    const response = await fetch("/api/person-photo/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: file.name, mime: file.type, base64 }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok || !payload.url) {
+      throw new Error(payload.error || "upload failed");
+    }
+    if (els.personPhoto) els.personPhoto.value = payload.url;
+    renderPersonPhotoPreview(payload.url);
+    if (els.trainingStatus) els.trainingStatus.textContent = t("person.photoSaved");
+  } catch (error) {
+    window.alert(t("person.photoUploadFailed").replace("{error}", error?.message || String(error)));
+  } finally {
+    if (els.personPhotoFile) els.personPhotoFile.value = "";
+  }
+}
+
+function renderSelfProfileEditor() {
+  const profile = state.selfProfile || {};
+  if (els.selfLastName) els.selfLastName.value = profile.lastName || "";
+  if (els.selfFirstName) els.selfFirstName.value = profile.firstName || "";
+  if (els.selfDisplayName) els.selfDisplayName.value = profile.displayName || "";
+  if (els.selfNickname) els.selfNickname.value = profile.nickname || "";
+  if (els.selfBirthdate) els.selfBirthdate.value = profile.birthdate || "";
+  renderSelectOptions(els.selfGender, window.GEMMA_PERSON_RELATIONSHIP?.genderOptions?.() || [], profile.gender || "");
+  renderSelectOptions(els.selfBloodType, window.GEMMA_PERSON_RELATIONSHIP?.bloodTypeOptions?.() || [], profile.bloodType || "");
+  renderSelectOptions(els.selfPersonalityType, window.GEMMA_PERSON_RELATIONSHIP?.personalityTypes?.() || [], profile.personalityType || "");
+  if (els.selfPersonalitySummary) {
+    els.selfPersonalitySummary.textContent = profile.personalitySummary || window.GEMMA_PERSON_RELATIONSHIP?.selfPersonalitySummary?.(profile) || "";
+    els.selfPersonalitySummary.dataset.autoSummary = profile.personalitySummary ? "false" : "true";
+  }
+  if (els.selfNotes) els.selfNotes.value = profile.notes || "";
+}
+
+function updateSelfPersonalitySummary() {
+  if (!els.selfPersonalitySummary) return;
+  const current = els.selfPersonalitySummary.textContent.trim();
+  if (current && els.selfPersonalitySummary.dataset.autoSummary !== "true") return;
+  const summary = window.GEMMA_PERSON_RELATIONSHIP?.selfPersonalitySummary?.({
+    birthdate: els.selfBirthdate?.value,
+    personalityType: els.selfPersonalityType?.value,
+  }) || "";
+  if (!summary) return;
+  els.selfPersonalitySummary.textContent = summary;
+  els.selfPersonalitySummary.dataset.autoSummary = "true";
+}
+
+function currentPersonEditorInput() {
+  return {
+    id: state.editingPersonId,
+    lastName: els.personLastName?.value,
+    firstName: els.personFirstName?.value,
+    displayName: els.personDisplayName?.value,
+    nickname: els.personNickname?.value,
+    relationshipCategory: els.personCategory?.value,
+    relationDetail: els.personRelationDetail?.value,
+    photo: els.personPhoto?.value,
+    birthdate: els.personBirthdate?.value,
+    gender: els.personGender?.value,
+    bloodType: els.personBloodType?.value,
+    personalityType: els.personPersonalityType?.value,
+    personalityTypeSource: els.personPersonalityType?.value ? "user_reported" : "unknown",
+    notes: els.personRelationshipMemo?.value,
+  };
+}
+
+function hasPersonEditorInput(input = {}) {
+  return [
+    input.lastName,
+    input.firstName,
+    input.displayName,
+    input.nickname,
+    input.birthdate,
+    input.notes,
+  ].some((value) => String(value || "").trim());
+}
+
+function relationshipMapPeople() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api) return state.people;
+  const draft = currentPersonEditorInput();
+  if (!hasPersonEditorInput(draft)) return state.people;
+  if (!draft.id) return [api.normalizePerson(draft), ...state.people];
+  let replaced = false;
+  const people = state.people.map((person) => {
+    if (person.id !== draft.id) return person;
+    replaced = true;
+    return api.normalizePerson({ ...person, ...draft });
+  });
+  return replaced ? people : [api.normalizePerson(draft), ...people];
+}
+
+function renderBiorhythmCategories(categories = {}) {
+  return ["health", "work", "study", "love"].map((key) => {
+    const item = categories[key];
+    if (!item) return "";
+    return `
+      <span class="person-biorhythm-category">
+        <b>${escapeHtml(item.label)}</b>
+        <strong>${escapeHtml(item.phase)}</strong>
+        <small>${escapeHtml(item.detail || "")}</small>
+      </span>
+    `;
+  }).join("");
+}
+
+function renderBiorhythmRows(items = []) {
+  return items.map((item) => `
+    <li class="person-biorhythm-row">
+      <b class="person-biorhythm-phase">${escapeHtml(item.phase || item.mark || "休息")}</b>
+      <div>
+        <strong>${escapeHtml(item.label || "")}</strong>
+        <span>${escapeHtml(item.title || "")}</span>
+        <div class="person-biorhythm-categories">${renderBiorhythmCategories(item.categories)}</div>
+      </div>
+    </li>
+  `).join("");
+}
+
+function renderPersonBiorhythm() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api || !els.personBiorhythmView) return;
+  const model = api.biorhythmSelfModel?.(state.selfProfile?.birthdate);
+  if (!model?.ok) {
+    els.personBiorhythmView.innerHTML = `<p class="management-note">自分の情報に生年月日を入れると表示されます。</p>`;
+    return;
+  }
+  els.personBiorhythmView.innerHTML = `
+    <div class="person-biorhythm-head">
+      <div>
+        <strong>自分のバイオリズム</strong>
+        <span>月単位・年単位の参考リズムです。</span>
+      </div>
+      <b>${escapeHtml(state.selfProfile?.birthdate || "")}</b>
+    </div>
+    <section class="person-biorhythm-section">
+      <strong>今月と前後2ヶ月</strong>
+      <ul>${renderBiorhythmRows(model.months)}</ul>
+    </section>
+    <section class="person-biorhythm-section">
+      <strong>今年と前後1年</strong>
+      <ul>${renderBiorhythmRows(model.years)}</ul>
+    </section>
+    <small class="person-biorhythm-source">${escapeHtml(model.source || "")}</small>
+  `;
+}
+
+function renderRelationshipMap() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api || !els.personRelationshipMap) return;
+  const sortOptions = api.compatibilitySortOptions?.() || [];
+  const validSort = sortOptions.some((item) => item.id === state.personRelationshipSort)
+    ? state.personRelationshipSort
+    : "total";
+  state.personRelationshipSort = validSort;
+  const model = api.relationshipRankingModel?.(state.selfProfile, relationshipMapPeople(), validSort)
+    || api.relationshipMapModel(state.selfProfile, relationshipMapPeople());
+  els.personRelationshipMap.innerHTML = `
+    <div class="person-map-ranking-header">
+      <label class="setting-field person-map-sort">
+        <span>並び替え</span>
+        <select id="person-ranking-sort">
+          ${sortOptions.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === validSort ? " selected" : ""}>${escapeHtml(item.label)}</option>`).join("")}
+        </select>
+      </label>
+    </div>
+    <div class="person-map-links person-map-ranking-list">
+      ${model.nodes.length ? model.nodes.map((node) => `
+        <details class="person-map-link person-map-link-${escapeHtml(node.category)}">
+          <summary class="person-rank-summary">
+            <b class="person-rank-number">${escapeHtml(String(node.rank || ""))}位</b>
+            <b class="person-rank-mark">${escapeHtml(node.sortMark || node.compatibility?.mark || node.compatibility?.grade || "✗")}</b>
+            <strong>${escapeHtml(node.label)}</strong>
+          </summary>
+          <div class="person-rank-body">
+            <div class="person-rank-meta">
+              <span>${escapeHtml(node.relation)}</span>
+              <span>${escapeHtml(node.sortLabel || "総合")}で並び替え中</span>
+            </div>
+            <section class="person-compatibility-section person-compatibility-total-section">
+              <div>
+                <span>総合</span>
+                <strong>${escapeHtml(node.compatibility?.mark || "✗")} ${escapeHtml((node.compatibility?.label || "総合相性: 未設定").replace(/^総合相性: /, ""))}</strong>
+              </div>
+              <p>${escapeHtml(node.compatibility?.detail || "")}</p>
+            </section>
+            <ul class="person-map-compatibility-list">
+              ${(node.compatibility?.items || []).map((item) => `
+                <li class="person-compatibility-section">
+                  <div class="person-compatibility-section-head">
+                    <span>${escapeHtml(item.label)}</span>
+                    <strong>${escapeHtml(item.mark || item.grade || "✗")} ${escapeHtml(item.title)}</strong>
+                  </div>
+                  ${item.detail ? `<p>${escapeHtml(item.detail)}</p>` : ""}
+                  ${item.source ? `<small>${escapeHtml(`判定データ: ${item.source}`)}</small>` : ""}
+                </li>
+              `).join("")}
+            </ul>
+          </div>
+        </details>
+      `).join("") : `<p class="management-note">${escapeHtml(t("person.mapEmpty"))}</p>`}
+    </div>
+  `;
+  els.personRelationshipMap.querySelector("#person-ranking-sort")?.addEventListener("change", (event) => {
+    state.personRelationshipSort = event.target.value || "total";
+    renderRelationshipMap();
+  });
+}
+
+function setPersonRelationshipTab(tab = "register") {
+  const next = ["self", "register", "map", "biorhythm"].includes(tab) ? tab : "register";
+  state.personRelationshipTab = next;
+  els.personTabButtons?.forEach((button) => {
+    const active = button.dataset.personTab === next;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  els.personTabPanels?.forEach((panel) => {
+    panel.hidden = panel.dataset.personTabPanel !== next;
+  });
+}
+
+function renderPersonRelationshipPanel() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api || !els.personList) return;
+  renderSelfProfileEditor();
+  if (els.personCategory) {
+    const current = els.personCategory.value || "friend";
+    els.personCategory.innerHTML = api.relationshipCategories()
+      .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`)
+      .join("");
+    els.personCategory.value = api.relationshipCategories().some((item) => item.id === current) ? current : "friend";
+  }
+  renderPersonRelationDetails(els.personRelationDetail?.value || "");
+  renderPersonProfileSelects();
+  renderPersonPhotoPreview();
+  els.personList.innerHTML = state.people.length
+    ? `
+      <div class="person-list-header" aria-hidden="true">
+        <span></span>
+        <span>${escapeHtml(t("person.name"))}</span>
+        <span>${escapeHtml(t("person.category"))}</span>
+        <span>${escapeHtml(t("person.relationshipMemo"))}</span>
+        <span>${escapeHtml(t("management.actions"))}</span>
+      </div>
+      ${state.people.map((person) => `
+      <article class="person-card" data-person-id="${escapeHtml(person.id)}">
+        <div class="person-card-photo">${person.photo ? `<img src="${escapeHtml(person.photo)}" alt="">` : escapeHtml(person.name.slice(0, 2))}</div>
+        <strong class="person-card-name">${escapeHtml(person.name)}</strong>
+        <span class="person-card-relation">${escapeHtml(api.relationDetailLabel(person.relationDetail) || api.categoryLabel(person.relationshipCategory))}</span>
+        <small class="person-card-note">${escapeHtml(person.notes || "メモなし")}</small>
+        <div class="person-card-actions">
+          <button class="ghost-button" type="button" data-person-edit="${escapeHtml(person.id)}">${escapeHtml(t("common.edit"))}</button>
+          <button class="ghost-button" type="button" data-person-delete="${escapeHtml(person.id)}">${escapeHtml(t("management.remove"))}</button>
+        </div>
+      </article>
+    `).join("")}`
+    : `<p class="management-note">${escapeHtml(t("person.empty"))}</p>`;
+  renderRelationshipMap();
+  renderPersonBiorhythm();
+  setPersonRelationshipTab(state.personRelationshipTab);
+  renderComposerRecipients();
+}
+
+function clearPersonEditor() {
+  state.editingPersonId = "";
+  [
+    els.personLastName,
+    els.personFirstName,
+    els.personDisplayName,
+    els.personNickname,
+    els.personPhoto,
+    els.personBirthdate,
+    els.personRelationshipMemo,
+  ].forEach((input) => {
+    if (input) input.value = "";
+  });
+  if (els.personCategory) els.personCategory.value = "friend";
+  if (els.personPhotoFile) els.personPhotoFile.value = "";
+  renderPersonProfileSelects({ gender: "", bloodType: "", personalityType: "" });
+  renderPersonPhotoPreview("");
+  renderPersonRelationDetails("");
+}
+
+function fillPersonEditor(person) {
+  if (!person) return;
+  state.editingPersonId = person.id;
+  if (els.personLastName) els.personLastName.value = person.lastName || "";
+  if (els.personFirstName) els.personFirstName.value = person.firstName || "";
+  if (els.personDisplayName) els.personDisplayName.value = person.displayName || "";
+  if (els.personNickname) els.personNickname.value = person.nickname;
+  if (els.personCategory) els.personCategory.value = person.relationshipCategory;
+  renderPersonRelationDetails(person.relationDetail);
+  if (els.personPhoto) els.personPhoto.value = person.photo;
+  renderPersonPhotoPreview(person.photo);
+  if (els.personBirthdate) els.personBirthdate.value = person.birthdate || "";
+  renderPersonProfileSelects(person);
+  if (els.personRelationshipMemo) els.personRelationshipMemo.value = person.notes || person.relationshipMemo || "";
+}
+
+function saveSelfProfileFromEditor() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api) return;
+  state.selfProfile = api.saveSelfProfile({
+    lastName: els.selfLastName?.value,
+    firstName: els.selfFirstName?.value,
+    displayName: els.selfDisplayName?.value,
+    nickname: els.selfNickname?.value,
+    birthdate: els.selfBirthdate?.value,
+    gender: els.selfGender?.value,
+    bloodType: els.selfBloodType?.value,
+    personalityType: els.selfPersonalityType?.value,
+    personalitySummary: els.selfPersonalitySummary?.textContent,
+    notes: els.selfNotes?.value,
+  });
+  renderPersonRelationshipPanel();
+  flashSavedButton(els.selfSave);
+  if (els.selfSaveStatus) els.selfSaveStatus.textContent = t("person.selfSaved");
+  if (els.trainingStatus) els.trainingStatus.textContent = t("person.selfSaved");
+}
+
+function savePersonFromEditor() {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api) return;
+  state.people = api.upsertPerson(state.people, {
+    id: state.editingPersonId,
+    lastName: els.personLastName?.value,
+    firstName: els.personFirstName?.value,
+    displayName: els.personDisplayName?.value,
+    nickname: els.personNickname?.value,
+    relationshipCategory: els.personCategory?.value,
+    relationDetail: els.personRelationDetail?.value,
+    photo: els.personPhoto?.value,
+    birthdate: els.personBirthdate?.value,
+    gender: els.personGender?.value,
+    bloodType: els.personBloodType?.value,
+    personalityType: els.personPersonalityType?.value,
+    personalityTypeSource: els.personPersonalityType?.value ? "user_reported" : "unknown",
+    notes: els.personRelationshipMemo?.value,
+  });
+  state.people = api.savePeople(state.people);
+  clearPersonEditor();
+  renderPersonRelationshipPanel();
+  renderComposerRecipients();
+  if (els.trainingStatus) els.trainingStatus.textContent = t("person.saved");
+}
+
+function deletePerson(personId) {
+  const api = window.GEMMA_PERSON_RELATIONSHIP;
+  if (!api || !personId) return;
+  state.people = api.deletePerson(state.people, personId);
+  state.people = api.savePeople(state.people);
+  if (state.selectedPersonId === personId) state.selectedPersonId = "";
+  if (state.editingPersonId === personId) clearPersonEditor();
+  renderPersonRelationshipPanel();
+  renderComposerRecipients();
+}
+
 function renderCharacterPanel() {
   if (els.characterName) els.characterName.value = state.character?.name || "Gemma";
   if (els.characterUserName) els.characterUserName.value = state.character?.userName || "";
@@ -3336,6 +3842,8 @@ function render() {
   renderWorkspace();
   renderTrainingSetControls();
   if (els.characterPanel && !els.characterPanel.hidden) renderCharacterPanel();
+  if (els.personRelationshipPanel && !els.personRelationshipPanel.hidden) renderPersonRelationshipPanel();
+  renderComposerRecipients();
   els.send.disabled = false;
   els.send.hidden = state.busy;
   els.stop.hidden = !state.busy;
@@ -3343,6 +3851,7 @@ function render() {
   renderPendingImages();
   renderStudyPackModeRow();
   renderWebSearchToggle({ button: els.webSearchToggle, enabled: state.webSearch });
+  renderWebSearchToggle({ button: els.composerExternalResearch, enabled: state.webSearch });
   els.progressLine.hidden = true;
 }
 
@@ -3815,7 +4324,8 @@ function factualSafetySystemSuffix(codingMode, translationMode) {
     "",
     "事実確認ルール:",
     "- 固有名詞、会社、人物、製品、日付、数値、代表者、所在地などは推測で断定しないでください。",
-    `- 学習セット、ユーザー提供文、Web検索結果、添付資料のどれにも根拠がない情報は「${t("training.uncertainAnswer")}」と答えてください。`,
+    `- 人物・関係メモ、学習セット、ユーザー提供文、Web検索結果、添付資料のどれにも根拠がない情報は「${t("training.uncertainAnswer")}」と答えてください。`,
+    "- 人物・関係メモにある登録人物、自分の情報、関係メモ、バイオリズムは、ユーザーが登録した根拠として扱ってください。",
     "- 似た言葉や一般知識から別の意味を作らないでください。",
     "- 学習セットにある事実は優先して使ってください。ただし、学習セットにない追加情報を補完しないでください。",
     "- 現在情報や外部確認が必要な質問では、Web検索を使うよう短く案内してください。",
@@ -4074,6 +4584,15 @@ function chatRequestOptions(text, hasImages = false) {
     useStudyPackContext: hasStudyPackSelection,
     isolateUserMessage: rewriteStudyPackMode,
   });
+}
+
+function confirmExternalResearchIfNeeded(requestOptions) {
+  if (!requestOptions?.webSearch || requestOptions?.codingMode || requestOptions?.translationMode) return true;
+  const confirmed = window.confirm(t("composer.externalResearchConfirm"));
+  if (confirmed) return true;
+  state.webSearch = false;
+  render();
+  return false;
 }
 
 function workspaceBuilderSystemPrompt() {
@@ -4890,6 +5409,7 @@ async function sendMessage(text) {
     sizeLabel: file.sizeLabel,
   }));
   const requestOptions = chatRequestOptions(text, images.length > 0);
+  if (!confirmExternalResearchIfNeeded(requestOptions)) return;
   const appliedStudyPackSelections = requestOptions.useStudyPackContext ? selectedStudyPackModes() : [];
   const appliedStudyPackModeLabel = studyPackModesDisplayLabel(appliedStudyPackSelections);
   const userMessage = { role: "user", content: text, images, imagePreviews, attachments };
@@ -5019,7 +5539,7 @@ async function sendMessage(text) {
             requestOptions.thinkingMode,
             requestOptions.translationMode,
           );
-    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${baseRequestSystem}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${trainingContextSystemPrompt()}`;
+    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${requestOptions.translationMode ? "" : personRelationshipContextSystemPrompt()}${selectedRecipientContextPrompt()}${baseRequestSystem}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${trainingContextSystemPrompt()}`;
     const modelUserMessage = messageWithAttachmentContext(userMessage, attachmentContext);
     const requestMessages = requestOptions.translationMode || requestOptions.fastModel || requestOptions.isolateUserMessage
       ? [modelUserMessage]
@@ -5112,9 +5632,10 @@ async function sendMessage(text) {
       history_turns: requestOptions.historyTurns,
       think: requestOptions.think,
       keep_alive: requestOptions.keepAlive,
-      ...(searchPayloadOptions?.(requestOptions, 4) || {
+      ...(searchPayloadOptions?.({ ...requestOptions, appInfo: state.appInfo }, 4) || {
         web_search: !requestOptions.codingMode && requestOptions.webSearch,
         search_results: 4,
+        internet_layer_channels: [],
       }),
       workspace: workspaceRequest,
     };
@@ -5815,6 +6336,7 @@ function setupManagementPanels() {
     renderStudyPacksPanel,
     renderPluginsPanel,
     renderContractsPanel,
+    renderPersonRelationshipPanel,
   });
 }
 
@@ -6982,6 +7504,30 @@ els.characterMemoryList?.addEventListener("click", (event) => {
     deleteCharacterMemory(deleteButton.dataset.memoryDelete);
   }
 });
+els.selfSave?.addEventListener("click", saveSelfProfileFromEditor);
+els.selfBirthdate?.addEventListener("change", updateSelfPersonalitySummary);
+els.selfPersonalityType?.addEventListener("change", updateSelfPersonalitySummary);
+els.personSave?.addEventListener("click", savePersonFromEditor);
+els.personClear?.addEventListener("click", clearPersonEditor);
+els.personPhotoPick?.addEventListener("click", pickPersonPhotoFile);
+els.personPhotoClear?.addEventListener("click", clearPersonPhoto);
+els.personPhotoFile?.addEventListener("change", handlePersonPhotoFileChange);
+els.personCategory?.addEventListener("change", () => renderPersonRelationDetails(""));
+els.personTabButtons?.forEach((button) => {
+  button.addEventListener("click", () => setPersonRelationshipTab(button.dataset.personTab));
+});
+els.personList?.addEventListener("click", (event) => {
+  const editId = event.target.closest("[data-person-edit]")?.dataset.personEdit;
+  const deleteId = event.target.closest("[data-person-delete]")?.dataset.personDelete;
+  if (editId) {
+    fillPersonEditor(state.people.find((item) => item.id === editId));
+    return;
+  }
+  if (deleteId) deletePerson(deleteId);
+});
+els.composerRecipient?.addEventListener("change", () => {
+  state.selectedPersonId = els.composerRecipient.value || "";
+});
 els.memoryCandidateClose?.addEventListener("click", closeMemoryCandidate);
 els.memoryCandidateDiscard?.addEventListener("click", closeMemoryCandidate);
 els.memoryCandidateSave?.addEventListener("click", saveMemoryCandidate);
@@ -7045,6 +7591,11 @@ els.clearChat.addEventListener("click", () => {
 });
 
 els.webSearchToggle.addEventListener("click", () => {
+  toggleWebSearch(state);
+  render();
+});
+
+els.composerExternalResearch?.addEventListener("click", () => {
   toggleWebSearch(state);
   render();
 });
@@ -7246,6 +7797,8 @@ restoreAutoSavedSettings();
 applyI18n();
 renderStudyPacksPanel();
 renderPluginsPanel();
+renderPersonRelationshipPanel();
+renderComposerRecipients();
 if (els.systemPrompt && allSystemPromptTemplateTexts().includes(els.systemPrompt.value)) {
   const templateId = detectSystemPromptTemplate(els.systemPrompt.value);
   els.systemPrompt.value = systemPromptTemplateText(templateId, state.language);

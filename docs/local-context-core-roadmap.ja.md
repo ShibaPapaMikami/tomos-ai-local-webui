@@ -187,6 +187,60 @@ Dating側エンジニアへの指示:
 - [ ] AI同士模擬チャット評価は `sourceType: simulation` として扱う
 - [ ] 実キャラ、実ユーザー、権利キャラのsampleを共通packageに入れない
 
+## 人物・関係メモアプリでの利用
+
+人物・関係メモアプリでは、Local Context Coreを人物プロフィールと関係性の保存に使う。
+Monicaの思想を参考にするが、TOMOSではローカル保存、返信支援、プラグイン参照を優先する。
+
+使う対象:
+
+- 友達
+- 恋愛
+- 家族
+- 仕事
+- 自分のプロフィール
+- 人物プロフィール
+- 自分との詳細関係
+- 自分との関係メモ
+- 関係図
+- 送り先別の返信支援
+
+ContextEntity:
+
+- `entityType: person`
+- `name`
+- `firstName`
+- `lastName`
+- `displayName`
+- `aliases`
+- `photoRef`
+- `birthdate`
+- `gender`
+- `bloodType`
+- `personalityType`
+- `personalityTypeSource`
+- `notes`
+- `scope`
+
+ContextRelation:
+
+- `fromEntityId`: 自分または所有者
+- `toEntityId`: 登録した人物
+- `relationType`: `friend`、`romantic_interest`、`family`、`work_contact`
+- `relationDetail`: `child`、`spouse`、`manager`、`client` など
+- `snippet`: 関係メモ
+- `confidence`
+- `scope`
+
+制約:
+
+- [ ] MBTIは公式診断として扱わない
+- [ ] MBTIの根拠は `self_reported`、`user_reported`、`estimated`、`unknown` に分ける
+- [ ] AIが他人の属性を勝手に確定保存しない
+- [ ] 保存前確認なしにセンシティブ情報を `remember()` しない
+- [ ] チャット返信支援では必要な人物メモだけを `context()` に渡す
+- [ ] 採用、評価、医療、法的判断には使わない
+
 ## やらないこと
 
 - Supermemory本体の組み込み

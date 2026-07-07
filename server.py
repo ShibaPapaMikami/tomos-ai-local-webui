@@ -82,6 +82,13 @@ WEB_ROOT = ROOT / "web"
 KNOWLEDGE_DB_PATH = default_db_path(ROOT)
 CONTEXT_DB_PATH = context_db_path(ROOT)
 CONTRACT_DB_PATH = default_contract_db_path(ROOT)
+PERSON_PHOTO_DIR = ROOT / "data" / "person-photos"
+PERSON_PHOTO_MAX_BYTES = 2 * 1024 * 1024
+PERSON_PHOTO_MIME_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.206")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
@@ -257,6 +264,8 @@ ASR_SETUP_JOB: dict[str, object] = {}
 ASR_SETUP_LOCK = threading.Lock()
 OCR_SETUP_JOB: dict[str, object] = {}
 OCR_SETUP_LOCK = threading.Lock()
+INTERNET_LAYER_SETUP_JOB: dict[str, object] = {}
+INTERNET_LAYER_SETUP_LOCK = threading.Lock()
 ASR_WORKER_PROCESS: subprocess.Popen | None = None
 ASR_WORKER_OUTPUTS: queue.Queue[str] = queue.Queue()
 ASR_WORKER_LOCK = threading.Lock()
@@ -462,6 +471,37 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
         return {}
     raw = handler.rfile.read(length)
     return json.loads(raw.decode("utf-8"))
+
+
+def person_photo_upload_payload(name: str, mime: str, base64_value: str) -> dict:
+    normalized_mime = (mime or "").split(";")[0].strip().lower()
+    suffix = PERSON_PHOTO_MIME_EXTENSIONS.get(normalized_mime)
+    if not suffix:
+        return {"ok": False, "error": "unsupported image type"}
+    raw_value = (base64_value or "").strip()
+    if raw_value.startswith("data:"):
+        if "," not in raw_value:
+            return {"ok": False, "error": "invalid image data"}
+        raw_value = raw_value.split(",", 1)[1]
+    try:
+        body = base64.b64decode(raw_value, validate=True)
+    except (binascii.Error, ValueError):
+        return {"ok": False, "error": "invalid image data"}
+    if not body:
+        return {"ok": False, "error": "empty image data"}
+    if len(body) > PERSON_PHOTO_MAX_BYTES:
+        return {"ok": False, "error": "image too large"}
+    PERSON_PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+    stored_name = f"{uuid.uuid4().hex}{suffix}"
+    (PERSON_PHOTO_DIR / stored_name).write_bytes(body)
+    return {
+        "ok": True,
+        "file": stored_name,
+        "name": Path(name or stored_name).name,
+        "mime": normalized_mime,
+        "size": len(body),
+        "url": f"/api/person-photo/view?file={urllib.parse.quote(stored_name)}",
+    }
 
 
 def is_lan_ipv4_address(address: str) -> bool:
@@ -3392,6 +3432,325 @@ def pc_diagnostics_payload(available_models: set[str] | list[str] | None = None,
     }
 
 
+AGENT_REACH_PRIMARY_COMMAND = "agent-reach"
+AGENT_REACH_COMMAND_CANDIDATES = [AGENT_REACH_PRIMARY_COMMAND, "agentreach"]
+INTERNET_LAYER_RESULT_SCHEMA_VERSION = "tomos-internet-layer-result-v0.1"
+AGENT_REACH_INSTALL_GUIDE_URL = "https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/install.md"
+AGENT_REACH_DOCTOR_TIMEOUT_SECONDS = 15
+AGENT_REACH_VENV_DIR = Path.home() / ".agent-reach-venv"
+AGENT_REACH_PACKAGE_URL = "git+https://github.com/Panniantong/Agent-Reach.git"
+
+
+def agent_reach_venv_python() -> Path:
+    return AGENT_REACH_VENV_DIR / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def agent_reach_venv_executable() -> Path:
+    return AGENT_REACH_VENV_DIR / ("Scripts/agent-reach.exe" if os.name == "nt" else "bin/agent-reach")
+
+
+def agent_reach_executable() -> str:
+    venv_executable = agent_reach_venv_executable()
+    if venv_executable.exists():
+        return str(venv_executable)
+    for command in AGENT_REACH_COMMAND_CANDIDATES:
+        resolved = shutil.which(command)
+        if resolved:
+            return resolved
+    return ""
+
+
+def agent_reach_command_contract(executable: str = "") -> dict[str, object]:
+    command = executable or AGENT_REACH_PRIMARY_COMMAND
+    return {
+        "tool": "Agent-Reach",
+        "schemaVersion": INTERNET_LAYER_RESULT_SCHEMA_VERSION,
+        "installGuideUrl": AGENT_REACH_INSTALL_GUIDE_URL,
+        "doctorCommand": [command, "doctor"],
+        "executionMode": "upstream-tools",
+        "executionPolicy": {
+            "autoInstall": False,
+            "requiresUserConfirmation": True,
+            "autoSaveToMemory": False,
+            "snsRequiresExplicitPermission": True,
+        },
+        "resultShape": {
+            "ok": "boolean",
+            "query": "string",
+            "channel": "web|github|youtube|rss|sns",
+            "summary": "string",
+            "sources": [{"title": "string", "url": "string", "snippet": "string"}],
+            "warnings": ["string"],
+        },
+    }
+
+
+def internet_layer_diagnostics_payload() -> dict[str, object]:
+    executable = agent_reach_executable()
+    detected = bool(executable)
+    base_status = "ready" if detected else "missing"
+    channels = {
+        "web": {"status": base_status, "requiresPermission": False},
+        "github": {"status": base_status, "requiresPermission": False},
+        "youtube": {"status": base_status, "requiresPermission": False},
+        "rss": {"status": base_status, "requiresPermission": False},
+        "sns": {"status": "permission-required", "requiresPermission": True},
+    }
+    return {
+        "ok": True,
+        "tool": "Agent-Reach",
+        "installed": detected,
+        "executable": executable,
+        "status": "ready" if detected else "not-installed",
+        "contract": agent_reach_command_contract(executable),
+        "channels": channels,
+        "memoryAutoSave": False,
+    }
+
+
+def parse_agent_reach_doctor_output(text: str) -> dict[str, object]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    candidates = [raw]
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if lines:
+        candidates.append(lines[-1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    marker_map = {
+        "web": ["任意网页", "任意網頁", "web page", "web pages"],
+        "github": ["github"],
+        "youtube": ["youtube"],
+        "rss": ["rss/atom", "rss"],
+    }
+    lower_raw = raw.lower()
+    parsed: dict[str, object] = {}
+    for channel, markers in marker_map.items():
+        if any(marker.lower() in lower_raw for marker in markers):
+            parsed[channel] = True
+    if parsed:
+        parsed["ok"] = True
+    return parsed
+    return {}
+
+
+def normalize_agent_reach_channel_status(value: object) -> str:
+    if isinstance(value, bool):
+        return "ready" if value else "missing"
+    if isinstance(value, dict):
+        if value.get("ok") is True or value.get("available") is True or value.get("ready") is True:
+            return "ready"
+        if value.get("ok") is False or value.get("available") is False or value.get("ready") is False:
+            return "missing"
+        value = value.get("status", "")
+    normalized = str(value or "").strip().lower()
+    if normalized in {"ok", "ready", "available", "enabled", "pass", "passed", "true"}:
+        return "ready"
+    if normalized in {"missing", "not-installed", "unavailable", "disabled", "fail", "failed", "false"}:
+        return "missing"
+    return "checking"
+
+
+def agent_reach_doctor_channels(doctor: dict[str, object]) -> dict[str, dict[str, object]]:
+    raw_channels = doctor.get("channels") if isinstance(doctor.get("channels"), dict) else {}
+    channels: dict[str, dict[str, object]] = {}
+    for channel in ["web", "github", "youtube", "rss", "sns"]:
+        raw_value = raw_channels.get(channel) if isinstance(raw_channels, dict) and channel in raw_channels else doctor.get(channel)
+        if raw_value is None:
+            raw_value = "permission-required" if channel == "sns" else "checking"
+        status = "permission-required" if channel == "sns" and raw_value in {None, ""} else normalize_agent_reach_channel_status(raw_value)
+        if channel == "sns" and status == "checking":
+            status = "permission-required"
+        channels[channel] = {
+            "status": status,
+            "requiresPermission": channel == "sns",
+        }
+    return channels
+
+
+def normalize_internet_layer_channels(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    allowed = {"web", "github", "youtube", "rss", "sns"}
+    channels: list[str] = []
+    for item in value:
+        channel = str(item or "").strip().lower()
+        if channel in allowed and channel not in channels:
+            channels.append(channel)
+    return channels
+
+
+def agent_reach_doctor_payload(runner=subprocess.run) -> dict[str, object]:
+    diagnostics = internet_layer_diagnostics_payload()
+    executable = str(diagnostics.get("executable") or "")
+    if not executable:
+        return {
+            "ok": True,
+            "installed": False,
+            "status": "not-installed",
+            "message": "エージェントリーチは未導入です。",
+            "contract": diagnostics.get("contract") or agent_reach_command_contract(),
+            "doctor": {},
+        }
+    command = [executable, "doctor"]
+    try:
+        result = runner(
+            command,
+            check=False,
+            capture_output=True,
+            timeout=AGENT_REACH_DOCTOR_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "installed": True,
+            "status": "timeout",
+            "message": "エージェントリーチ診断が時間内に完了しませんでした。",
+            "command": command,
+            "contract": diagnostics.get("contract") or agent_reach_command_contract(executable),
+            "doctor": {},
+        }
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "ok": False,
+            "installed": True,
+            "status": "error",
+            "message": str(exc),
+            "command": command,
+            "contract": diagnostics.get("contract") or agent_reach_command_contract(executable),
+            "doctor": {},
+        }
+    stdout = decode_subprocess_output(getattr(result, "stdout", ""))
+    stderr = decode_subprocess_output(getattr(result, "stderr", ""))
+    doctor = parse_agent_reach_doctor_output(stdout)
+    channels = agent_reach_doctor_channels(doctor)
+    return {
+        "ok": getattr(result, "returncode", 1) == 0,
+        "installed": True,
+        "status": "ready" if getattr(result, "returncode", 1) == 0 else "error",
+        "message": "エージェントリーチ診断が完了しました。" if getattr(result, "returncode", 1) == 0 else "エージェントリーチ診断でエラーが出ました。",
+        "command": command,
+        "contract": diagnostics.get("contract") or agent_reach_command_contract(executable),
+        "doctor": doctor,
+        "channels": channels,
+        "stdout": stdout[-4000:],
+        "stderr": stderr[-2000:],
+    }
+
+
+def internet_layer_setup_status() -> dict[str, object]:
+    with INTERNET_LAYER_SETUP_LOCK:
+        job = dict(INTERNET_LAYER_SETUP_JOB)
+    return {"ok": True, "job": job, "internetLayer": internet_layer_diagnostics_payload()}
+
+
+def update_internet_layer_setup_job(**updates: object) -> None:
+    with INTERNET_LAYER_SETUP_LOCK:
+        job = dict(INTERNET_LAYER_SETUP_JOB)
+        logs = list(job.get("logs") or [])
+        message = str(updates.get("message") or "")
+        if message:
+            logs.append(message)
+        job.update(updates)
+        job["logs"] = logs[-8:]
+        INTERNET_LAYER_SETUP_JOB.clear()
+        INTERNET_LAYER_SETUP_JOB.update(job)
+
+
+def run_internet_layer_setup_command(command: list[str], message: str, step: int, total: int) -> None:
+    update_internet_layer_setup_job(message=message, step=step, total=total, percent=min(99, round(step / max(total, 1) * 100)))
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    last_line = ""
+    for line in iter_subprocess_output_lines(process):
+        last_line = line or last_line
+        if last_line:
+            update_internet_layer_setup_job(message=last_line)
+    code = process.wait()
+    if code != 0:
+        raise RuntimeError(last_line or f"コマンドが終了コード {code} で失敗しました。")
+
+
+def run_internet_layer_setup() -> None:
+    total = 4
+    try:
+        update_internet_layer_setup_job(
+            status="running",
+            message="エージェントリーチ安全導入を開始しました。",
+            step=0,
+            total=total,
+            percent=0,
+            startedAt=time.time(),
+            finishedAt=None,
+        )
+        venv_python = agent_reach_venv_python()
+        if not venv_python.exists():
+            run_internet_layer_setup_command(
+                [sys.executable, "-m", "venv", str(AGENT_REACH_VENV_DIR)],
+                "専用環境を作成しています。",
+                1,
+                total,
+            )
+        else:
+            update_internet_layer_setup_job(message="専用環境は作成済みです。", step=1, total=total, percent=25)
+        run_internet_layer_setup_command(
+            [str(venv_python), "-m", "pip", "install", "--upgrade", AGENT_REACH_PACKAGE_URL],
+            "エージェントリーチを導入しています。",
+            2,
+            total,
+        )
+        executable = str(agent_reach_venv_executable())
+        run_internet_layer_setup_command(
+            [executable, "install", "--env=auto", "--safe"],
+            "安全モードの初期設定を実行しています。",
+            3,
+            total,
+        )
+        doctor = agent_reach_doctor_payload()
+        final_message = "エージェントリーチ安全導入が完了しました。" if doctor.get("ok") or doctor.get("installed") else "導入後の診断で確認が必要です。"
+        update_internet_layer_setup_job(
+            status="done",
+            message=final_message,
+            step=total,
+            total=total,
+            percent=100,
+            doctor=doctor,
+            finishedAt=time.time(),
+        )
+    except Exception as exc:
+        update_internet_layer_setup_job(status="error", message=str(exc), finishedAt=time.time())
+
+
+def start_internet_layer_setup() -> dict[str, object]:
+    with INTERNET_LAYER_SETUP_LOCK:
+        if INTERNET_LAYER_SETUP_JOB.get("status") == "running":
+            return {"ok": True, "status": "running", "message": str(INTERNET_LAYER_SETUP_JOB.get("message", ""))}
+        INTERNET_LAYER_SETUP_JOB.clear()
+        INTERNET_LAYER_SETUP_JOB.update({
+            "status": "queued",
+            "message": "エージェントリーチ安全導入待機中です。",
+            "step": 0,
+            "total": 4,
+            "percent": 0,
+            "logs": ["エージェントリーチ安全導入待機中です。"],
+            "startedAt": time.time(),
+            "finishedAt": None,
+        })
+    thread = threading.Thread(target=run_internet_layer_setup, daemon=True)
+    thread.start()
+    return {"ok": True, "status": "running", "message": "エージェントリーチ安全導入を開始しました。"}
+
+
 def health_payload() -> dict:
     try:
         version = ollama_json("/api/version", timeout=3).get("version", "unknown")
@@ -3423,6 +3782,7 @@ def health_payload() -> dict:
                 available_models=models,
                 ollama_version=str(version),
             ),
+            "internetLayer": internet_layer_diagnostics_payload(),
             "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": installed,
             "codingModelInstalled": coding_model in models,
@@ -3452,6 +3812,7 @@ def health_payload() -> dict:
                 available_models=set(),
                 ollama_version="",
             ),
+            "internetLayer": internet_layer_diagnostics_payload(),
             "searchCapabilities": workspace_search_capabilities(),
             "modelInstalled": False,
             "codingModelInstalled": False,
@@ -3822,6 +4183,19 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/ocr/setup/status":
             json_response(self, 200, ocr_setup_status())
             return
+        if parsed.path == "/api/internet-layer/status":
+            json_response(self, 200, internet_layer_diagnostics_payload())
+            return
+        if parsed.path == "/api/internet-layer/contract":
+            json_response(self, 200, {"ok": True, "contract": agent_reach_command_contract()})
+            return
+        if parsed.path == "/api/internet-layer/doctor":
+            payload = agent_reach_doctor_payload()
+            json_response(self, 200 if payload.get("ok") or payload.get("status") == "not-installed" else 503, payload)
+            return
+        if parsed.path == "/api/internet-layer/setup/status":
+            json_response(self, 200, internet_layer_setup_status())
+            return
         if parsed.path == "/api/contracts/pdf-import/status":
             json_response(self, 200, contract_pdf_import_status_payload())
             return
@@ -3840,6 +4214,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/image/view":
             self.handle_image_view(parsed.query)
+            return
+        if parsed.path == "/api/person-photo/view":
+            self.handle_person_photo_view(parsed.query)
             return
         if parsed.path == "/api/workspace/preview":
             self.handle_workspace_preview(parsed.query)
@@ -3912,6 +4289,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/image/generate":
             self.handle_image_generate()
             return
+        if self.path == "/api/person-photo/upload":
+            self.handle_person_photo_upload()
+            return
         if self.path == "/api/models/pull":
             self.handle_model_pull()
             return
@@ -3929,6 +4309,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/ocr/setup":
             self.handle_ocr_setup()
+            return
+        if self.path == "/api/internet-layer/setup":
+            self.handle_internet_layer_setup()
             return
         if self.path == "/api/contracts/pdf-import/try-page":
             try:
@@ -4036,6 +4419,7 @@ class Handler(BaseHTTPRequestHandler):
             search_results: list[dict[str, str]] = []
             search_error = ""
             use_web_search = bool(body.get("web_search", False)) and not is_translation_task
+            internet_layer_channels = normalize_internet_layer_channels(body.get("internet_layer_channels", [])) if use_web_search else []
             if use_web_search:
                 query = str(body.get("search_query") or messages[-1].get("content", ""))
                 try:
@@ -4114,6 +4498,7 @@ class Handler(BaseHTTPRequestHandler):
                             "enabled": use_web_search,
                             "results": search_results,
                             "error": search_error,
+                            "channels": internet_layer_channels,
                         },
                     },
                 )
@@ -4161,6 +4546,7 @@ class Handler(BaseHTTPRequestHandler):
                             "enabled": use_web_search,
                             "results": search_results,
                             "error": search_error,
+                            "channels": internet_layer_channels,
                         },
                     },
                 )
@@ -4184,6 +4570,7 @@ class Handler(BaseHTTPRequestHandler):
                         "enabled": use_web_search,
                         "results": search_results,
                         "error": search_error,
+                        "channels": internet_layer_channels,
                     },
                 },
             )
@@ -4273,6 +4660,12 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             json_response(self, 400, {"ok": False, "error": str(exc), "setup": ocr_setup_status()})
 
+    def handle_internet_layer_setup(self) -> None:
+        try:
+            json_response(self, 200, start_internet_layer_setup())
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc), "setup": internet_layer_setup_status()})
+
     def handle_attachment_read(self) -> None:
         try:
             body = read_json_body(self)
@@ -4296,6 +4689,49 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except Exception as exc:
             json_response(self, 502, {"ok": False, "error": str(exc)})
+
+    def handle_person_photo_upload(self) -> None:
+        try:
+            body = read_json_body(self)
+            payload = person_photo_upload_payload(
+                str(body.get("name") or ""),
+                str(body.get("mime") or ""),
+                str(body.get("base64") or ""),
+            )
+            json_response(self, 200 if payload.get("ok") else 400, payload)
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc)})
+
+    def handle_person_photo_view(self, query: str) -> None:
+        try:
+            params = urllib.parse.parse_qs(query)
+            file_name = Path((params.get("file") or [""])[0]).name
+            if not file_name:
+                self.send_error(404)
+                return
+            root = PERSON_PHOTO_DIR.resolve()
+            path = (PERSON_PHOTO_DIR / file_name).resolve()
+            try:
+                path.relative_to(root)
+            except ValueError:
+                self.send_error(404)
+                return
+            if not path.is_file():
+                self.send_error(404)
+                return
+            content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+            if content_type not in PERSON_PHOTO_MIME_EXTENSIONS:
+                self.send_error(415)
+                return
+            body = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            json_response(self, 400, {"ok": False, "error": str(exc)})
 
     def handle_workspace_preview(self, query: str) -> None:
         try:

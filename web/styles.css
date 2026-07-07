@@ -826,6 +826,526 @@ h1 {
   font-weight: 700;
 }
 
+.person-relationship-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.person-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 10px;
+}
+
+.person-tab-button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted-strong);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+.person-tab-button:hover,
+.person-tab-button:focus {
+  border-color: var(--active-line);
+  color: var(--text);
+}
+
+.person-tab-button.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.person-editor {
+  display: grid;
+  gap: 12px;
+  align-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.person-register-editor {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.person-editor .setting-field {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.person-editor .setting-wide {
+  grid-column: 1 / -1;
+}
+
+.person-photo-picker {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.person-photo-preview {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+}
+
+.person-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.person-self-editor,
+.person-map-card,
+.person-biorhythm-card {
+  display: grid;
+  gap: 12px;
+  grid-column: 1 / -1;
+}
+
+.person-self-editor {
+  column-gap: 14px;
+  row-gap: 12px;
+  align-items: start;
+}
+
+.person-self-editor .self-field-left {
+  grid-column: 1;
+}
+
+.person-self-editor .self-field-right {
+  grid-column: 2;
+}
+
+.person-self-editor .setting-field:not(.setting-wide) {
+  min-height: 54px;
+}
+
+.person-self-editor input,
+.person-self-editor select {
+  min-height: 28px;
+}
+
+.person-card-title,
+.person-editor .character-actions {
+  grid-column: 1 / -1;
+}
+
+.inline-save-status {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.person-self-summary-text {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.75;
+  min-height: 0;
+  white-space: pre-line;
+}
+
+.person-list {
+  display: grid;
+  gap: 0;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-bg);
+  overflow: hidden;
+}
+
+.person-list-header {
+  display: grid;
+  grid-template-columns: 48px minmax(120px, 1.1fr) minmax(92px, 0.7fr) minmax(0, 1.8fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 9px 10px;
+}
+
+.person-card {
+  display: grid;
+  grid-template-columns: 48px minmax(120px, 1.1fr) minmax(92px, 0.7fr) minmax(0, 1.8fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 10px;
+}
+
+.person-card:last-child {
+  border-bottom: 0;
+}
+
+.person-card-photo {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--panel-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.person-card-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.person-card-name,
+.person-card-relation,
+.person-card-note {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.person-card-relation,
+.person-card-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-card-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: end;
+  min-width: max-content;
+}
+
+.person-relationship-map {
+  display: grid;
+  gap: 12px;
+}
+
+.person-map-ranking-header {
+  display: grid;
+  justify-content: end;
+}
+
+.person-map-sort {
+  display: grid;
+  gap: 5px;
+  min-width: min(100%, 260px);
+}
+
+.person-map-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.person-map-ranking-list {
+  align-items: stretch;
+}
+
+.person-map-link {
+  display: grid;
+  gap: 2px;
+  min-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-bg);
+  padding: 8px 10px;
+}
+
+.person-map-link summary {
+  list-style: none;
+}
+
+.person-map-link summary::-webkit-details-marker {
+  display: none;
+}
+
+.person-rank-summary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.person-rank-summary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.person-rank-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.person-rank-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.person-rank-number {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  min-height: 24px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.person-rank-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.person-map-link > span,
+.person-map-link summary span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.person-map-link strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.person-map-compatibility {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.person-map-compatibility b {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  min-height: 22px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.person-map-compatibility-total {
+  margin-top: 4px;
+}
+
+.person-map-compatibility-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person-map-compatibility-list li {
+  color: var(--text);
+}
+
+.person-compatibility-section {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 8px 10px;
+}
+
+.person-compatibility-total-section {
+  background: var(--accent-soft);
+  border-color: var(--active-line);
+}
+
+.person-compatibility-section-head,
+.person-compatibility-section > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.person-compatibility-section span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.person-compatibility-section strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.person-compatibility-section p,
+.person-compatibility-section small {
+  color: var(--muted);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.person-compatibility-section p {
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
+.person-compatibility-section small {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.person-map-link em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.person-biorhythm-card,
+.person-biorhythm-view {
+  min-width: 0;
+}
+
+.person-biorhythm-view {
+  display: grid;
+  gap: 14px;
+}
+
+.person-biorhythm-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.person-biorhythm-head div,
+.person-biorhythm-section {
+  display: grid;
+  gap: 5px;
+}
+
+.person-biorhythm-head span,
+.person-biorhythm-source {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.person-biorhythm-section ul,
+.person-biorhythm-mini-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person-biorhythm-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-bg);
+  padding: 8px 10px;
+}
+
+.person-biorhythm-phase {
+  display: inline-grid;
+  place-items: center;
+  min-width: 58px;
+  min-height: 30px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 4px 10px;
+}
+
+.person-biorhythm-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.person-biorhythm-row strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.person-biorhythm-row span,
+.person-biorhythm-row small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.person-biorhythm-categories {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.person-biorhythm-category {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 6px 8px;
+}
+
+.person-biorhythm-category b {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.person-biorhythm-category strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
 .context-memory-body {
   gap: 14px;
 }
@@ -1198,8 +1718,8 @@ h1 {
 }
 
 .internet-diagnostics {
-  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .internet-diagnostics > div:first-child {
@@ -1222,6 +1742,24 @@ h1 {
   padding: 8px;
 }
 
+#internet-layer-tool-status[data-internet-layer-state="ready"],
+.internet-channel-grid div[data-internet-status="ready"] span {
+  color: var(--accent-strong);
+}
+
+#internet-layer-tool-status[data-internet-layer-state="partial"] {
+  color: #b7791f;
+}
+
+#internet-layer-tool-status[data-internet-layer-state="installed"] {
+  color: var(--muted-strong);
+}
+
+#internet-layer-tool-status[data-internet-layer-state="missing"],
+.internet-channel-grid div[data-internet-status="missing"] span {
+  color: var(--muted);
+}
+
 .internet-channel-grid strong {
   color: var(--text);
   font-size: 11px;
@@ -1231,6 +1769,32 @@ h1 {
   color: var(--muted-strong);
   font-size: 11px;
   font-weight: 800;
+}
+
+.internet-layer-guide .plugin-state-note {
+  display: grid;
+  gap: 6px;
+}
+
+.internet-layer-steps {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0;
+  padding-left: 20px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+#internet-layer-install-prompt {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .plugin-candidate-grid {
@@ -3956,6 +4520,15 @@ select:focus {
   display: none;
 }
 
+.settings-panel:not([hidden]) ~ .messages,
+.settings-panel:not([hidden]) ~ .progress-line,
+.settings-panel:not([hidden]) ~ .composer,
+.management-panel:not([hidden]) ~ .messages,
+.management-panel:not([hidden]) ~ .progress-line,
+.management-panel:not([hidden]) ~ .composer {
+  display: none;
+}
+
 .empty-state {
   display: grid;
   align-content: center;
@@ -4398,12 +4971,12 @@ select:focus {
 
 .composer-box {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto auto;
   grid-template-areas:
-    "attachments attachments attachments attachments attachments attachments"
-    "study study study study study study"
-    "prompt prompt prompt prompt prompt prompt"
-    "attach . mode model voice send";
+    "attachments attachments attachments attachments attachments attachments attachments attachments"
+    "study study study study study study study study"
+    "prompt prompt prompt prompt prompt prompt prompt prompt"
+    "attach . external recipient mode model voice send";
   align-items: end;
   align-self: end;
   gap: 6px 8px;
@@ -4817,7 +5390,8 @@ select:focus {
 }
 
 .composer-mode-select,
-.composer-model-select {
+.composer-model-select,
+.composer-recipient-select {
   width: auto;
   min-width: 72px;
   height: 34px;
@@ -4840,12 +5414,43 @@ select:focus {
   max-width: 112px;
 }
 
+.composer-recipient-select {
+  grid-area: recipient;
+  max-width: 132px;
+}
+
+.composer-external-toggle {
+  grid-area: external;
+  height: 34px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--muted-strong);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 .composer-mode-select:hover,
 .composer-mode-select:focus,
 .composer-model-select:hover,
-.composer-model-select:focus {
+.composer-model-select:focus,
+.composer-recipient-select:hover,
+.composer-recipient-select:focus,
+.composer-external-toggle:hover,
+.composer-external-toggle:focus {
   border-color: var(--active-line);
   color: var(--text);
+}
+
+.composer-external-toggle.active,
+.composer-external-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .composer textarea {
@@ -5121,7 +5726,9 @@ select:focus {
   }
 
   .composer-mode-select,
-  .composer-model-select {
+  .composer-model-select,
+  .composer-recipient-select,
+  .composer-external-toggle {
     min-width: 64px;
     padding-left: 8px;
     font-size: 11px;
@@ -5137,18 +5744,48 @@ select:focus {
   }
 
   .composer-box {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     grid-template-areas:
-      "attachments attachments attachments attachments"
-      "study study study study"
-      "prompt prompt prompt prompt"
-      "attach mode voice send";
+      "attachments attachments attachments attachments attachments"
+      "study study study study study"
+      "prompt prompt prompt prompt prompt"
+      "attach recipient mode voice send";
     min-height: 0;
+  }
+
+  .composer-external-toggle {
+    display: none;
   }
 
   .composer-model-select {
     display: none;
     max-width: 96px;
+  }
+
+  .composer-recipient-select {
+    max-width: 108px;
+  }
+
+  .person-relationship-body,
+  .person-editor,
+  .person-relationship-map,
+  .person-map-ranking-header,
+  .person-card {
+    grid-template-columns: 1fr;
+  }
+
+  .person-self-editor .self-field-left,
+  .person-self-editor .self-field-right {
+    grid-column: 1;
+  }
+
+  .person-list-header {
+    display: none;
+  }
+
+  .person-card-actions {
+    justify-content: start;
+    min-width: 0;
   }
 
   .workspace-picker,

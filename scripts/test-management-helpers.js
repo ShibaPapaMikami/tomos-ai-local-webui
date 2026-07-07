@@ -50,6 +50,7 @@ const els = {
   studyPacksPanel: { hidden: true },
   trainingManagementPanel: { hidden: true },
   contextMemoryPanel: { hidden: true },
+  personRelationshipPanel: { hidden: true },
   pluginsPanel: { hidden: true },
 };
 const state = { workspaceOpen: true };
@@ -83,6 +84,10 @@ assert.equal(els.studyPacksPanel.hidden, false);
 openManagementPanel({ els, panel: els.contextMemoryPanel });
 assert.equal(els.studyPacksPanel.hidden, true);
 assert.equal(els.contextMemoryPanel.hidden, false);
+
+openManagementPanel({ els, panel: els.personRelationshipPanel });
+assert.equal(els.contextMemoryPanel.hidden, true);
+assert.equal(els.personRelationshipPanel.hidden, false);
 
 const labels = {
   "management.add": "追加",
@@ -124,6 +129,36 @@ const labels = {
   "management.pluginSearchPdfFilenameOnly": "PDFはファイル名のみ",
   "management.pluginSearchImageOcrUnsupported": "画像内文字",
   "management.pluginSearchNone": "未確認",
+  "management.internetLayerReady": "利用可能",
+  "management.internetLayerMissing": "未検出",
+  "management.internetLayerPermissionRequired": "明示許可が必要",
+  "management.internetLayerToolReady": "エージェントリーチ: 検出済み",
+  "management.internetLayerToolMissing": "エージェントリーチ: 未導入",
+  "management.internetLayerOverallNotInstalled": "未導入",
+  "management.internetLayerOverallInstalled": "導入済み",
+  "management.internetLayerOverallPartial": "一部利用可能",
+  "management.internetLayerOverallReady": "利用可能",
+  "management.internetLayerSetupGuide": "導入案内",
+  "management.internetLayerSetupNote": "未検出の場合は、エージェントリーチなどの外部調査ツールを別途導入してから再起動してください。この画面からは自動インストールしません。",
+  "management.internetLayerStepInstall": "下の依頼文をコピーして、CodexやClaude Codeなどのコーディングエージェントに渡します。",
+  "management.internetLayerStepRestart": "導入が終わったら、このアプリを再起動します。",
+  "management.internetLayerStepDoctor": "プラグイン画面で「診断を実行」を押し、利用可能か確認します。",
+  "management.internetLayerStepUse": "チャット欄の「外部調査」をONにして送信します。",
+  "management.internetLayerInstallPrompt": "エージェントリーチを安全モードで導入してください: https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/install.md",
+  "management.internetLayerCopyInstallPrompt": "依頼文をコピー",
+  "management.internetLayerCopyDone": "コピーしました",
+  "management.internetLayerSetupInTomos": "TOMOSで安全導入",
+  "management.internetLayerSetupConfirm": "エージェントリーチをTOMOS内の専用環境に導入します。GitHubからのダウンロードが発生します。開始しますか？",
+  "management.internetLayerSetupRunning": "安全導入中",
+  "management.internetLayerContract": "連携仕様",
+  "management.internetLayerDoctorCommand": "診断コマンド: agent-reach doctor",
+  "management.internetLayerResultSchema": "返却形式: tomos-internet-layer-result-v0.1",
+  "management.internetLayerPolicy": "自動インストールなし / 送信前確認あり / 長期記憶へ自動保存なし",
+  "management.internetLayerRunDoctor": "診断を実行",
+  "management.internetLayerDoctorRunning": "診断中",
+  "management.internetLayerDoctorReady": "診断完了",
+  "management.internetLayerDoctorMissing": "エージェントリーチ未導入",
+  "management.internetLayerDoctorError": "診断エラー: {error}",
   "studyPack.mode.codeReviewShort": "コードレビュー",
   "studyPack.mode.makeReadableShort": "読みやすくする",
 };
@@ -147,6 +182,8 @@ const indexHtml = fs.readFileSync("web/index.html", "utf8");
 const i18nJs = fs.readFileSync("web/i18n.js", "utf8");
 const stylesCss = fs.readFileSync("web/styles.css", "utf8");
 const appJs = fs.readFileSync("web/app.js", "utf8");
+const personRelationshipJs = fs.readFileSync("web/person-relationship.js", "utf8");
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const searchCapabilitiesElement = { textContent: "" };
 const ocrCandidateStatus = { textContent: "", dataset: {} };
@@ -155,10 +192,22 @@ const ocrCandidateToggle = {
   disabled: false,
   setAttribute(name, value) { this[name] = value; },
 };
+const internetToolStatus = { textContent: "", dataset: {} };
+const internetChannelStatus = {};
 context.document.querySelector = (selector) => {
   if (selector === "#plugin-search-capabilities") return searchCapabilitiesElement;
   if (selector === '[data-plugin-candidate-status="ocr"]') return ocrCandidateStatus;
   if (selector === '[data-plugin-candidate-toggle="ocr"]') return ocrCandidateToggle;
+  if (selector === "#internet-layer-tool-status") return internetToolStatus;
+  const internetChannelMatch = selector.match(/^\[data-internet-channel="([^"]+)"\]$/);
+  if (internetChannelMatch) {
+    const channel = internetChannelMatch[1];
+    internetChannelStatus[channel] = internetChannelStatus[channel] || { textContent: "", dataset: {} };
+    return {
+      dataset: {},
+      querySelector: (innerSelector) => innerSelector === "span" ? internetChannelStatus[channel] : null,
+    };
+  }
   return null;
 };
 context.document.querySelectorAll = (selector) => {
@@ -167,12 +216,26 @@ context.document.querySelectorAll = (selector) => {
 const pluginEls = {
   codegraphPluginStatus: { textContent: "", dataset: {} },
   codegraphPluginToggle: { textContent: "", setAttribute(name, value) { this[name] = value; } },
+  appsGroup: { hidden: true },
+  personRelationshipToggle: { hidden: false },
   contractsToggle: { hidden: false },
 };
 renderPluginsPanel({
   els: pluginEls,
   state: {
-    appInfo: { searchCapabilities: { text: true, docx: true, pdf: true, pdfBackend: "Spotlight", imageOcr: false } },
+    appInfo: {
+      searchCapabilities: { text: true, docx: true, pdf: true, pdfBackend: "Spotlight", imageOcr: false },
+      internetLayer: {
+        installed: true,
+        channels: {
+          web: { status: "ready" },
+          github: { status: "ready" },
+          youtube: { status: "ready" },
+          rss: { status: "ready" },
+          sns: { status: "permission-required" },
+        },
+      },
+    },
     plugins: { codegraph: { installed: true }, ocr: { planned: true }, contracts: { installed: false } },
   },
   t,
@@ -181,24 +244,170 @@ assert.equal(pluginEls.codegraphPluginStatus.textContent, "フォルダー編集
 assert.match(searchCapabilitiesElement.textContent, /PDF本文/);
 assert.equal(ocrCandidateStatus.textContent, "検討リスト入り（まだ使えません）");
 assert.equal(ocrCandidateToggle.textContent, "検討リストから外す");
+assert.equal(internetToolStatus.textContent, "利用可能");
+assert.equal(internetChannelStatus.web.textContent, "利用可能");
+assert.equal(internetChannelStatus.sns.textContent, "明示許可が必要");
 assert.equal(pluginEls.contractsToggle.hidden, true);
+assert.equal(pluginEls.appsGroup.hidden, false);
 assert.match(indexHtml, /data-plugin-candidate-status="contracts"/);
 assert.match(indexHtml, /data-plugin-candidate-toggle="contracts"/);
 assert.match(indexHtml, /data-i18n="management\.pluginContractsTitle"/);
 assert.match(indexHtml, /追加DLなし（内蔵機能）/);
 assert.match(i18nJs, /"management\.pluginContractsSize": "追加DLなし（内蔵機能）"/);
 assert.match(indexHtml, /id="contracts-toggle"[^>]*hidden/);
+assert.match(indexHtml, /id="person-relationship-toggle"/);
+assert.match(indexHtml, /id="person-relationship-panel"/);
+assert.match(indexHtml, /data-person-tab="self"/);
+assert.match(indexHtml, /data-person-tab="register"/);
+assert.match(indexHtml, /data-person-tab="map"/);
+assert.match(indexHtml, /data-person-tab-panel="self" hidden/);
+assert.match(indexHtml, /data-person-tab-panel="register"/);
+assert.match(indexHtml, /data-person-tab-panel="map" hidden/);
+assert.doesNotMatch(indexHtml, /person\.relationshipMapHelp/);
+assert.match(indexHtml, /class="person-editor person-register-editor"/);
+assert.doesNotMatch(indexHtml, /class="management-card person-editor/);
+assert.doesNotMatch(indexHtml, /class="management-card person-map-card/);
+assert.doesNotMatch(indexHtml, /class="management-card person-biorhythm-card/);
+assert.match(indexHtml, /id="person-list"/);
+assert.match(indexHtml, /id="self-last-name"/);
+assert.match(indexHtml, /self-field-left/);
+assert.match(indexHtml, /self-field-right/);
+assert.match(indexHtml, /id="self-personality-summary"/);
+assert.ok(indexHtml.indexOf('id="self-notes"') < indexHtml.indexOf('id="self-personality-summary"'));
+assert.match(indexHtml, /class="person-self-summary-text" id="self-personality-summary"/);
+assert.doesNotMatch(indexHtml, /<textarea id="self-personality-summary"/);
+assert.match(indexHtml, /id="self-save"/);
+assert.match(indexHtml, /id="self-save-status"/);
+assert.match(indexHtml, /id="person-last-name"/);
+assert.match(indexHtml, /id="person-first-name"/);
+assert.match(indexHtml, /id="person-display-name"/);
+assert.match(indexHtml, /id="person-relation-detail"/);
+assert.match(indexHtml, /id="person-relationship-map"/);
+assert.match(indexHtml, /id="composer-recipient"/);
 assert.match(indexHtml, /id="internet-layer-diagnostics"/);
 assert.match(indexHtml, /data-internet-channel="web"/);
 assert.match(indexHtml, /data-internet-channel="github"/);
 assert.match(indexHtml, /data-internet-channel="youtube"/);
 assert.match(indexHtml, /data-internet-channel="rss"/);
 assert.match(indexHtml, /data-internet-channel="sns"/);
-assert.match(i18nJs, /"management\.internetLayerTitle": "Internet Layer診断"/);
-assert.match(stylesCss, /\.internet-diagnostics\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s);
+assert.match(indexHtml, /id="internet-layer-tool-status"/);
+assert.match(indexHtml, /data-i18n="management\.internetLayerSetupGuide"/);
+assert.match(indexHtml, /id="internet-layer-install-prompt"/);
+assert.match(indexHtml, /id="internet-layer-copy-install"/);
+assert.match(indexHtml, /id="internet-layer-setup"/);
+assert.match(indexHtml, /id="internet-layer-setup-progress"/);
+assert.match(indexHtml, /data-i18n="management\.internetLayerStepUse"/);
+assert.match(indexHtml, /data-i18n="management\.internetLayerContract"/);
+assert.match(indexHtml, /tomos-internet-layer-result-v0\.1/);
+assert.match(indexHtml, /id="internet-layer-doctor"/);
+assert.match(indexHtml, /id="internet-layer-doctor-status"/);
+assert.match(indexHtml, /id="composer-external-research"/);
+assert.match(indexHtml, /src="\/person-relationship\.js\?v=0\.8\.206-tomos48"/);
+assert.match(indexHtml, /src="\/person-name-fortune\.js\?v=0\.8\.206-tomos48"/);
+assert.match(i18nJs, /"management\.personRelationship": "人物・関係メモ"/);
+assert.match(i18nJs, /"management\.actions": "操作"/);
+assert.match(i18nJs, /"person\.selfProfile": "自分の情報"/);
+assert.match(i18nJs, /"person\.selfPersonalitySummary": "自分の性格総括"/);
+assert.match(i18nJs, /"person\.relationshipMap": "自分との関係図"/);
+assert.match(i18nJs, /"person\.biorhythm": "バイオリズム"/);
+assert.match(i18nJs, /"person\.personalityType": "MBTI"/);
+assert.match(i18nJs, /"person\.photoHelp": "画像はこのPC内の規定フォルダに保存されます。"/);
+const personI18nKeys = Array.from(indexHtml.matchAll(/data-i18n(?:-[a-z-]+)?="(person\.[^"]+)"/g))
+  .map((match) => match[1]);
+for (const key of personI18nKeys) {
+  assert.match(i18nJs, new RegExp(`"${escapeRegExp(key)}"`), `${key} should exist in i18n.js`);
+}
+assert.match(i18nJs, /"management\.internetLayerTitle": "インターネットレイヤー診断"/);
+assert.match(i18nJs, /"management\.internetLayerReady": "利用可能"/);
+assert.match(i18nJs, /"management\.internetLayerMissing": "未検出"/);
+assert.match(i18nJs, /"management\.internetLayerToolReady": "エージェントリーチ: 検出済み"/);
+assert.match(i18nJs, /"management\.internetLayerOverallNotInstalled": "未導入"/);
+assert.match(i18nJs, /"management\.internetLayerOverallPartial": "一部利用可能"/);
+assert.match(i18nJs, /"management\.internetLayerSetupGuide": "導入案内"/);
+assert.match(i18nJs, /"management\.internetLayerInstallPrompt": "エージェントリーチを安全モードで導入してください:/);
+assert.match(i18nJs, /"management\.internetLayerCopyInstallPrompt": "依頼文をコピー"/);
+assert.match(i18nJs, /"management\.internetLayerSetupInTomos": "TOMOSで安全導入"/);
+assert.match(i18nJs, /"management\.internetLayerSetupConfirm": "エージェントリーチをTOMOS内の専用環境に導入します。/);
+assert.match(i18nJs, /"management\.internetLayerDoctorCommand": "診断コマンド: agent-reach doctor"/);
+assert.match(i18nJs, /"management\.internetLayerResultSchema": "返却形式: tomos-internet-layer-result-v0\.1"/);
+assert.match(i18nJs, /"management\.internetLayerRunDoctor": "診断を実行"/);
+assert.match(i18nJs, /"management\.internetLayerDoctorMissing": "エージェントリーチ未導入"/);
 assert.match(i18nJs, /"management\.internetLayerMemoryNote": "外部調査結果は、自動で長期記憶に保存されません。"/);
+assert.match(i18nJs, /"composer\.externalResearch": "外部調査"/);
+assert.match(i18nJs, /"composer\.externalResearchConfirm": "外部調査を使います。/);
+assert.match(i18nJs, /"chat\.webSources": "外部調査の出典"/);
+assert.match(stylesCss, /\.person-card/);
+assert.match(stylesCss, /\.person-tabs/);
+assert.match(stylesCss, /\.person-tab-button\.is-active/);
+assert.match(stylesCss, /\.person-register-editor\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s);
+assert.match(stylesCss, /\.person-list-header/);
+assert.match(stylesCss, /\.person-card-actions/);
+assert.match(stylesCss, /\.person-relationship-map/);
+assert.match(stylesCss, /\.person-map-ranking-header/);
+assert.match(stylesCss, /\.person-rank-number/);
+assert.match(stylesCss, /\.person-rank-mark/);
+assert.match(stylesCss, /\.person-compatibility-section/);
+assert.match(stylesCss, /\.person-map-compatibility/);
+assert.match(stylesCss, /\.person-map-compatibility-list/);
+assert.match(stylesCss, /\.person-biorhythm-view/);
+assert.match(stylesCss, /\.person-biorhythm-card/);
+assert.match(stylesCss, /\.person-photo-picker/);
+assert.match(stylesCss, /\.inline-save-status/);
+assert.match(stylesCss, /\.person-editor \.setting-field/);
+assert.match(stylesCss, /\.person-editor \.setting-wide/);
+assert.match(stylesCss, /\.person-self-editor \.self-field-left/);
+assert.match(stylesCss, /\.person-self-editor \.self-field-right/);
 assert.match(stylesCss, /\.internet-diagnostics/);
+assert.match(stylesCss, /\.internet-diagnostics\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s);
+assert.match(stylesCss, /data-internet-status="ready"/);
+assert.match(stylesCss, /data-internet-layer-state="partial"/);
+assert.match(stylesCss, /\.internet-layer-steps/);
+assert.match(stylesCss, /#internet-layer-install-prompt/);
+assert.match(stylesCss, /\.composer-external-toggle/);
+assert.match(stylesCss, /\.management-panel:not\(\[hidden\]\) ~ \.messages/);
+assert.match(appJs, /function tWithDomFallback/);
+assert.match(appJs, /composerExternalResearch/);
+assert.match(appJs, /renderWebSearchToggle\(\{ button: els\.composerExternalResearch, enabled: state\.webSearch \}\)/);
+assert.match(appJs, /searchPayloadOptions\?\.\(\{ \.\.\.requestOptions, appInfo: state\.appInfo \}, 4\)/);
+assert.match(appJs, /function confirmExternalResearchIfNeeded/);
+assert.match(appJs, /window\.confirm\(t\("composer\.externalResearchConfirm"\)\)/);
+assert.match(appJs, /tWithDomFallback\(element\.dataset\.i18n, element\.textContent\.trim\(\)\)/);
+assert.match(appJs, /function setPersonRelationshipTab/);
+assert.match(appJs, /function renderPersonProfileSelects/);
+assert.match(appJs, /function updateSelfPersonalitySummary/);
+assert.match(appJs, /selfPersonalityType\?\.addEventListener\("change", updateSelfPersonalitySummary\)/);
+assert.match(appJs, /selfPersonalitySummary\.textContent/);
+assert.doesNotMatch(appJs, /selfPersonalitySummary\.value/);
+assert.match(appJs, /function handlePersonPhotoFileChange/);
+assert.match(appJs, /function relationshipMapPeople/);
+assert.match(appJs, /relationshipRankingModel/);
+assert.match(appJs, /renderPersonBiorhythm/);
+assert.doesNotMatch(appJs, /node\.biorhythm/);
+assert.doesNotMatch(personRelationshipJs, /biorhythmPairMonthlyModel/);
+assert.match(appJs, /person-ranking-sort/);
+assert.match(appJs, /<details class="person-map-link/);
+assert.match(appJs, /<summary class="person-rank-summary">/);
+assert.match(appJs, /person-rank-mark/);
+assert.match(appJs, /person-compatibility-section/);
+assert.doesNotMatch(appJs, /person-map-center/);
+assert.match(appJs, /currentPersonEditorInput/);
+assert.match(appJs, /person-map-compatibility/);
+assert.match(appJs, /person-map-compatibility-list/);
+assert.match(appJs, /item\.source/);
+assert.match(fs.readFileSync("web/person-name-fortune.js", "utf8"), /calculateFiveGrids/);
+assert.match(indexHtml, /id="person-photo-file" type="file"/);
+assert.match(appJs, /personTabButtons\?\.\forEach|personTabButtons.*forEach/);
+assert.match(appJs, /renderPersonRelationshipPanel,\n  \}\);/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /personRelationshipToggle\?\.\addEventListener\("click"/);
 assert.match(fs.readFileSync("web/management.js", "utf8"), /internetLayerDiagnosticsModel/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /runInternetLayerDoctor/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /copyInternetLayerInstallPrompt/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /navigator\.clipboard\.writeText/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /startInternetLayerSetup/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /\/api\/internet-layer\/setup/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /\/api\/internet-layer\/doctor/);
+assert.match(fs.readFileSync("web/search.js", "utf8"), /function availableInternetLayerChannels/);
+assert.match(fs.readFileSync("web/search.js", "utf8"), /internet_layer_channels/);
 const contractAppState = { plugins: { contracts: { installed: false } } };
 togglePluginCandidate({ state: contractAppState, els: pluginEls, t, pluginId: "contracts" });
 assert.equal(contractAppState.plugins.contracts.installed, true);
@@ -214,8 +423,8 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.206-tomos7"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.206-tomos7"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.206-tomos48"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.206-tomos48"/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);
@@ -595,6 +804,9 @@ async function runImportTests() {
   assert.match(appJs, /hasQuotedMail && hasReplyOpening/);
   assert.match(appJs, /件名案、変更した理由、送信前の確認事項/);
   assert.match(appJs, /studyPackContextSystemPrompt\(text\)/);
+assert.match(appJs, /function personRelationshipContextSystemPrompt/);
+assert.match(appJs, /personRelationshipContextSystemPrompt\(\)/);
+assert.match(appJs, /人物・関係メモ、学習セット、ユーザー提供文/);
   assert.match(appJs, /numPredict: 900/);
   assert.equal(shouldApplyStudyPackForText("ガンダム好き？", { hasSelection: true }), false);
   assert.equal(shouldApplyStudyPackForText("しばぱぱはどの機体が好き？", { hasSelection: true }), false);

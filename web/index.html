@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=0.8.206-tomos7" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.206-tomos48" />
   </head>
   <body>
     <div class="app-shell">
@@ -60,6 +60,7 @@
           </div>
           <div class="sidebar-settings-group" id="apps-group" hidden>
             <span data-i18n="management.apps">アプリ</span>
+            <button class="ghost-button" id="person-relationship-toggle" type="button" data-i18n="management.personRelationship">人物・関係メモ</button>
             <button class="ghost-button" id="contracts-toggle" type="button" data-i18n="contracts.menu" hidden>契約書管理</button>
           </div>
         </div>
@@ -641,6 +642,148 @@
           </div>
         </section>
 
+        <section class="management-panel" id="person-relationship-panel" hidden>
+          <div class="settings-header">
+            <div>
+              <strong data-i18n="management.personRelationship">人物・関係メモ</strong>
+              <span data-i18n="management.personRelationshipHelp">友達、恋愛、家族、仕事の相手を登録し、返信支援に使います。</span>
+            </div>
+            <button class="ghost-button" id="person-relationship-close" type="button" data-i18n="common.close">閉じる</button>
+          </div>
+          <div class="person-tabs" role="tablist" aria-label="人物・関係メモ">
+            <button class="person-tab-button" type="button" role="tab" data-person-tab="self" data-i18n="person.selfProfile">自分の情報</button>
+            <button class="person-tab-button is-active" type="button" role="tab" data-person-tab="register" data-i18n="person.otherProfile">登録する人</button>
+            <button class="person-tab-button" type="button" role="tab" data-person-tab="map" data-i18n="person.relationshipMap">自分との関係図</button>
+            <button class="person-tab-button" type="button" role="tab" data-person-tab="biorhythm" data-i18n="person.biorhythm">バイオリズム</button>
+          </div>
+          <div class="management-panel-body person-relationship-body">
+            <article class="person-editor person-self-editor" data-person-tab-panel="self" hidden>
+              <div class="person-card-title">
+                <strong data-i18n="person.selfProfile">自分の情報</strong>
+                <span data-i18n="person.selfProfileHelp">返信支援と関係図の中心に使います。</span>
+              </div>
+              <label class="setting-field self-field-left">
+                <span data-i18n="person.lastName">姓</span>
+                <input id="self-last-name" type="text" />
+              </label>
+              <label class="setting-field self-field-right">
+                <span data-i18n="person.firstName">名</span>
+                <input id="self-first-name" type="text" />
+              </label>
+              <label class="setting-field self-field-left">
+                <span data-i18n="person.displayName">表示名</span>
+                <input id="self-display-name" type="text" />
+              </label>
+              <label class="setting-field self-field-right">
+                <span data-i18n="person.nickname">呼び名</span>
+                <input id="self-nickname" type="text" />
+              </label>
+              <label class="setting-field self-field-left">
+                <span data-i18n="person.birthdate">生年月日</span>
+                <input id="self-birthdate" type="date" />
+              </label>
+              <label class="setting-field self-field-right">
+                <span data-i18n="person.gender">性別</span>
+                <select id="self-gender"></select>
+              </label>
+              <label class="setting-field self-field-left">
+                <span data-i18n="person.bloodType">血液型</span>
+                <select id="self-blood-type"></select>
+              </label>
+              <label class="setting-field self-field-right">
+                <span data-i18n="person.personalityType">MBTI</span>
+                <select id="self-personality-type"></select>
+              </label>
+              <label class="setting-field setting-wide">
+                <span data-i18n="person.selfMemo">自分のメモ</span>
+                <textarea id="self-notes" rows="3"></textarea>
+              </label>
+              <label class="setting-field setting-wide">
+                <span data-i18n="person.selfPersonalitySummary">自分の性格総括</span>
+                <div class="person-self-summary-text" id="self-personality-summary" aria-live="polite"></div>
+              </label>
+              <div class="character-actions">
+                <button class="ghost-button primary-action" id="self-save" type="button" data-i18n="common.save">保存</button>
+                <span class="inline-save-status" id="self-save-status" aria-live="polite"></span>
+              </div>
+            </article>
+            <article class="person-editor person-register-editor" data-person-tab-panel="register">
+              <div class="person-card-title">
+                <strong data-i18n="person.otherProfile">登録する人</strong>
+                <span data-i18n="person.otherProfileHelp">相手の情報と自分との関係を保存します。</span>
+              </div>
+              <label class="setting-field">
+                <span data-i18n="person.lastName">姓</span>
+                <input id="person-last-name" type="text" />
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.firstName">名</span>
+                <input id="person-first-name" type="text" />
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.displayName">表示名</span>
+                <input id="person-display-name" type="text" />
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.nickname">呼び名</span>
+                <input id="person-nickname" type="text" />
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.category">関係</span>
+                <select id="person-category"></select>
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.relationDetail">詳細関係</span>
+                <select id="person-relation-detail"></select>
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.photo">写真</span>
+                <div class="person-photo-picker">
+                  <span class="person-card-photo person-photo-preview" id="person-photo-preview"></span>
+                  <div class="person-photo-actions">
+                    <button class="ghost-button" id="person-photo-pick" type="button" data-i18n="person.photoPick">画像を選択</button>
+                    <button class="ghost-button" id="person-photo-clear" type="button" data-i18n="person.photoClear">画像を外す</button>
+                  </div>
+                </div>
+                <input id="person-photo" type="hidden" />
+                <input id="person-photo-file" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+                <small data-i18n="person.photoHelp">画像はこのPC内の規定フォルダに保存されます。</small>
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.birthdate">生年月日</span>
+                <input id="person-birthdate" type="date" />
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.gender">性別</span>
+                <select id="person-gender"></select>
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.bloodType">血液型</span>
+                <select id="person-blood-type"></select>
+              </label>
+              <label class="setting-field">
+                <span data-i18n="person.personalityType">MBTI</span>
+                <select id="person-personality-type"></select>
+              </label>
+              <label class="setting-field setting-wide">
+                <span data-i18n="person.relationshipMemo">自分との関係メモ</span>
+                <textarea id="person-relationship-memo" rows="3"></textarea>
+              </label>
+              <div class="character-actions">
+                <button class="ghost-button" id="person-clear" type="button" data-i18n="person.new">新規</button>
+                <button class="ghost-button primary-action" id="person-save" type="button" data-i18n="common.save">保存</button>
+              </div>
+            </article>
+            <section class="person-map-card" data-person-tab-panel="map" hidden>
+              <div class="person-relationship-map" id="person-relationship-map"></div>
+            </section>
+            <section class="person-biorhythm-card" data-person-tab-panel="biorhythm" hidden>
+              <div class="person-biorhythm-view" id="person-biorhythm-view"></div>
+            </section>
+            <div class="person-list" id="person-list" data-person-tab-panel="register"></div>
+          </div>
+        </section>
+
         <section class="management-panel" id="study-packs-panel" hidden>
           <div class="settings-header">
             <div>
@@ -713,25 +856,26 @@
             </div>
             <section class="management-card internet-diagnostics" id="internet-layer-diagnostics">
               <div>
-                <strong data-i18n="management.internetLayerTitle">Internet Layer診断</strong>
+                <strong data-i18n="management.internetLayerTitle">インターネットレイヤー診断</strong>
                 <span data-i18n="management.internetLayerHelp">外部調査はまだ標準機能ではありません。Agent-Reachなどの外部調査ツールを、将来ここから確認できるようにします。</span>
+                <small id="internet-layer-tool-status" data-i18n="management.internetLayerChecking">確認中</small>
               </div>
-              <div class="internet-channel-grid" aria-label="Internet Layer診断">
+              <div class="internet-channel-grid" aria-label="インターネットレイヤー診断">
                 <div data-internet-channel="web">
                   <strong data-i18n="management.internetLayerWeb">Webページ</strong>
-                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                  <span data-i18n="management.internetLayerChecking">確認中</span>
                 </div>
                 <div data-internet-channel="github">
                   <strong data-i18n="management.internetLayerGitHub">GitHub</strong>
-                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                  <span data-i18n="management.internetLayerChecking">確認中</span>
                 </div>
                 <div data-internet-channel="youtube">
                   <strong data-i18n="management.internetLayerYouTube">YouTube字幕</strong>
-                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                  <span data-i18n="management.internetLayerChecking">確認中</span>
                 </div>
                 <div data-internet-channel="rss">
                   <strong data-i18n="management.internetLayerRss">RSS</strong>
-                  <span data-i18n="management.internetLayerDesigning">設計中</span>
+                  <span data-i18n="management.internetLayerChecking">確認中</span>
                 </div>
                 <div data-internet-channel="sns">
                   <strong data-i18n="management.internetLayerSns">SNS</strong>
@@ -739,6 +883,47 @@
                 </div>
               </div>
               <small data-i18n="management.internetLayerMemoryNote">外部調査結果は、自動で長期記憶に保存されません。</small>
+              <details class="plugin-candidate-details internet-layer-guide">
+                <summary data-i18n="management.internetLayerSetupGuide">導入案内</summary>
+                <div class="plugin-state-note">
+                  <span data-i18n="management.internetLayerSetupNote">未検出の場合は、エージェントリーチなどの外部調査ツールを別途導入してから再起動してください。この画面からは自動インストールしません。</span>
+                  <ol class="internet-layer-steps">
+                    <li data-i18n="management.internetLayerStepInstall">下の依頼文をコピーして、CodexやClaude Codeなどのコーディングエージェントに渡します。</li>
+                    <li data-i18n="management.internetLayerStepRestart">導入が終わったら、このアプリを再起動します。</li>
+                    <li data-i18n="management.internetLayerStepDoctor">プラグイン画面で「診断を実行」を押し、利用可能か確認します。</li>
+                    <li data-i18n="management.internetLayerStepUse">チャット欄の「外部調査」をONにして送信します。</li>
+                  </ol>
+                  <code id="internet-layer-install-prompt" data-i18n="management.internetLayerInstallPrompt">エージェントリーチを安全モードで導入してください: https://raw.githubusercontent.com/Panniantong/agent-reach/main/docs/install.md</code>
+                  <div class="plugin-candidate-actions">
+                    <button class="ghost-button" id="internet-layer-copy-install" type="button" data-i18n="management.internetLayerCopyInstallPrompt">依頼文をコピー</button>
+                    <button class="ghost-button" id="internet-layer-setup" type="button" data-i18n="management.internetLayerSetupInTomos">TOMOSで安全導入</button>
+                    <small id="internet-layer-copy-status" data-i18n="management.internetLayerCopyIdle">未コピー</small>
+                  </div>
+                  <div class="plugin-setup-progress" id="internet-layer-setup-progress" hidden>
+                    <div class="plugin-setup-progress-head">
+                      <strong data-i18n="management.pluginSetupProgress">セットアップ進行状況</strong>
+                      <span id="internet-layer-setup-progress-label">0%</span>
+                    </div>
+                    <div class="plugin-setup-bar" aria-hidden="true">
+                      <span id="internet-layer-setup-progress-bar"></span>
+                    </div>
+                    <ol class="plugin-setup-log" id="internet-layer-setup-log"></ol>
+                  </div>
+                  <a class="plugin-source-link" href="https://github.com/Panniantong/Agent-Reach" target="_blank" rel="noopener" data-i18n="management.pluginSource">公式を見る ↗</a>
+                </div>
+              </details>
+              <details class="plugin-candidate-details internet-layer-guide">
+                <summary data-i18n="management.internetLayerContract">連携仕様</summary>
+                <div class="plugin-state-note">
+                  <span data-i18n="management.internetLayerDoctorCommand">診断コマンド: agent-reach doctor</span>
+                  <span data-i18n="management.internetLayerResultSchema">返却形式: tomos-internet-layer-result-v0.1</span>
+                  <span data-i18n="management.internetLayerPolicy">自動インストールなし / 送信前確認あり / 長期記憶へ自動保存なし</span>
+                  <div class="plugin-candidate-actions">
+                    <button class="ghost-button" id="internet-layer-doctor" type="button" data-i18n="management.internetLayerRunDoctor">診断を実行</button>
+                    <small id="internet-layer-doctor-status" data-i18n="management.internetLayerDoctorIdle">未実行</small>
+                  </div>
+                </div>
+              </details>
             </section>
             <div class="plugin-candidate-grid">
               <article class="plugin-candidate-card plugin-available">
@@ -1044,6 +1229,10 @@
             <select class="composer-model-select" id="composer-model" title="使用モデル" aria-label="使用モデル" data-i18n-title="composer.model" data-i18n-aria-label="composer.model">
               <option value="" data-i18n="model.auto">モデル自動</option>
             </select>
+            <select class="composer-recipient-select" id="composer-recipient" title="送り先" aria-label="送り先" data-i18n-title="person.recipient" data-i18n-aria-label="person.recipient">
+              <option value="" data-i18n="person.recipientNone">送り先なし</option>
+            </select>
+            <button class="composer-external-toggle" id="composer-external-research" type="button" title="外部調査を使う" aria-label="外部調査を使う" aria-pressed="false" data-i18n-title="composer.externalResearchTitle" data-i18n-aria-label="composer.externalResearchTitle" data-i18n="composer.externalResearch">外部調査</button>
             <button class="voice-button" id="voice-input" type="button" title="音声入力" aria-label="音声入力" data-i18n-title="composer.voiceInput" data-i18n-aria-label="composer.voiceInput">
               <svg class="voice-idle-icon" aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"></path>
@@ -1118,28 +1307,30 @@
       </section>
     </div>
 
-  <script src="/i18n.js?v=0.8.206-tomos7"></script>
-  <script src="/utils.js?v=0.8.206-tomos7"></script>
-  <script src="/translation.js?v=0.8.206-tomos7"></script>
-  <script src="/local-tools.js?v=0.8.206-tomos7"></script>
-  <script src="/weather.js?v=0.8.206-tomos7"></script>
-  <script src="/image-tools.js?v=0.8.206-tomos7"></script>
-  <script src="/asr.js?v=0.8.206-tomos7"></script>
-  <script src="/attachments.js?v=0.8.206-tomos7"></script>
-  <script src="/composer.js?v=0.8.206-tomos7"></script>
-  <script src="/workspace.js?v=0.8.206-tomos7"></script>
-  <script src="/training.js?v=0.8.206-tomos7"></script>
-  <script src="/tomos-character-core.js?v=0.8.206-tomos7"></script>
-  <script src="/character-core-adapter.js?v=0.8.206-tomos7"></script>
-  <script src="/character.js?v=0.8.206-tomos7"></script>
-  <script src="/models.js?v=0.8.206-tomos7"></script>
-  <script src="/messages.js?v=0.8.206-tomos7"></script>
-  <script src="/sidebar.js?v=0.8.206-tomos7"></script>
-  <script src="/settings.js?v=0.8.206-tomos7"></script>
-  <script src="/management.js?v=0.8.206-tomos7"></script>
-  <script src="/router.js?v=0.8.206-tomos7"></script>
-  <script src="/search.js?v=0.8.206-tomos7"></script>
-  <script src="/pwa.js?v=0.8.206-tomos7"></script>
-  <script src="/app.js?v=0.8.206-tomos7"></script>
+  <script src="/i18n.js?v=0.8.206-tomos48"></script>
+  <script src="/utils.js?v=0.8.206-tomos48"></script>
+  <script src="/translation.js?v=0.8.206-tomos48"></script>
+  <script src="/local-tools.js?v=0.8.206-tomos48"></script>
+  <script src="/weather.js?v=0.8.206-tomos48"></script>
+  <script src="/image-tools.js?v=0.8.206-tomos48"></script>
+  <script src="/asr.js?v=0.8.206-tomos48"></script>
+  <script src="/attachments.js?v=0.8.206-tomos48"></script>
+  <script src="/composer.js?v=0.8.206-tomos48"></script>
+  <script src="/workspace.js?v=0.8.206-tomos48"></script>
+  <script src="/training.js?v=0.8.206-tomos48"></script>
+  <script src="/tomos-character-core.js?v=0.8.206-tomos48"></script>
+  <script src="/character-core-adapter.js?v=0.8.206-tomos48"></script>
+  <script src="/character.js?v=0.8.206-tomos48"></script>
+  <script src="/person-name-fortune.js?v=0.8.206-tomos48"></script>
+  <script src="/person-relationship.js?v=0.8.206-tomos48"></script>
+  <script src="/models.js?v=0.8.206-tomos48"></script>
+  <script src="/messages.js?v=0.8.206-tomos48"></script>
+  <script src="/sidebar.js?v=0.8.206-tomos48"></script>
+  <script src="/settings.js?v=0.8.206-tomos48"></script>
+  <script src="/management.js?v=0.8.206-tomos48"></script>
+  <script src="/router.js?v=0.8.206-tomos48"></script>
+  <script src="/search.js?v=0.8.206-tomos48"></script>
+  <script src="/pwa.js?v=0.8.206-tomos48"></script>
+  <script src="/app.js?v=0.8.206-tomos48"></script>
 </body>
 </html>

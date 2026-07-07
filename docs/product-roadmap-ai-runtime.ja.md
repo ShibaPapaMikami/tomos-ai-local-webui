@@ -309,6 +309,41 @@ Dating側で使わないもの:
 - 本番DB/Rules/Secrets
 - 決済/AGO/Firebase固有処理
 
+#### 人物・関係メモアプリ
+
+Monicaの思想を参考に、TOMOS内に人物プロフィールと関係性を保存するアプリを追加する。
+これはプラグインではなく `アプリ` として扱う。
+Discord、LINE、Slack、メールなどの連携プラグインは、この人物データを参照して返信支援や相性メモを出す。
+
+扱う関係カテゴリ:
+
+- 友達
+- 恋愛
+- 家族
+- 仕事
+
+登録できる情報:
+
+- 自分の情報
+- 姓、名、表示名、呼び名、写真
+- 関係カテゴリ、詳細関係
+- 生年月日、性別、血液型
+- MBTI
+- 自分との関係メモ
+- 自分との関係図
+- 最終更新日
+
+Context Core上の扱い:
+
+- [ ] 人物は `ContextEntity` の `person` として保存する
+- [ ] 自分との関係は `ContextRelation` として保存する
+- [ ] Relation typeに `friend`、`romantic_interest`、`family`、`work_contact` を追加候補にする
+- [ ] MBTIは `personalityType` として扱い、公式診断とは表現しない
+- [ ] MBTIの根拠は `self_reported`、`user_reported`、`estimated`、`unknown` に分ける
+- [ ] 他人の性格、年齢、性別、血液型をAIが勝手に確定保存しない
+- [ ] チャット返信支援では、送り先を選ぶと人物メモ、詳細関係、MBTI参考だけを最小文脈として渡す
+- [ ] 採用、評価、医療、法的判断には使わない
+
 ### Phase 4: Agent Layer
 
 対象: 承認付きでファイル生成・コード修正・作業支援を行う。

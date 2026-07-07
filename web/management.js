@@ -506,25 +506,74 @@ window.GEMMA_MANAGEMENT = (() => {
     return Boolean(PLUGIN_CANDIDATES[pluginId]?.implemented);
   }
 
-  function internetLayerDiagnosticsModel(t) {
+  function internetLayerChannelStatusLabel(status = "", t) {
+    if (status === "ready") return t("management.internetLayerReady");
+    if (status === "missing") return t("management.internetLayerMissing");
+    if (status === "permission-required") return t("management.internetLayerPermissionRequired");
+    return t("management.internetLayerChecking");
+  }
+
+  function internetLayerOverallStatus(diagnostics = {}, t) {
+    if (!diagnostics?.installed) {
+      return { label: t("management.internetLayerOverallNotInstalled"), state: "missing" };
+    }
+    const channels = diagnostics?.channels || {};
+    const statuses = ["web", "github", "youtube", "rss"]
+      .map((channel) => channels[channel]?.status)
+      .filter(Boolean);
+    if (statuses.length === 0 || statuses.every((status) => status === "checking")) {
+      return { label: t("management.internetLayerOverallInstalled"), state: "installed" };
+    }
+    const readyCount = statuses.filter((status) => status === "ready").length;
+    if (readyCount > 0 && readyCount < statuses.length) {
+      return { label: t("management.internetLayerOverallPartial"), state: "partial" };
+    }
+    if (readyCount === statuses.length) {
+      return { label: t("management.internetLayerOverallReady"), state: "ready" };
+    }
+    return { label: t("management.internetLayerOverallInstalled"), state: "installed" };
+  }
+
+  function internetLayerDiagnosticsModel(t, diagnostics = {}) {
+    const channels = diagnostics?.channels || {};
+    const overall = internetLayerOverallStatus(diagnostics, t);
     return {
       title: t("management.internetLayerTitle"),
       help: t("management.internetLayerHelp"),
       memoryNote: t("management.internetLayerMemoryNote"),
+      toolStatus: overall.label,
+      toolStatusState: overall.state,
       channels: [
-        { id: "web", label: t("management.internetLayerWeb"), status: t("management.internetLayerDesigning") },
-        { id: "github", label: t("management.internetLayerGitHub"), status: t("management.internetLayerDesigning") },
-        { id: "youtube", label: t("management.internetLayerYouTube"), status: t("management.internetLayerDesigning") },
-        { id: "rss", label: t("management.internetLayerRss"), status: t("management.internetLayerDesigning") },
-        { id: "sns", label: t("management.internetLayerSns"), status: t("management.internetLayerPermissionRequired") },
+        { id: "web", label: t("management.internetLayerWeb"), status: internetLayerChannelStatusLabel(channels.web?.status, t) },
+        { id: "github", label: t("management.internetLayerGitHub"), status: internetLayerChannelStatusLabel(channels.github?.status, t) },
+        { id: "youtube", label: t("management.internetLayerYouTube"), status: internetLayerChannelStatusLabel(channels.youtube?.status, t) },
+        { id: "rss", label: t("management.internetLayerRss"), status: internetLayerChannelStatusLabel(channels.rss?.status, t) },
+        { id: "sns", label: t("management.internetLayerSns"), status: internetLayerChannelStatusLabel(channels.sns?.status || "permission-required", t) },
       ],
     };
+  }
+
+  function renderInternetLayerDiagnostics({ state, t }) {
+    const diagnostics = internetLayerDiagnosticsModel(t, state.appInfo?.internetLayer || {});
+    const toolStatus = document.querySelector("#internet-layer-tool-status");
+    if (toolStatus) {
+      toolStatus.textContent = diagnostics.toolStatus;
+      toolStatus.dataset.internetLayerState = diagnostics.toolStatusState;
+    }
+    diagnostics.channels.forEach((channel) => {
+      const item = document.querySelector(`[data-internet-channel="${channel.id}"]`);
+      const status = item?.querySelector("span");
+      if (!item || !status) return;
+      status.textContent = channel.status;
+      const rawStatus = state.appInfo?.internetLayer?.channels?.[channel.id]?.status || "";
+      item.dataset.internetStatus = rawStatus || (channel.id === "sns" ? "permission-required" : "missing");
+    });
   }
 
   function syncInstalledAppsVisibility({ state, els }) {
     const contractsInstalled = Boolean(state.plugins?.contracts?.installed);
     if (els.contractsToggle) els.contractsToggle.hidden = !contractsInstalled;
-    if (els.appsGroup) els.appsGroup.hidden = !contractsInstalled;
+    if (els.appsGroup) els.appsGroup.hidden = !(contractsInstalled || els.personRelationshipToggle);
   }
 
   function renderOcrPluginState({ state, t }) {
@@ -595,6 +644,40 @@ window.GEMMA_MANAGEMENT = (() => {
     }
   }
 
+  function renderInternetLayerSetupState({ state, t }) {
+    const button = document.querySelector("#internet-layer-setup");
+    const progress = document.querySelector("#internet-layer-setup-progress");
+    const progressLabel = document.querySelector("#internet-layer-setup-progress-label");
+    const progressBar = document.querySelector("#internet-layer-setup-progress-bar");
+    const progressLog = document.querySelector("#internet-layer-setup-log");
+    const job = state.internetLayerSetupJob || {};
+    const running = job.status === "queued" || job.status === "running";
+    if (button) {
+      button.textContent = running ? t("management.internetLayerSetupRunning") : t("management.internetLayerSetupInTomos");
+      button.disabled = running;
+    }
+    if (!progress) return;
+    const logs = Array.isArray(job.logs) ? job.logs : [];
+    const percent = Math.max(0, Math.min(100, Number(job.percent || (running ? 5 : 0))));
+    progress.hidden = !running && logs.length === 0;
+    if (progressLabel) {
+      const step = Number(job.step || 0);
+      const total = Number(job.total || 0);
+      progressLabel.textContent = total > 0
+        ? t("management.pluginSetupProgressValue", { percent, step, total })
+        : `${percent}%`;
+    }
+    if (progressBar) progressBar.style.width = `${percent}%`;
+    if (progressLog) {
+      progressLog.innerHTML = "";
+      logs.slice(-5).forEach((line) => {
+        const item = document.createElement("li");
+        item.textContent = String(line);
+        progressLog.appendChild(item);
+      });
+    }
+  }
+
   async function reloadAppInfo(state) {
     const response = await fetch("/api/health");
     const payload = await response.json();
@@ -602,6 +685,115 @@ window.GEMMA_MANAGEMENT = (() => {
       state.appInfo = payload;
     }
     return payload;
+  }
+
+  async function runInternetLayerDoctor({ state, t }) {
+    const button = document.querySelector("#internet-layer-doctor");
+    const status = document.querySelector("#internet-layer-doctor-status");
+    if (button) button.disabled = true;
+    if (status) {
+      status.textContent = t("management.internetLayerDoctorRunning");
+      status.dataset.internetLayerDoctorState = "running";
+    }
+    try {
+      const response = await fetch("/api/internet-layer/doctor", { cache: "no-store" });
+      const payload = await response.json();
+      state.appInfo = {
+        ...(state.appInfo || {}),
+        internetLayer: {
+          ...(state.appInfo?.internetLayer || {}),
+          installed: payload.installed !== false,
+          ...(payload.channels ? { channels: payload.channels } : {}),
+          doctor: payload,
+        },
+      };
+      if (status) {
+        status.textContent = payload.status === "not-installed"
+          ? t("management.internetLayerDoctorMissing")
+          : payload.ok
+            ? t("management.internetLayerDoctorReady")
+            : t("management.internetLayerDoctorError", { error: payload.message || payload.status || "" });
+        status.dataset.internetLayerDoctorState = payload.ok ? "ready" : payload.status || "error";
+      }
+      renderInternetLayerDiagnostics({ state, t });
+      return payload;
+    } catch (error) {
+      if (status) {
+        status.textContent = t("management.internetLayerDoctorError", { error: error?.message || String(error) });
+        status.dataset.internetLayerDoctorState = "error";
+      }
+      return null;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function copyInternetLayerInstallPrompt(t) {
+    const prompt = document.querySelector("#internet-layer-install-prompt");
+    const status = document.querySelector("#internet-layer-copy-status");
+    const text = String(prompt?.textContent || "").trim();
+    if (!text) return false;
+    try {
+      await navigator.clipboard.writeText(text);
+      if (status) {
+        status.textContent = t("management.internetLayerCopyDone");
+        status.dataset.internetLayerCopyState = "done";
+      }
+      return true;
+    } catch {
+      if (status) {
+        status.textContent = t("management.internetLayerCopyFailed");
+        status.dataset.internetLayerCopyState = "error";
+      }
+      return false;
+    }
+  }
+
+  async function reloadInternetLayerSetupStatus(state) {
+    const response = await fetch("/api/internet-layer/setup/status", { cache: "no-store" });
+    const payload = await response.json();
+    if (payload?.ok) {
+      state.internetLayerSetupJob = payload.job || {};
+      state.appInfo = {
+        ...(state.appInfo || {}),
+        internetLayer: payload.internetLayer || state.appInfo?.internetLayer || {},
+      };
+    }
+    return payload;
+  }
+
+  async function refreshInternetLayerSetup({ state, els, t }) {
+    try {
+      await reloadInternetLayerSetupStatus(state);
+    } catch (error) {
+      state.internetLayerSetupJob = { status: "error", message: String(error?.message || error) };
+    }
+    renderPluginsPanel({ state, els, t });
+  }
+
+  async function startInternetLayerSetup({ state, els, t }) {
+    if (!window.confirm(t("management.internetLayerSetupConfirm"))) return;
+    state.internetLayerSetupJob = { status: "queued", message: t("management.internetLayerSetupRunning") };
+    renderPluginsPanel({ state, els, t });
+    try {
+      const response = await fetch("/api/internet-layer/setup", { method: "POST" });
+      const payload = await response.json();
+      state.internetLayerSetupJob = {
+        status: payload.status || (payload.ok ? "running" : "error"),
+        message: payload.message || payload.error || "",
+      };
+    } catch (error) {
+      state.internetLayerSetupJob = { status: "error", message: String(error?.message || error) };
+    }
+    renderPluginsPanel({ state, els, t });
+    const startedAt = Date.now();
+    const timer = window.setInterval(async () => {
+      await refreshInternetLayerSetup({ state, els, t });
+      const status = state.internetLayerSetupJob?.status;
+      if (!["queued", "running"].includes(status) || Date.now() - startedAt > 10 * 60 * 1000) {
+        window.clearInterval(timer);
+      }
+    }, 2000);
   }
 
   async function reloadOcrSetupStatus(state) {
@@ -664,6 +856,7 @@ window.GEMMA_MANAGEMENT = (() => {
       els.responseSettingsPanel,
       els.asrPanel,
       els.characterPanel,
+      els.personRelationshipPanel,
       els.studyPacksPanel,
       els.trainingManagementPanel,
       els.contextMemoryPanel,
@@ -730,7 +923,7 @@ window.GEMMA_MANAGEMENT = (() => {
     return "";
   }
 
-  function setupManagementPanels({ els, renderStudyPacksPanel, renderPluginsPanel, renderContractsPanel }) {
+  function setupManagementPanels({ els, renderStudyPacksPanel, renderPluginsPanel, renderContractsPanel, renderPersonRelationshipPanel }) {
     const trainingPanel = document.querySelector(".training-panel");
     if (trainingPanel && els.trainingManagementBody && trainingPanel.parentElement !== els.trainingManagementBody) {
       els.trainingManagementBody.appendChild(trainingPanel);
@@ -993,6 +1186,8 @@ window.GEMMA_MANAGEMENT = (() => {
       });
     }
     renderOcrPluginState({ state, t });
+    renderInternetLayerDiagnostics({ state, t });
+    renderInternetLayerSetupState({ state, t });
     if (els.codegraphPluginStatus) {
       els.codegraphPluginStatus.textContent = installed ? t("management.needsFolderSetup") : t("management.notAdded");
       els.codegraphPluginStatus.dataset.pluginState = installed ? "ready" : "off";
@@ -1156,6 +1351,15 @@ window.GEMMA_MANAGEMENT = (() => {
       syncManagementLayout({ els });
     });
 
+    els.personRelationshipToggle?.addEventListener("click", () => {
+      openManagementPanel({ els, panel: els.personRelationshipPanel });
+      renderPersonRelationshipPanel?.();
+    });
+    els.personRelationshipClose?.addEventListener("click", () => {
+      if (els.personRelationshipPanel) els.personRelationshipPanel.hidden = true;
+      syncManagementLayout({ els });
+    });
+
     els.studyPacksToggle?.addEventListener("click", () => openManagementPanel({ els, panel: els.studyPacksPanel }));
     els.studyPacksClose?.addEventListener("click", () => {
       if (els.studyPacksPanel) els.studyPacksPanel.hidden = true;
@@ -1233,6 +1437,15 @@ window.GEMMA_MANAGEMENT = (() => {
     document.querySelector("#ocr-plugin-setup")?.addEventListener("click", () => {
       startOcrSetup({ state, els, t });
     });
+    document.querySelector("#internet-layer-doctor")?.addEventListener("click", () => {
+      runInternetLayerDoctor({ state, t });
+    });
+    document.querySelector("#internet-layer-copy-install")?.addEventListener("click", () => {
+      copyInternetLayerInstallPrompt(t);
+    });
+    document.querySelector("#internet-layer-setup")?.addEventListener("click", () => {
+      startInternetLayerSetup({ state, els, t });
+    });
     document.querySelectorAll("[data-plugin-settings]").forEach((button) => {
       button.addEventListener("click", () => {
         const target = button.dataset.pluginSettings || "";
@@ -1283,6 +1496,9 @@ window.GEMMA_MANAGEMENT = (() => {
     toggleSampleStudyPack,
     toggleStudyPack,
     renderPluginsPanel,
+    runInternetLayerDoctor,
+    copyInternetLayerInstallPrompt,
+    startInternetLayerSetup,
     toggleCodegraphPlugin,
     togglePluginCandidate,
     bindManagementEvents,

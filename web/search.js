@@ -14,10 +14,19 @@ function searchEnabledForChat({ codingMode, webSearch }) {
   return !codingMode && Boolean(webSearch);
 }
 
+function availableInternetLayerChannels(appInfo = {}) {
+  const channels = appInfo?.internetLayer?.channels || {};
+  return Object.entries(channels)
+    .filter(([, value]) => value?.status === "ready")
+    .map(([channel]) => channel);
+}
+
 function searchPayloadOptions(options, resultCount = 4) {
+  const enabled = searchEnabledForChat(options);
   return {
-    web_search: searchEnabledForChat(options),
+    web_search: enabled,
     search_results: resultCount,
+    internet_layer_channels: enabled ? availableInternetLayerChannels(options.appInfo) : [],
   };
 }
 
@@ -66,6 +75,7 @@ function searchResultsFromResponse(data) {
 window.GEMMA_SEARCH = {
   normalizeSearchResults,
   applySearchBudget,
+  availableInternetLayerChannels,
   renderWebSearchToggle,
   searchEnabledForChat,
   searchPayloadOptions,

@@ -13,6 +13,35 @@ import server
 import sarashina_ocr_runner
 
 
+def test_person_photo_upload_saves_to_local_folder() -> None:
+    previous_dir = server.PERSON_PHOTO_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            server.PERSON_PHOTO_DIR = Path(tmp)
+            payload = server.person_photo_upload_payload(
+                "avatar.png",
+                "image/png",
+                base64.b64encode(b"\x89PNG\r\n\x1a\nsample").decode("ascii"),
+            )
+            assert (Path(tmp) / payload["file"]).is_file()
+        finally:
+            server.PERSON_PHOTO_DIR = previous_dir
+    assert payload["ok"] is True
+    assert payload["file"].endswith(".png")
+    assert payload["url"].startswith("/api/person-photo/view?file=")
+    assert payload["size"] > 0
+
+
+def test_person_photo_upload_rejects_unsupported_mime() -> None:
+    payload = server.person_photo_upload_payload(
+        "avatar.gif",
+        "image/gif",
+        base64.b64encode(b"gif").decode("ascii"),
+    )
+    assert payload["ok"] is False
+    assert "unsupported" in payload["error"]
+
+
 def test_contract_pdf_import_status_payload_shape() -> None:
     payload = server.contract_pdf_import_status_payload()
     assert payload["ok"] is True
@@ -880,6 +909,90 @@ def test_pc_diagnostics_payload_shape() -> None:
     assert "recommended" in payload["recommendation"]
 
 
+def test_internet_layer_diagnostics_payload_shape() -> None:
+    payload = server.internet_layer_diagnostics_payload()
+    assert payload["ok"] is True
+    assert payload["tool"] == "Agent-Reach"
+    assert payload["status"] in {"ready", "not-installed"}
+    assert payload["memoryAutoSave"] is False
+    assert payload["contract"]["doctorCommand"][-1] == "doctor"
+    assert payload["contract"]["schemaVersion"] == "tomos-internet-layer-result-v0.1"
+    assert payload["contract"]["executionPolicy"]["autoInstall"] is False
+    assert payload["contract"]["executionPolicy"]["autoSaveToMemory"] is False
+    assert {"web", "github", "youtube", "rss", "sns"}.issubset(payload["channels"])
+    assert payload["channels"]["sns"]["status"] == "permission-required"
+
+
+def test_parse_agent_reach_doctor_output_reads_json_last_line() -> None:
+    parsed = server.parse_agent_reach_doctor_output('log line\n{"ok": true, "web": true}')
+    assert parsed["ok"] is True
+    assert parsed["web"] is True
+
+
+def test_parse_agent_reach_doctor_output_reads_text_status() -> None:
+    parsed = server.parse_agent_reach_doctor_output(
+        "✅ GitHub 仓库和代码\n"
+        "✅ YouTube 视频和字幕\n"
+        "✅ RSS/Atom 订阅源\n"
+        "✅ 任意网页"
+    )
+    assert parsed["ok"] is True
+    assert parsed["web"] is True
+    assert parsed["github"] is True
+    assert parsed["youtube"] is True
+    assert parsed["rss"] is True
+
+
+def test_agent_reach_doctor_channels_normalize_partial_status() -> None:
+    channels = server.agent_reach_doctor_channels({
+        "web": True,
+        "github": False,
+        "youtube": {"status": "ready"},
+        "rss": "missing",
+    })
+    assert channels["web"]["status"] == "ready"
+    assert channels["github"]["status"] == "missing"
+    assert channels["youtube"]["status"] == "ready"
+    assert channels["rss"]["status"] == "missing"
+    assert channels["sns"]["status"] == "permission-required"
+
+
+def test_normalize_internet_layer_channels_allows_known_channels_only() -> None:
+    channels = server.normalize_internet_layer_channels(["web", "github", "bad", "web", "SNS"])
+    assert channels == ["web", "github", "sns"]
+
+
+def test_internet_layer_setup_status_shape() -> None:
+    payload = server.internet_layer_setup_status()
+    assert payload["ok"] is True
+    assert "job" in payload
+    assert payload["internetLayer"]["tool"] == "Agent-Reach"
+
+
+def test_agent_reach_doctor_payload_reads_runner_output() -> None:
+    previous = server.AGENT_REACH_COMMAND_CANDIDATES
+
+    class FakeRunResult:
+        returncode = 0
+        stdout = b'{"ok": true, "web": true}\n'
+        stderr = b""
+
+    def fake_runner(*args, **kwargs):
+        assert args[0][-1] == "doctor"
+        return FakeRunResult()
+
+    try:
+        server.AGENT_REACH_COMMAND_CANDIDATES = ["python3"]
+        payload = server.agent_reach_doctor_payload(runner=fake_runner)
+    finally:
+        server.AGENT_REACH_COMMAND_CANDIDATES = previous
+    assert payload["ok"] is True
+    assert payload["status"] == "ready"
+    assert payload["doctor"]["web"] is True
+    assert payload["channels"]["web"]["status"] == "ready"
+    assert payload["contract"]["executionPolicy"]["autoInstall"] is False
+
+
 def test_validate_model_remove_rejects_unknown_model() -> None:
     try:
         server.validate_model_remove("unknown:model")
@@ -944,6 +1057,13 @@ if __name__ == "__main__":
     test_ollama_http_error_event_is_stream_json_safe()
     test_pc_diagnostics_recommendation_levels()
     test_pc_diagnostics_payload_shape()
+    test_internet_layer_diagnostics_payload_shape()
+    test_parse_agent_reach_doctor_output_reads_json_last_line()
+    test_parse_agent_reach_doctor_output_reads_text_status()
+    test_agent_reach_doctor_channels_normalize_partial_status()
+    test_normalize_internet_layer_channels_allows_known_channels_only()
+    test_internet_layer_setup_status_shape()
+    test_agent_reach_doctor_payload_reads_runner_output()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")
