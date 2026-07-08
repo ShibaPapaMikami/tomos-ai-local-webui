@@ -89,7 +89,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.208")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.209")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
@@ -3647,6 +3647,8 @@ def clean_youtube_vtt_text(text: str, max_chars: int = YOUTUBE_TRANSCRIPT_MAX_CH
         line = raw_line.strip()
         if not line or line.upper().startswith("WEBVTT") or line.startswith("NOTE"):
             continue
+        if line.lower().startswith(("kind:", "language:")):
+            continue
         if "-->" in line or re.fullmatch(r"\d+", line):
             continue
         line = re.sub(r"<[^>]+>", "", line)
@@ -3659,6 +3661,40 @@ def clean_youtube_vtt_text(text: str, max_chars: int = YOUTUBE_TRANSCRIPT_MAX_CH
         if sum(len(item) + 1 for item in lines) >= max_chars:
             break
     return "\n".join(lines)[:max_chars].strip()
+
+
+def youtube_transcript_from_metadata(metadata: dict, opener=urllib.request.urlopen) -> str:
+    caption_sets: list[dict] = []
+    for key in ("subtitles", "automatic_captions"):
+        value = metadata.get(key) if isinstance(metadata, dict) else {}
+        if isinstance(value, dict):
+            caption_sets.append(value)
+    language_priority = ["ja", "ja-JP", "en", "zh-Hans", "zh-Hant"]
+    candidates: list[dict] = []
+    for captions in caption_sets:
+        for language in language_priority:
+            entries = captions.get(language)
+            if isinstance(entries, list):
+                candidates.extend(entry for entry in entries if isinstance(entry, dict))
+        for language, entries in captions.items():
+            if str(language).startswith("ja") and isinstance(entries, list):
+                candidates.extend(entry for entry in entries if isinstance(entry, dict))
+    seen_urls: set[str] = set()
+    for entry in candidates:
+        url = str(entry.get("url") or "").strip()
+        ext = str(entry.get("ext") or "").strip().lower()
+        if not url or url in seen_urls or (ext and ext != "vtt"):
+            continue
+        seen_urls.add(url)
+        try:
+            with opener(url, timeout=WEB_READER_TIMEOUT_SECONDS) as response:
+                text = decode_subprocess_output(response.read())
+            transcript = clean_youtube_vtt_text(text)
+            if transcript:
+                return transcript
+        except Exception:
+            continue
+    return ""
 
 
 def clean_reader_text(text: str, max_chars: int = WEB_READER_MAX_CHARS) -> str:
@@ -3876,34 +3912,35 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
     video_id = str(metadata.get("id") or "")
     title = str(metadata.get("title") or "YouTube")
     description = " ".join(str(metadata.get("description") or "").split())[:1200]
-    transcript = ""
+    transcript = youtube_transcript_from_metadata(metadata)
     with tempfile.TemporaryDirectory(prefix="tomos-youtube-") as tmp:
         output_template = str(Path(tmp) / "%(id)s.%(ext)s")
-        runner(
-            [
-                *command_base,
-                "--write-sub",
-                "--write-auto-sub",
-                "--sub-lang",
-                "ja,en,zh-Hans,zh-Hant,zh.*",
-                "--sub-format",
-                "vtt",
-                "--skip-download",
-                "--no-warnings",
-                "-o",
-                output_template,
-                url,
-            ],
-            check=False,
-            capture_output=True,
-            timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
-        )
-        subtitle_files = sorted(Path(tmp).glob("*.vtt"))
-        preferred = [path for path in subtitle_files if ".ja." in path.name] or subtitle_files
-        for path in preferred[:2]:
-            transcript = clean_youtube_vtt_text(path.read_text(encoding="utf-8", errors="replace"))
-            if transcript:
-                break
+        if not transcript:
+            runner(
+                [
+                    *command_base,
+                    "--write-sub",
+                    "--write-auto-sub",
+                    "--sub-lang",
+                    "ja,en,zh-Hans,zh-Hant,zh.*",
+                    "--sub-format",
+                    "vtt",
+                    "--skip-download",
+                    "--no-warnings",
+                    "-o",
+                    output_template,
+                    url,
+                ],
+                check=False,
+                capture_output=True,
+                timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
+            )
+            subtitle_files = sorted(Path(tmp).glob("*.vtt"))
+            preferred = [path for path in subtitle_files if ".ja." in path.name] or subtitle_files
+            for path in preferred[:2]:
+                transcript = clean_youtube_vtt_text(path.read_text(encoding="utf-8", errors="replace"))
+                if transcript:
+                    break
     snippet_parts = [f"動画タイトル: {title}"]
     if transcript:
         snippet_parts.append(f"字幕抜粋:\n{transcript}")

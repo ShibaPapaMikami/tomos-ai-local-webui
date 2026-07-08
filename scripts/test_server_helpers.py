@@ -1005,11 +1005,40 @@ def test_extract_youtube_urls_detects_watch_and_short_urls() -> None:
 
 def test_clean_youtube_vtt_text_removes_timestamps_and_duplicates() -> None:
     cleaned = server.clean_youtube_vtt_text(
-        "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Speaker>こんにちは</v>\nこんにちは\n\n2\n00:00:03.000 --> 00:00:04.000\n次の話です"
+        "WEBVTT\n\nKind: captions\nLanguage: ja\n00:00:01.000 --> 00:00:02.000\n<v Speaker>こんにちは</v>\nこんにちは\n\n2\n00:00:03.000 --> 00:00:04.000\n次の話です"
     )
     assert "WEBVTT" not in cleaned
     assert "-->" not in cleaned
     assert cleaned.splitlines() == ["こんにちは", "次の話です"]
+
+
+def test_youtube_transcript_from_metadata_uses_automatic_caption_url() -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n字幕本文\n".encode("utf-8")
+
+    def fake_opener(url, timeout=0):
+        assert url == "https://example.test/caption.vtt"
+        return FakeResponse()
+
+    transcript = server.youtube_transcript_from_metadata(
+        {
+            "automatic_captions": {
+                "ja": [
+                    {"ext": "json3", "url": "https://example.test/caption.json3"},
+                    {"ext": "vtt", "url": "https://example.test/caption.vtt"},
+                ],
+            },
+        },
+        opener=fake_opener,
+    )
+    assert transcript == "字幕本文"
 
 
 def test_extract_web_urls_excludes_youtube_urls() -> None:
@@ -1344,6 +1373,7 @@ if __name__ == "__main__":
     test_agent_reach_doctor_payload_reads_runner_output()
     test_extract_youtube_urls_detects_watch_and_short_urls()
     test_clean_youtube_vtt_text_removes_timestamps_and_duplicates()
+    test_youtube_transcript_from_metadata_uses_automatic_caption_url()
     test_extract_web_urls_excludes_youtube_urls()
     test_web_reader_result_uses_jina_reader_request()
     test_extract_github_repos_reads_owner_repo()

@@ -284,7 +284,7 @@ renderSettingsMeta({
   state: {
     language: "ja",
     appInfo: {
-      version: "0.8.208",
+      version: "0.8.209",
       commit: "test",
       pcDiagnostics: {
         recommendation: { label: "快適" },
