@@ -3545,6 +3545,42 @@ def extract_github_repos(text: str, limit: int = 3) -> list[str]:
     return repos
 
 
+def should_auto_use_external_research(query: str) -> bool:
+    normalized = str(query or "").strip()
+    if not normalized:
+        return False
+    has_supported_url = bool(
+        extract_youtube_urls(normalized, limit=1)
+        or extract_github_repos(normalized, limit=1)
+        or extract_web_urls(normalized, limit=1)
+    )
+    if not has_supported_url:
+        return False
+    return bool(re.search(
+        r"分析|調べ|調査|要約|解説|説明|見て|読んで|確認|評価|比較|まとめ|analy[sz]e|summari[sz]e|explain|review|check|research",
+        normalized,
+        re.IGNORECASE,
+    ))
+
+
+def auto_internet_layer_channels_for_query(query: str) -> list[str]:
+    diagnostics = internet_layer_diagnostics_payload()
+    channels = diagnostics.get("channels", {}) if isinstance(diagnostics, dict) else {}
+
+    def channel_ready(name: str) -> bool:
+        value = channels.get(name) if isinstance(channels, dict) else {}
+        return isinstance(value, dict) and value.get("status") == "ready"
+
+    selected: list[str] = []
+    if extract_youtube_urls(query, limit=1) and channel_ready("youtube"):
+        selected.append("youtube")
+    if extract_github_repos(query, limit=1) and channel_ready("github"):
+        selected.append("github")
+    if extract_web_urls(query, limit=1) and channel_ready("web"):
+        selected.append("web")
+    return selected
+
+
 def clean_youtube_vtt_text(text: str, max_chars: int = YOUTUBE_TRANSCRIPT_MAX_CHARS) -> str:
     lines: list[str] = []
     previous = ""
@@ -4814,10 +4850,13 @@ class Handler(BaseHTTPRequestHandler):
                 recent_messages[-1]["content"] = strip_translation_instruction(str(recent_messages[-1].get("content", "")))
             search_results: list[dict[str, str]] = []
             search_error = ""
-            use_web_search = bool(body.get("web_search", False)) and not is_translation_task
+            query = str(body.get("search_query") or messages[-1].get("content", ""))
+            auto_external_research = should_auto_use_external_research(query)
+            use_web_search = (bool(body.get("web_search", False)) or auto_external_research) and not is_translation_task
             internet_layer_channels = normalize_internet_layer_channels(body.get("internet_layer_channels", [])) if use_web_search else []
+            if use_web_search and auto_external_research and not internet_layer_channels:
+                internet_layer_channels = auto_internet_layer_channels_for_query(query)
             if use_web_search:
-                query = str(body.get("search_query") or messages[-1].get("content", ""))
                 try:
                     internet_results, internet_error = internet_layer_context_results(query, internet_layer_channels)
                     search_results.extend(internet_results)

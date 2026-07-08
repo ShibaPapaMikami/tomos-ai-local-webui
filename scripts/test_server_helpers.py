@@ -1204,6 +1204,30 @@ def test_internet_layer_context_results_prefers_youtube_channel(monkeypatch=None
     assert results[0]["url"] == "https://www.youtube.com/watch?v=zfN4QApep6s"
 
 
+def test_should_auto_use_external_research_requires_url_and_intent() -> None:
+    assert server.should_auto_use_external_research("https://www.youtube.com/watch?v=zfN4QApep6s この動画を分析して")
+    assert server.should_auto_use_external_research("https://github.com/openai/codex を調べて")
+    assert not server.should_auto_use_external_research("https://www.youtube.com/watch?v=zfN4QApep6s")
+    assert not server.should_auto_use_external_research("この動画を分析して")
+
+
+def test_auto_internet_layer_channels_for_query_uses_ready_channels() -> None:
+    previous = server.internet_layer_diagnostics_payload
+    try:
+        server.internet_layer_diagnostics_payload = lambda: {
+            "channels": {
+                "youtube": {"status": "ready"},
+                "github": {"status": "ready"},
+                "web": {"status": "missing"},
+            }
+        }
+        assert server.auto_internet_layer_channels_for_query("https://www.youtube.com/watch?v=zfN4QApep6s を分析して") == ["youtube"]
+        assert server.auto_internet_layer_channels_for_query("https://github.com/openai/codex を調べて") == ["github"]
+        assert server.auto_internet_layer_channels_for_query("https://example.com/article を読んで") == []
+    finally:
+        server.internet_layer_diagnostics_payload = previous
+
+
 def test_validate_model_remove_rejects_unknown_model() -> None:
     try:
         server.validate_model_remove("unknown:model")
@@ -1287,6 +1311,8 @@ if __name__ == "__main__":
     test_bilibili_search_results_reads_video_group()
     test_youtube_transcript_result_uses_runner_output()
     test_internet_layer_context_results_prefers_youtube_channel()
+    test_should_auto_use_external_research_requires_url_and_intent()
+    test_auto_internet_layer_channels_for_query_uses_ready_channels()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")
