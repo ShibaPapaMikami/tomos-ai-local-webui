@@ -2067,7 +2067,7 @@ async function startModelRemove(model) {
 
 function renderSettingsMeta() {
   if (els.sidebarAppVersion) {
-    const version = state.appInfo.version || "0.8.206";
+    const version = state.appInfo.version || "0.8.207";
     els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
   }
   const deps = {
