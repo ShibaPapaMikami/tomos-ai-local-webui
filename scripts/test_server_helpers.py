@@ -1228,6 +1228,20 @@ def test_auto_internet_layer_channels_for_query_uses_ready_channels() -> None:
         server.internet_layer_diagnostics_payload = previous
 
 
+def test_external_research_answer_instruction_avoids_web_search_prompt() -> None:
+    instruction = server.external_research_answer_instruction(
+        [{
+            "title": "YouTube動画: Demo",
+            "url": "https://www.youtube.com/watch?v=vid123",
+            "snippet": "動画タイトル: Demo",
+        }],
+        "YouTube字幕取得: unavailable",
+    )
+    assert "Web検索をONにしてください" in instruction
+    assert "案内しないでください" in instruction
+    assert "取得済みの出典があればその範囲で回答" in instruction
+
+
 def test_validate_model_remove_rejects_unknown_model() -> None:
     try:
         server.validate_model_remove("unknown:model")
@@ -1313,6 +1327,7 @@ if __name__ == "__main__":
     test_internet_layer_context_results_prefers_youtube_channel()
     test_should_auto_use_external_research_requires_url_and_intent()
     test_auto_internet_layer_channels_for_query_uses_ready_channels()
+    test_external_research_answer_instruction_avoids_web_search_prompt()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")

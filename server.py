@@ -3581,6 +3581,22 @@ def auto_internet_layer_channels_for_query(query: str) -> list[str]:
     return selected
 
 
+def external_research_answer_instruction(results: list[dict[str, str]], error: str = "") -> str:
+    if not results:
+        return ""
+    parts = [
+        "外部調査回答ルール:",
+        "- 外部調査の出典があるため、「Web検索をONにしてください」とは案内しないでください。",
+        "- 取得できたタイトル、説明欄、字幕抜粋、検索スニペットだけを根拠として分析してください。",
+        "- 字幕本文やページ本文が不足している場合は、分析の冒頭ではなく最後に「確認できていない点」として短く書いてください。",
+        "- 動画URLの分析では、動画タイトル、説明欄、字幕抜粋があれば内容の要点、論点、注意点を分けて答えてください。",
+        "- 根拠にない事実、発言、数値、結論は作らないでください。",
+    ]
+    if error:
+        parts.append("- 取得エラーがある場合も、取得済みの出典があればその範囲で回答してください。")
+    return "\n".join(parts)
+
+
 def clean_youtube_vtt_text(text: str, max_chars: int = YOUTUBE_TRANSCRIPT_MAX_CHARS) -> str:
     lines: list[str] = []
     previous = ""
@@ -4888,6 +4904,9 @@ class Handler(BaseHTTPRequestHandler):
                 if search_error:
                     search_context += f"\n\nSearch error: {search_error}"
                 prompt_messages.append({"role": "system", "content": search_context})
+                answer_instruction = external_research_answer_instruction(search_results, search_error)
+                if answer_instruction:
+                    prompt_messages.append({"role": "system", "content": answer_instruction})
             if body.get("workspace") and not is_translation_task:
                 try:
                     workspace_context = build_workspace_context(body.get("workspace", {}))
