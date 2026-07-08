@@ -1242,6 +1242,22 @@ def test_external_research_answer_instruction_avoids_web_search_prompt() -> None
     assert "取得済みの出典があればその範囲で回答" in instruction
 
 
+def test_direct_external_research_answer_uses_available_source() -> None:
+    answer = server.direct_external_research_answer(
+        "https://www.youtube.com/watch?v=vid123 この動画を分析して",
+        [{
+            "title": "YouTube動画: Demo",
+            "url": "https://www.youtube.com/watch?v=vid123",
+            "snippet": "動画タイトル: Demo",
+        }],
+        "YouTube字幕取得: unavailable",
+    )
+    assert "外部調査で確認できた範囲で分析します" in answer
+    assert "動画タイトル: Demo" in answer
+    assert "字幕本文を取得できていない" in answer
+    assert "Web検索をON" not in answer
+
+
 def test_validate_model_remove_rejects_unknown_model() -> None:
     try:
         server.validate_model_remove("unknown:model")
@@ -1328,6 +1344,7 @@ if __name__ == "__main__":
     test_should_auto_use_external_research_requires_url_and_intent()
     test_auto_internet_layer_channels_for_query_uses_ready_channels()
     test_external_research_answer_instruction_avoids_web_search_prompt()
+    test_direct_external_research_answer_uses_available_source()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")

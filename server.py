@@ -89,7 +89,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.207")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.208")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
@@ -3597,6 +3597,44 @@ def external_research_answer_instruction(results: list[dict[str, str]], error: s
     return "\n".join(parts)
 
 
+def direct_external_research_answer(query: str, results: list[dict[str, str]], error: str = "") -> str:
+    if not should_auto_use_external_research(query) or not results:
+        return ""
+    primary = results[0]
+    title = str(primary.get("title") or "外部調査結果").strip()
+    url = str(primary.get("url") or "").strip()
+    snippet = str(primary.get("snippet") or "").strip()
+    lines = [
+        "外部調査で確認できた範囲で分析します。",
+        "",
+        "## 確認できた情報",
+        f"- 出典: {title}",
+    ]
+    if url:
+        lines.append(f"- URL: {url}")
+    if "動画タイトル:" in snippet:
+        for line in snippet.splitlines():
+            if line.startswith("動画タイトル:"):
+                lines.append(f"- {line}")
+                break
+    elif snippet:
+        lines.append(f"- 抜粋: {snippet[:240]}")
+    lines.extend([
+        "",
+        "## 分析",
+        "- 取得できた情報だけを見る限り、この動画は上記タイトルに関する話題を扱っています。",
+        "- タイトルや検索結果から主題は推測できますが、動画内で実際に話された詳細、根拠、時系列、結論までは断定できません。",
+        "- そのため、内容の深い要約や発言単位の分析には字幕または本文取得が必要です。",
+        "",
+        "## 確認できていない点",
+    ])
+    if "字幕抜粋:" not in snippet:
+        lines.append("- 字幕本文を取得できていないため、動画内の具体的な発言内容は未確認です。")
+    if error:
+        lines.append(f"- 取得時の制限: {error}")
+    return "\n".join(lines)
+
+
 def clean_youtube_vtt_text(text: str, max_chars: int = YOUTUBE_TRANSCRIPT_MAX_CHARS) -> str:
     lines: list[str] = []
     previous = ""
@@ -4915,6 +4953,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     prompt_messages.append({"role": "system", "content": f"Workspace context error: {exc}"})
             prompt_messages.extend(recent_messages)
+            direct_answer = "" if is_translation_task or body.get("workspace") else direct_external_research_answer(query, search_results, search_error)
             requested_model = str(body.get("model") or "").strip()
             is_coding_task = body.get("task") == "coding" or bool(body.get("coding", False))
             if requested_model:
@@ -4965,6 +5004,26 @@ class Handler(BaseHTTPRequestHandler):
                         },
                     },
                 )
+                if direct_answer:
+                    stream_json_event(self, {"ok": True, "type": "chunk", "content": direct_answer})
+                    stream_json_event(
+                        self,
+                        {
+                            "ok": True,
+                            "type": "done",
+                            "message": {"role": "assistant", "content": direct_answer},
+                            "model": payload["model"],
+                            "task": "chat",
+                            "done": True,
+                            "search": {
+                                "enabled": use_web_search,
+                                "results": search_results,
+                                "error": search_error,
+                                "channels": internet_layer_channels,
+                            },
+                        },
+                    )
+                    return
                 content_parts: list[str] = []
                 try:
                     with ollama_stream("/api/chat", payload=payload, timeout=600, base_url=llm_base_url) as stream:
@@ -5016,6 +5075,25 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             payload["stream"] = False
+            if direct_answer:
+                json_response(
+                    self,
+                    200,
+                    {
+                        "ok": True,
+                        "message": {"role": "assistant", "content": direct_answer},
+                        "model": payload["model"],
+                        "task": "chat",
+                        "done": True,
+                        "search": {
+                            "enabled": use_web_search,
+                            "results": search_results,
+                            "error": search_error,
+                            "channels": internet_layer_channels,
+                        },
+                    },
+                )
+                return
             response = ollama_json("/api/chat", payload=payload, timeout=600, base_url=llm_base_url)
             message = response.get("message", {})
             if is_translation_task and isinstance(message, dict):

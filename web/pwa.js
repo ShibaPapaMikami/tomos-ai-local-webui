@@ -3,7 +3,7 @@
     if (!("serviceWorker" in navigator)) return;
     if (window.location.protocol !== "http:" && window.location.protocol !== "https:") return;
     try {
-      await navigator.serviceWorker.register("/sw.js?v=0.8.207-tomos51");
+      await navigator.serviceWorker.register("/sw.js?v=0.8.208-tomos52");
     } catch (error) {
       console.warn("Service worker registration failed", error);
     }
