@@ -718,6 +718,23 @@ window.GEMMA_MANAGEMENT = (() => {
     return payload;
   }
 
+  async function fetchInternetLayerJson(url, options = {}, t) {
+    const translate = typeof t === "function" ? t : (key) => key;
+    const response = await fetch(url, options);
+    const contentType = String(response.headers?.get?.("content-type") || "");
+    if (!contentType.includes("application/json")) {
+      await response.text().catch(() => "");
+      throw new Error(response.status === 404
+        ? translate("management.internetLayerApiMissing")
+        : translate("management.internetLayerSetupError", { error: `HTTP ${response.status}` }));
+    }
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.error || payload?.message || `HTTP ${response.status}`);
+    }
+    return payload;
+  }
+
   async function runInternetLayerDoctor({ state, t }) {
     const button = document.querySelector("#internet-layer-doctor");
     const status = document.querySelector("#internet-layer-doctor-status");
@@ -733,8 +750,7 @@ window.GEMMA_MANAGEMENT = (() => {
       t,
     });
     try {
-      const response = await fetch("/api/internet-layer/doctor", { cache: "no-store" });
-      const payload = await response.json();
+      const payload = await fetchInternetLayerJson("/api/internet-layer/doctor", { cache: "no-store" }, t);
       state.appInfo = {
         ...(state.appInfo || {}),
         internetLayer: {
@@ -775,9 +791,12 @@ window.GEMMA_MANAGEMENT = (() => {
     }
   }
 
-  async function reloadInternetLayerSetupStatus(state) {
-    const response = await fetch("/api/internet-layer/setup/status", { cache: "no-store" });
-    const payload = await response.json();
+  async function reloadInternetLayerSetupStatus(state, t) {
+    const payload = await fetchInternetLayerJson(
+      "/api/internet-layer/setup/status",
+      { cache: "no-store" },
+      t,
+    );
     if (payload?.ok) {
       state.internetLayerSetupJob = payload.job || {};
       state.appInfo = {
@@ -790,9 +809,15 @@ window.GEMMA_MANAGEMENT = (() => {
 
   async function refreshInternetLayerSetup({ state, els, t }) {
     try {
-      await reloadInternetLayerSetupStatus(state);
+      await reloadInternetLayerSetupStatus(state, t);
     } catch (error) {
-      state.internetLayerSetupJob = { status: "error", message: String(error?.message || error) };
+      const message = String(error?.message || error);
+      state.internetLayerSetupJob = {
+        status: "error",
+        message,
+        percent: 100,
+        logs: [message],
+      };
     }
     renderPluginsPanel({ state, els, t });
   }
@@ -807,14 +832,19 @@ window.GEMMA_MANAGEMENT = (() => {
     };
     renderPluginsPanel({ state, els, t });
     try {
-      const response = await fetch("/api/internet-layer/setup", { method: "POST" });
-      const payload = await response.json();
+      const payload = await fetchInternetLayerJson("/api/internet-layer/setup", { method: "POST" }, t);
       state.internetLayerSetupJob = {
         status: payload.status || (payload.ok ? "running" : "error"),
         message: payload.message || payload.error || "",
       };
     } catch (error) {
-      state.internetLayerSetupJob = { status: "error", message: String(error?.message || error) };
+      const message = String(error?.message || error);
+      state.internetLayerSetupJob = {
+        status: "error",
+        message,
+        percent: 100,
+        logs: [message],
+      };
     }
     renderPluginsPanel({ state, els, t });
     const startedAt = Date.now();
