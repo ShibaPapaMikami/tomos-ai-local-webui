@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=0.8.210-ytdiag1" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.210-pluginlayout1" />
   </head>
   <body>
     <div class="app-shell">
@@ -854,7 +854,8 @@
               <strong data-i18n="management.pluginCandidates">追加できる機能</strong>
               <span data-i18n="management.pluginCandidatesHelp">1クリックで追加できます。コード理解はすぐ使えます。その他は先にメニューへ追加する準備枠です。</span>
             </div>
-            <section class="management-card internet-diagnostics" id="internet-layer-diagnostics">
+            <div class="plugin-candidate-grid">
+              <section class="plugin-candidate-card internet-diagnostics" id="internet-layer-diagnostics">
               <div>
                 <strong data-i18n="management.internetLayerTitle">インターネットレイヤー診断</strong>
                 <span data-i18n="management.internetLayerHelp">Web調査はまだ標準機能ではありません。Agent-ReachなどのWeb調査ツールを、将来ここから確認できるようにします。</span>
@@ -940,8 +941,7 @@
                   </div>
                 </div>
               </details>
-            </section>
-            <div class="plugin-candidate-grid">
+              </section>
               <article class="plugin-candidate-card plugin-available">
                 <strong data-i18n="management.codeUnderstanding">コード理解</strong>
                 <span class="plugin-kind-badge" data-i18n="management.pluginReadyNow">すぐ使える</span>

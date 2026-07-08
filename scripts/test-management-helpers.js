@@ -399,7 +399,8 @@ assert.match(stylesCss, /\.person-editor \.setting-wide/);
 assert.match(stylesCss, /\.person-self-editor \.self-field-left/);
 assert.match(stylesCss, /\.person-self-editor \.self-field-right/);
 assert.match(stylesCss, /\.internet-diagnostics/);
-assert.match(stylesCss, /\.internet-diagnostics\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s);
+assert.match(indexHtml, /class="plugin-candidate-card internet-diagnostics"/);
+assert.match(stylesCss, /\.internet-channel-grid\s*\{[^}]*repeat\(auto-fit, minmax\(104px, 1fr\)\)/s);
 assert.match(stylesCss, /data-internet-status="ready"/);
 assert.match(stylesCss, /data-internet-layer-state="partial"/);
 assert.match(stylesCss, /\.internet-layer-steps/);
@@ -468,7 +469,7 @@ assert.equal(
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
 assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.210-ytdiag1"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.210-ytdiag1"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.210-pluginlayout1"/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);

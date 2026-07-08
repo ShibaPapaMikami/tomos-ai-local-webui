@@ -1,10 +1,10 @@
-const CACHE_NAME = "gemma4-pwa-0.8.210-ytdiag1";
+const CACHE_NAME = "gemma4-pwa-0.8.210-pluginlayout1";
 const APP_SHELL = [
   "/",
   "/mobile.html",
   "/offline.html",
   "/manifest.webmanifest",
-  "/styles.css?v=0.8.210-ytdiag1",
+  "/styles.css?v=0.8.210-pluginlayout1",
   "/i18n.js?v=0.8.209-tomos53",
   "/utils.js?v=0.8.209-tomos53",
   "/translation.js?v=0.8.209-tomos53",

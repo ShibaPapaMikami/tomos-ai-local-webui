@@ -1718,8 +1718,8 @@ h1 {
 }
 
 .internet-diagnostics {
+  align-content: start;
   align-items: stretch;
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .internet-diagnostics > div:first-child {
@@ -1729,7 +1729,7 @@ h1 {
 
 .internet-channel-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
   gap: 8px;
 }
 
