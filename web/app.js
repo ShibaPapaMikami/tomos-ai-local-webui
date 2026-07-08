@@ -161,7 +161,7 @@ const SYSTEM_PROMPT_TEMPLATES = {
     en: "You are a concise and helpful AI. Use the configured character name and speaking style, while answering briefly without preamble. Use bullets only for comparisons, steps, or structured explanations. Do not invent unknown facts; say when you do not know.",
   },
   detailed: {
-    ja: "あなたは学生を支えるAIです。マイキャラ設定の名前と話し方を使いながら、理由・手順・注意点を分かりやすく説明してください。長くなりすぎないように区切り、正確でないことは作らず、必要ならWeb検索や学習セットへの登録を提案してください。",
+    ja: "あなたは学生を支えるAIです。マイキャラ設定の名前と話し方を使いながら、理由・手順・注意点を分かりやすく説明してください。長くなりすぎないように区切り、正確でないことは作らず、必要ならWeb調査や学習セットへの登録を提案してください。",
     en: "You are an AI that supports students. Use the configured character name and speaking style, while explaining reasons, steps, and cautions clearly. Keep long answers segmented. Do not invent uncertain facts; suggest web search or adding a learning-set correction when useful.",
   },
 };
@@ -850,7 +850,7 @@ function characterAddressPrefix() {
 
 function characterUncertainAnswer() {
   const prefix = characterAddressPrefix();
-  return `${prefix}正確な情報を持っていないから、ここでは答えきれないよ。「Web検索」をONにするか、「修正して学習」で正しい情報を教えてね。`;
+  return `${prefix}正確な情報を持っていないから、ここでは答えきれないよ。「Web調査」をONにするか、「修正して学習」で正しい情報を教えてね。`;
 }
 
 function applyCharacterToneToToolReply(content) {
@@ -4327,11 +4327,11 @@ function factualSafetySystemSuffix(codingMode, translationMode) {
     "",
     "事実確認ルール:",
     "- 固有名詞、会社、人物、製品、日付、数値、代表者、所在地などは推測で断定しないでください。",
-    `- 人物・関係メモ、学習セット、ユーザー提供文、Web検索結果、添付資料のどれにも根拠がない情報は「${t("training.uncertainAnswer")}」と答えてください。`,
+    `- 人物・関係メモ、学習セット、ユーザー提供文、Web調査結果、添付資料のどれにも根拠がない情報は「${t("training.uncertainAnswer")}」と答えてください。`,
     "- 人物・関係メモにある登録人物、自分の情報、関係メモ、バイオリズムは、ユーザーが登録した根拠として扱ってください。",
     "- 似た言葉や一般知識から別の意味を作らないでください。",
     "- 学習セットにある事実は優先して使ってください。ただし、学習セットにない追加情報を補完しないでください。",
-    "- 現在情報や外部確認が必要な質問では、Web検索を使うよう短く案内してください。",
+    "- 現在情報や外部確認が必要な質問では、Web調査を使うよう短く案内してください。",
   ].join("\n");
 }
 
@@ -4591,12 +4591,7 @@ function chatRequestOptions(text, hasImages = false) {
 }
 
 function confirmExternalResearchIfNeeded(requestOptions) {
-  if (!requestOptions?.webSearch || requestOptions?.codingMode || requestOptions?.translationMode) return true;
-  const confirmed = window.confirm(t("composer.externalResearchConfirm"));
-  if (confirmed) return true;
-  state.webSearch = false;
-  render();
-  return false;
+  return true;
 }
 
 function workspaceBuilderSystemPrompt() {

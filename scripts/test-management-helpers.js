@@ -146,7 +146,7 @@ const labels = {
   "management.internetLayerStepInstall": "「TOMOSで安全導入」を押します。",
   "management.internetLayerStepRestart": "導入が終わるまで、この画面で進行状況を確認します。",
   "management.internetLayerStepDoctor": "必要に応じて「診断を実行」で利用可能か確認します。",
-  "management.internetLayerStepUse": "チャット欄の「外部調査」をONにして送信します。",
+  "management.internetLayerStepUse": "チャット欄の「Web調査」をONにして送信します。",
   "management.internetLayerSetupInTomos": "TOMOSで安全導入",
   "management.internetLayerSetupConfirm": "エージェントリーチをTOMOS内の専用環境に導入します。GitHubからのダウンロードが発生します。開始しますか？",
   "management.internetLayerSetupRunning": "安全導入中",
@@ -373,10 +373,10 @@ assert.match(i18nJs, /"management\.internetLayerRunDoctor": "診断を実行"/);
 assert.match(i18nJs, /"management\.internetLayerDoctorProgress": "診断進行状況"/);
 assert.match(i18nJs, /"management\.internetLayerDoctorStarted": "診断を開始しました"/);
 assert.match(i18nJs, /"management\.internetLayerDoctorMissing": "エージェントリーチ未導入"/);
-assert.match(i18nJs, /"management\.internetLayerMemoryNote": "外部調査結果は、自動で長期記憶に保存されません。"/);
-assert.match(i18nJs, /"composer\.externalResearch": "外部調査"/);
-assert.match(i18nJs, /"composer\.externalResearchConfirm": "外部調査を使います。/);
-assert.match(i18nJs, /"chat\.webSources": "外部調査の出典"/);
+assert.match(i18nJs, /"management\.internetLayerMemoryNote": "Web調査結果は、自動で長期記憶に保存されません。"/);
+assert.match(i18nJs, /"composer\.externalResearch": "Web調査"/);
+assert.match(i18nJs, /"composer\.externalResearchConfirm": "Web調査を使います。/);
+assert.match(i18nJs, /"chat\.webSources": "Web調査の出典"/);
 assert.match(stylesCss, /\.person-card/);
 assert.match(stylesCss, /\.person-tabs/);
 assert.match(stylesCss, /\.person-tab-button\.is-active/);
@@ -411,7 +411,7 @@ assert.match(appJs, /composerExternalResearch/);
 assert.match(appJs, /renderWebSearchToggle\(\{ button: els\.composerExternalResearch, enabled: state\.webSearch \}\)/);
 assert.match(appJs, /searchPayloadOptions\?\.\(\{ \.\.\.requestOptions, appInfo: state\.appInfo \}, 4\)/);
 assert.match(appJs, /function confirmExternalResearchIfNeeded/);
-assert.match(appJs, /window\.confirm\(t\("composer\.externalResearchConfirm"\)\)/);
+assert.doesNotMatch(appJs, /window\.confirm\(t\("composer\.externalResearchConfirm"\)\)/);
 assert.match(appJs, /tWithDomFallback\(element\.dataset\.i18n, element\.textContent\.trim\(\)\)/);
 assert.match(appJs, /function setPersonRelationshipTab/);
 assert.match(appJs, /function renderPersonProfileSelects/);
@@ -467,8 +467,8 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.209-tomos53"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.209-tomos53"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.210-ytdiag1"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.210-ytdiag1"/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);
