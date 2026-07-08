@@ -1211,6 +1211,8 @@ def test_youtube_transcript_result_uses_runner_output(monkeypatch=None) -> None:
     assert result["title"] == "YouTube動画: Demo Video"
     assert result["url"] == "https://www.youtube.com/watch?v=vid123"
     assert "字幕の本文です" in result["snippet"]
+    assert all("--extractor-args" in command for command in calls)
+    assert all("youtube:player_client=android,android_vr" in command for command in calls)
     assert any("--write-auto-sub" in command for command in calls)
 
 
@@ -1298,6 +1300,31 @@ def test_direct_external_research_answer_defers_to_model_when_transcript_exists(
         "",
     )
     assert answer == ""
+
+
+def test_external_research_diagnostics_reports_youtube_transcript_status() -> None:
+    success = server.external_research_diagnostics(
+        "https://www.youtube.com/watch?v=vid123 この動画を分析して",
+        ["youtube"],
+        [{
+            "title": "YouTube動画: Demo",
+            "url": "https://www.youtube.com/watch?v=vid123",
+            "snippet": "動画タイトル: Demo\n字幕抜粋: 半導体ショックについて解説します。",
+            "source": "agent-reach:youtube",
+        }],
+        "",
+    )
+    assert success[0]["status"] == "success"
+    assert "字幕本文" in success[0]["message"]
+
+    failed = server.external_research_diagnostics(
+        "https://www.youtube.com/watch?v=vid123 この動画を分析して",
+        ["youtube"],
+        [],
+        "YouTube字幕取得: unavailable",
+    )
+    assert failed[0]["status"] == "error"
+    assert "時間をおいて" in failed[0]["howToSucceed"]
 
 
 def test_validate_model_remove_rejects_unknown_model() -> None:
@@ -1389,6 +1416,7 @@ if __name__ == "__main__":
     test_external_research_answer_instruction_avoids_web_search_prompt()
     test_direct_external_research_answer_uses_available_source()
     test_direct_external_research_answer_defers_to_model_when_transcript_exists()
+    test_external_research_diagnostics_reports_youtube_transcript_status()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")

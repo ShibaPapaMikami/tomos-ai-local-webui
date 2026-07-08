@@ -10,6 +10,20 @@ function normalizeSearchResults(results) {
     .filter((result) => result.url);
 }
 
+function normalizeSearchDiagnostics(diagnostics) {
+  if (!Array.isArray(diagnostics)) return [];
+  return diagnostics
+    .map((item) => ({
+      type: String(item?.type || "").trim(),
+      status: String(item?.status || "").trim(),
+      label: String(item?.label || "").trim(),
+      message: String(item?.message || "").trim(),
+      howToSucceed: String(item?.howToSucceed || "").trim(),
+      error: String(item?.error || "").trim(),
+    }))
+    .filter((item) => item.label || item.message);
+}
+
 function searchEnabledForChat({ codingMode, webSearch }) {
   return !codingMode && Boolean(webSearch);
 }
@@ -76,17 +90,29 @@ function searchResultsFromEvent(event, currentResults = []) {
   return nextResults.length > 0 ? nextResults : normalizeSearchResults(currentResults);
 }
 
+function searchDiagnosticsFromEvent(event, currentDiagnostics = []) {
+  const nextDiagnostics = normalizeSearchDiagnostics(event?.search?.diagnostics);
+  return nextDiagnostics.length > 0 ? nextDiagnostics : normalizeSearchDiagnostics(currentDiagnostics);
+}
+
 function searchResultsFromResponse(data) {
   return normalizeSearchResults(data?.search?.results);
 }
 
+function searchDiagnosticsFromResponse(data) {
+  return normalizeSearchDiagnostics(data?.search?.diagnostics);
+}
+
 window.GEMMA_SEARCH = {
   normalizeSearchResults,
+  normalizeSearchDiagnostics,
   applySearchBudget,
   availableInternetLayerChannels,
   renderWebSearchToggle,
   searchEnabledForChat,
   searchPayloadOptions,
+  searchDiagnosticsFromEvent,
+  searchDiagnosticsFromResponse,
   searchResultsFromEvent,
   searchResultsFromResponse,
   shouldAutoUseExternalResearch,

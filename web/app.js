@@ -2067,7 +2067,7 @@ async function startModelRemove(model) {
 
 function renderSettingsMeta() {
   if (els.sidebarAppVersion) {
-    const version = state.appInfo.version || "0.8.209";
+    const version = state.appInfo.version || "0.8.210";
     els.sidebarAppVersion.textContent = state.language === "en" ? `App ${version}` : `アプリ版 ${version}`;
   }
   const deps = {
@@ -4119,6 +4119,8 @@ const {
   applySearchBudget,
   normalizeSearchResults,
   renderWebSearchToggle,
+  searchDiagnosticsFromEvent,
+  searchDiagnosticsFromResponse,
   searchPayloadOptions,
   searchResultsFromEvent,
   searchResultsFromResponse,
@@ -5665,11 +5667,13 @@ async function sendMessage(text) {
         throw new Error("Request failed");
       }
       let streamSearchResults = [];
+      let streamSearchDiagnostics = [];
       await readChatStream(response, (event) => {
         if (!event.ok) {
           throw new Error(event.error || "Request failed");
         }
         streamSearchResults = searchResultsFromEvent?.(event, streamSearchResults) || streamSearchResults;
+        streamSearchDiagnostics = searchDiagnosticsFromEvent?.(event, streamSearchDiagnostics) || streamSearchDiagnostics;
         if (event.type === "chunk" && event.content) {
           assistantMessage.content += event.content;
           scheduleStreamRender();
@@ -5677,6 +5681,7 @@ async function sendMessage(text) {
         if (event.type === "done") {
           assistantMessage.content = event.message?.content || assistantMessage.content;
           streamSearchResults = searchResultsFromEvent?.(event, streamSearchResults) || streamSearchResults;
+          streamSearchDiagnostics = searchDiagnosticsFromEvent?.(event, streamSearchDiagnostics) || streamSearchDiagnostics;
         }
       });
       const durationSeconds = (Date.now() - state.startedAt) / 1000;
@@ -5704,6 +5709,7 @@ async function sendMessage(text) {
       assistantMessage.sources = requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(normalizeSearchResults?.(streamSearchResults) || streamSearchResults)];
+      assistantMessage.searchDiagnostics = streamSearchDiagnostics;
       assistantMessage.durationSeconds = durationSeconds;
       assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel, runMetaOverrides);
       delete assistantMessage.streaming;
@@ -5741,6 +5747,7 @@ async function sendMessage(text) {
       sources: requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(searchResultsFromResponse?.(data) || [])],
+      searchDiagnostics: searchDiagnosticsFromResponse?.(data) || [],
       durationSeconds,
       runMeta: messageRunMeta(requestOptions, data.model || requestModel, runMetaOverrides),
     });

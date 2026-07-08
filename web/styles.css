@@ -4648,6 +4648,43 @@ select:focus {
   white-space: nowrap;
 }
 
+.search-diagnostics {
+  display: grid;
+  gap: 8px;
+  max-width: 780px;
+}
+
+.search-diagnostic {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted-strong);
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+}
+
+.search-diagnostic[data-status="success"] {
+  border-left-color: var(--accent);
+}
+
+.search-diagnostic[data-status="warning"] {
+  border-left-color: #c58a15;
+}
+
+.search-diagnostic[data-status="error"] {
+  border-left-color: var(--danger);
+}
+
+.search-diagnostic strong {
+  color: var(--text);
+}
+
+.search-diagnostic small {
+  color: var(--muted);
+}
+
 .workspace-source-card {
   align-items: stretch;
   display: inline-flex;

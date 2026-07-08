@@ -89,7 +89,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.209")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.210")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
@@ -3441,6 +3441,7 @@ AGENT_REACH_VENV_DIR = Path.home() / ".agent-reach-venv"
 AGENT_REACH_PACKAGE_URL = "git+https://github.com/Panniantong/Agent-Reach.git"
 YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS = 45
 YOUTUBE_TRANSCRIPT_MAX_CHARS = 12000
+YOUTUBE_YTDLP_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=android,android_vr"]
 YOUTUBE_URL_RE = re.compile(
     r"https?://(?:www\.)?(?:youtube\.com/(?:watch\?[^ \n\r\t]+|shorts/[^ \n\r\t]+|live/[^ \n\r\t]+)|youtu\.be/[^ \n\r\t]+)",
     re.IGNORECASE,
@@ -3595,6 +3596,50 @@ def external_research_answer_instruction(results: list[dict[str, str]], error: s
     if error:
         parts.append("- 取得エラーがある場合も、取得済みの出典があればその範囲で回答してください。")
     return "\n".join(parts)
+
+
+def external_research_diagnostics(query: str, channels: list[str], results: list[dict[str, str]], error: str = "") -> list[dict[str, str]]:
+    diagnostics: list[dict[str, str]] = []
+    if not extract_youtube_urls(query, limit=1):
+        return diagnostics
+    youtube_results = [result for result in results if str(result.get("source") or "") == "agent-reach:youtube"]
+    has_transcript = any("字幕抜粋:" in str(result.get("snippet") or "") for result in youtube_results)
+    if has_transcript:
+        diagnostics.append({
+            "type": "youtube-transcript",
+            "status": "success",
+            "label": "YouTube字幕取得",
+            "message": "成功。字幕本文を使って分析しています。",
+            "howToSucceed": "この状態なら動画内容の要約・論点整理に使えます。",
+        })
+        return diagnostics
+    if youtube_results:
+        diagnostics.append({
+            "type": "youtube-transcript",
+            "status": "warning",
+            "label": "YouTube字幕取得",
+            "message": "未取得。タイトルまたは説明欄だけを使っています。",
+            "howToSucceed": "動画に字幕があるか、時間をおいて再送信してください。字幕がない動画は深い分析ができません。",
+        })
+        return diagnostics
+    if "youtube" not in channels:
+        diagnostics.append({
+            "type": "youtube-transcript",
+            "status": "warning",
+            "label": "YouTube字幕取得",
+            "message": "未実行。外部調査のYouTube字幕ルートに入っていません。",
+            "howToSucceed": "外部調査をONにして、YouTube URLと「分析して」「要約して」などの依頼を同じ文に入れてください。",
+        })
+        return diagnostics
+    diagnostics.append({
+        "type": "youtube-transcript",
+        "status": "error",
+        "label": "YouTube字幕取得",
+        "message": "失敗。字幕本文を取得できませんでした。",
+        "howToSucceed": "外部調査診断でYouTube字幕が利用可能か確認し、時間をおいて再送信してください。YouTube側のbot判定や字幕未公開で失敗することがあります。",
+        "error": error,
+    })
+    return diagnostics
 
 
 def direct_external_research_answer(query: str, results: list[dict[str, str]], error: str = "") -> str:
@@ -3900,7 +3945,7 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
     if not command_base:
         return None
     metadata_result = runner(
-        [*command_base, "--dump-json", "--skip-download", "--no-warnings", url],
+        [*command_base, *YOUTUBE_YTDLP_CLIENT_ARGS, "--dump-json", "--skip-download", "--no-warnings", url],
         check=False,
         capture_output=True,
         timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
@@ -3919,6 +3964,7 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
             runner(
                 [
                     *command_base,
+                    *YOUTUBE_YTDLP_CLIENT_ARGS,
                     "--write-sub",
                     "--write-auto-sub",
                     "--sub-lang",
@@ -4946,6 +4992,7 @@ class Handler(BaseHTTPRequestHandler):
                 recent_messages[-1]["content"] = strip_translation_instruction(str(recent_messages[-1].get("content", "")))
             search_results: list[dict[str, str]] = []
             search_error = ""
+            search_diagnostics: list[dict[str, str]] = []
             query = str(body.get("search_query") or messages[-1].get("content", ""))
             auto_external_research = should_auto_use_external_research(query)
             use_web_search = (bool(body.get("web_search", False)) or auto_external_research) and not is_translation_task
@@ -4966,6 +5013,7 @@ class Handler(BaseHTTPRequestHandler):
                         search_results.extend(search_web(query, max_results))
                 except Exception as exc:
                     search_error = f"{search_error} / {exc}" if search_error else str(exc)
+            search_diagnostics = external_research_diagnostics(query, internet_layer_channels, search_results, search_error) if use_web_search else []
 
             prompt_messages = [{"role": "system", "content": system_prompt}]
             if is_translation_task and translation_target:
@@ -5043,6 +5091,7 @@ class Handler(BaseHTTPRequestHandler):
                             "results": search_results,
                             "error": search_error,
                             "channels": internet_layer_channels,
+                            "diagnostics": search_diagnostics,
                         },
                     },
                 )
@@ -5062,6 +5111,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "results": search_results,
                                 "error": search_error,
                                 "channels": internet_layer_channels,
+                                "diagnostics": search_diagnostics,
                             },
                         },
                     )
@@ -5111,6 +5161,7 @@ class Handler(BaseHTTPRequestHandler):
                             "results": search_results,
                             "error": search_error,
                             "channels": internet_layer_channels,
+                            "diagnostics": search_diagnostics,
                         },
                     },
                 )
@@ -5132,6 +5183,7 @@ class Handler(BaseHTTPRequestHandler):
                             "results": search_results,
                             "error": search_error,
                             "channels": internet_layer_channels,
+                            "diagnostics": search_diagnostics,
                         },
                     },
                 )
@@ -5154,6 +5206,7 @@ class Handler(BaseHTTPRequestHandler):
                         "results": search_results,
                         "error": search_error,
                         "channels": internet_layer_channels,
+                        "diagnostics": search_diagnostics,
                     },
                 },
             )

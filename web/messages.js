@@ -227,6 +227,32 @@ function renderGemmaMessages(deps) {
         wrapper.append(externalGroup);
       }
     }
+    if (Array.isArray(message.searchDiagnostics) && message.searchDiagnostics.length > 0) {
+      const diagnostics = document.createElement("div");
+      diagnostics.className = "search-diagnostics";
+      for (const item of message.searchDiagnostics) {
+        const row = document.createElement("div");
+        row.className = "search-diagnostic";
+        row.dataset.status = item.status || "info";
+        const label = document.createElement("strong");
+        label.textContent = item.label || (state.language === "en" ? "Research status" : "外部調査状態");
+        const messageText = document.createElement("span");
+        messageText.textContent = item.message || "";
+        row.append(label, messageText);
+        if (item.howToSucceed) {
+          const help = document.createElement("small");
+          help.textContent = item.howToSucceed;
+          row.append(help);
+        }
+        if (item.error) {
+          const error = document.createElement("small");
+          error.textContent = item.error;
+          row.append(error);
+        }
+        diagnostics.append(row);
+      }
+      wrapper.append(diagnostics);
+    }
     if (message.role === "assistant" && typeof message.durationSeconds === "number") {
       const duration = document.createElement("div");
       duration.className = "message-duration";
