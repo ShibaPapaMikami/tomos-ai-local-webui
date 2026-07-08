@@ -37,10 +37,28 @@ assert.equal(searchEnabledForChat({ codingMode: false, webSearch: false }), fals
 assert.deepEqual(plain(searchPayloadOptions({ codingMode: false, webSearch: true }, 6)), {
   web_search: true,
   search_results: 6,
+  internet_layer_channels: [],
 });
 assert.deepEqual(plain(searchPayloadOptions({ codingMode: true, webSearch: true }, 4)), {
   web_search: false,
   search_results: 4,
+  internet_layer_channels: [],
+});
+assert.deepEqual(plain(searchPayloadOptions({
+  codingMode: false,
+  webSearch: true,
+  appInfo: {
+    internetLayer: {
+      channels: {
+        youtube: { status: "ready" },
+        rss: { status: "missing" },
+      },
+    },
+  },
+}, 4)), {
+  web_search: true,
+  search_results: 4,
+  internet_layer_channels: ["youtube"],
 });
 assert.deepEqual(plain(applySearchBudget({
   codingMode: false,

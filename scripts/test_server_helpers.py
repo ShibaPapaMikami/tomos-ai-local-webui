@@ -958,8 +958,8 @@ def test_agent_reach_doctor_channels_normalize_partial_status() -> None:
 
 
 def test_normalize_internet_layer_channels_allows_known_channels_only() -> None:
-    channels = server.normalize_internet_layer_channels(["web", "github", "bad", "web", "SNS"])
-    assert channels == ["web", "github", "sns"]
+    channels = server.normalize_internet_layer_channels(["web", "github", "v2ex", "bilibili", "bad", "web", "SNS"])
+    assert channels == ["web", "github", "v2ex", "bilibili", "sns"]
 
 
 def test_internet_layer_setup_status_shape() -> None:
@@ -991,6 +991,217 @@ def test_agent_reach_doctor_payload_reads_runner_output() -> None:
     assert payload["doctor"]["web"] is True
     assert payload["channels"]["web"]["status"] == "ready"
     assert payload["contract"]["executionPolicy"]["autoInstall"] is False
+
+
+def test_extract_youtube_urls_detects_watch_and_short_urls() -> None:
+    urls = server.extract_youtube_urls(
+        "この動画 https://www.youtube.com/watch?v=zfN4QApep6s と https://youtu.be/abc123 を分析"
+    )
+    assert urls == [
+        "https://www.youtube.com/watch?v=zfN4QApep6s",
+        "https://youtu.be/abc123",
+    ]
+
+
+def test_clean_youtube_vtt_text_removes_timestamps_and_duplicates() -> None:
+    cleaned = server.clean_youtube_vtt_text(
+        "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Speaker>こんにちは</v>\nこんにちは\n\n2\n00:00:03.000 --> 00:00:04.000\n次の話です"
+    )
+    assert "WEBVTT" not in cleaned
+    assert "-->" not in cleaned
+    assert cleaned.splitlines() == ["こんにちは", "次の話です"]
+
+
+def test_extract_web_urls_excludes_youtube_urls() -> None:
+    urls = server.extract_web_urls(
+        "https://example.com/article と https://www.youtube.com/watch?v=zfN4QApep6s と https://github.com/openai/codex"
+    )
+    assert urls == ["https://example.com/article"]
+
+
+def test_web_reader_result_uses_jina_reader_request(monkeypatch=None) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"Title: Example Article\n\nMain body text"
+
+    def fake_opener(request, timeout=0):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    result = server.web_reader_result("https://example.com/article", opener=fake_opener)
+    assert captured["url"] == "https://r.jina.ai/https://example.com/article"
+    assert captured["timeout"] == server.WEB_READER_TIMEOUT_SECONDS
+    assert result is not None
+    assert result["title"] == "Webページ本文: Example Article"
+    assert "Main body text" in result["snippet"]
+
+
+def test_extract_github_repos_reads_owner_repo() -> None:
+    repos = server.extract_github_repos("https://github.com/Panniantong/Agent-Reach と https://github.com/openai/codex")
+    assert repos == ["Panniantong/Agent-Reach", "openai/codex"]
+
+
+def test_github_repo_result_uses_gh_runner(monkeypatch=None) -> None:
+    def fake_runner(command, **kwargs):
+        assert command[:3] == ["gh", "repo", "view"]
+        assert command[3] == "Panniantong/Agent-Reach"
+
+        class FakeRunResult:
+            returncode = 0
+            stdout = b'{"nameWithOwner":"Panniantong/Agent-Reach","description":"Internet router","url":"https://github.com/Panniantong/Agent-Reach","stargazerCount":123,"primaryLanguage":{"name":"Python"}}'
+            stderr = b""
+
+        return FakeRunResult()
+
+    result = server.github_repo_result("Panniantong/Agent-Reach", runner=fake_runner)
+    assert result is not None
+    assert result["title"] == "GitHubリポジトリ: Panniantong/Agent-Reach"
+    assert "Internet router" in result["snippet"]
+    assert "Python" in result["snippet"]
+
+
+def test_github_search_results_uses_gh_runner(monkeypatch=None) -> None:
+    def fake_runner(command, **kwargs):
+        assert command[:3] == ["gh", "search", "repos"]
+
+        class FakeRunResult:
+            returncode = 0
+            stdout = b'[{"fullName":"openai/codex","description":"coding agent","url":"https://github.com/openai/codex","stargazersCount":1000}]'
+            stderr = b""
+
+        return FakeRunResult()
+
+    results = server.github_search_results("github coding agent", runner=fake_runner, limit=1)
+    assert len(results) == 1
+    assert results[0]["url"] == "https://github.com/openai/codex"
+    assert "coding agent" in results[0]["snippet"]
+
+
+def test_rss_feed_result_reads_items(monkeypatch=None) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"""<?xml version='1.0'?>
+<rss><channel><title>Example Feed</title>
+<item><title>First</title><link>https://example.com/1</link><description>Summary one</description></item>
+<item><title>Second</title><link>https://example.com/2</link></item>
+</channel></rss>"""
+
+    def fake_opener(request, timeout=0):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    result = server.rss_feed_result("https://example.com/feed.xml", opener=fake_opener)
+    assert captured["url"] == "https://example.com/feed.xml"
+    assert captured["timeout"] == server.RSS_TIMEOUT_SECONDS
+    assert result is not None
+    assert result["title"] == "RSSフィード: Example Feed"
+    assert "First" in result["snippet"]
+    assert "Summary one" in result["snippet"]
+
+
+def test_v2ex_hot_results_reads_public_api(monkeypatch=None) -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'[{"title":"Topic","url":"https://www.v2ex.com/t/1","replies":3,"node":{"title":"Tech"},"member":{"username":"user"}}]'
+
+    results = server.v2ex_hot_results(opener=lambda request, timeout=0: FakeResponse(), limit=1)
+    assert len(results) == 1
+    assert results[0]["title"] == "V2EX: Topic"
+    assert "Tech" in results[0]["snippet"]
+
+
+def test_bilibili_search_results_reads_video_group(monkeypatch=None) -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"data":{"result":[{"result_type":"video","data":[{"title":"<em class=\\"keyword\\">AI</em> video","bvid":"BV123","author":"up","description":"desc"}]}]}}'
+
+    results = server.bilibili_search_results("AI", opener=lambda request, timeout=0: FakeResponse(), limit=1)
+    assert len(results) == 1
+    assert results[0]["url"] == "https://www.bilibili.com/video/BV123"
+    assert "AI video" in results[0]["snippet"]
+
+
+def test_youtube_transcript_result_uses_runner_output(monkeypatch=None) -> None:
+    calls = []
+
+    class FakeRunResult:
+        def __init__(self, returncode=0, stdout=b"", stderr=b""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_runner(command, **kwargs):
+        calls.append(command)
+        if "--dump-json" in command:
+            return FakeRunResult(stdout=b'{"id":"vid123","title":"Demo Video","description":"Demo description"}\n')
+        output_template = command[command.index("-o") + 1]
+        subtitle_path = Path(output_template.replace("%(id)s", "vid123").replace("%(ext)s", "ja.vtt"))
+        subtitle_path.write_text(
+            "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n字幕の本文です\n",
+            encoding="utf-8",
+        )
+        return FakeRunResult()
+
+    previous = server.agent_reach_venv_ytdlp_command
+    try:
+        server.agent_reach_venv_ytdlp_command = lambda: ["python", "-m", "yt_dlp"]
+        result = server.youtube_transcript_result("https://www.youtube.com/watch?v=vid123", runner=fake_runner)
+    finally:
+        server.agent_reach_venv_ytdlp_command = previous
+    assert result is not None
+    assert result["title"] == "YouTube動画: Demo Video"
+    assert result["url"] == "https://www.youtube.com/watch?v=vid123"
+    assert "字幕の本文です" in result["snippet"]
+    assert any("--write-auto-sub" in command for command in calls)
+
+
+def test_internet_layer_context_results_prefers_youtube_channel(monkeypatch=None) -> None:
+    previous = server.youtube_transcript_result
+    try:
+        server.youtube_transcript_result = lambda url, runner=None: {
+            "title": "YouTube動画: テスト",
+            "url": url,
+            "snippet": "字幕抜粋",
+        }
+        results, error = server.internet_layer_context_results(
+            "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
+            ["youtube"],
+        )
+    finally:
+        server.youtube_transcript_result = previous
+    assert error == ""
+    assert len(results) == 1
+    assert results[0]["url"] == "https://www.youtube.com/watch?v=zfN4QApep6s"
 
 
 def test_validate_model_remove_rejects_unknown_model() -> None:
@@ -1064,6 +1275,18 @@ if __name__ == "__main__":
     test_normalize_internet_layer_channels_allows_known_channels_only()
     test_internet_layer_setup_status_shape()
     test_agent_reach_doctor_payload_reads_runner_output()
+    test_extract_youtube_urls_detects_watch_and_short_urls()
+    test_clean_youtube_vtt_text_removes_timestamps_and_duplicates()
+    test_extract_web_urls_excludes_youtube_urls()
+    test_web_reader_result_uses_jina_reader_request()
+    test_extract_github_repos_reads_owner_repo()
+    test_github_repo_result_uses_gh_runner()
+    test_github_search_results_uses_gh_runner()
+    test_rss_feed_result_reads_items()
+    test_v2ex_hot_results_reads_public_api()
+    test_bilibili_search_results_reads_video_group()
+    test_youtube_transcript_result_uses_runner_output()
+    test_internet_layer_context_results_prefers_youtube_channel()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")

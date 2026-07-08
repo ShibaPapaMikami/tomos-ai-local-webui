@@ -42,6 +42,7 @@ const {
   togglePluginCandidate,
   studyPackById,
   contextMemoryListModel,
+  internetLayerSetupDisplayLines,
 } = context.window.GEMMA_MANAGEMENT;
 
 const els = {
@@ -138,6 +139,8 @@ const labels = {
   "management.internetLayerOverallInstalled": "導入済み",
   "management.internetLayerOverallPartial": "一部利用可能",
   "management.internetLayerOverallReady": "利用可能",
+  "management.internetLayerV2ex": "V2EX",
+  "management.internetLayerBilibili": "Bilibili",
   "management.internetLayerSetupGuide": "導入案内",
   "management.internetLayerSetupNote": "未導入の場合は、この画面のボタンからTOMOS内の専用環境へ安全導入できます。",
   "management.internetLayerStepInstall": "「TOMOSで安全導入」を押します。",
@@ -149,6 +152,12 @@ const labels = {
   "management.internetLayerSetupRunning": "安全導入中",
   "management.internetLayerSetupQueued": "安全導入を開始しました",
   "management.internetLayerSetupDone": "安全導入が完了しました",
+  "management.internetLayerSetupDoneSummary": "導入が完了しました。必要に応じて診断を実行してください。",
+  "management.internetLayerSetupErrorSummary": "導入で問題が発生しました。時間をおいて再実行してください。",
+  "management.internetLayerSetupPreparing": "専用環境を準備しています。",
+  "management.internetLayerSetupInstalling": "エージェントリーチを導入しています。",
+  "management.internetLayerSetupConfiguring": "初期設定を確認しています。",
+  "management.internetLayerSetupVerifying": "利用できるか確認しています。",
   "management.internetLayerSetupError": "安全導入エラー: {error}",
   "management.internetLayerApiMissing": "このアプリ本体はインターネットレイヤー導入APIに未対応です。最新版へ更新してから再度お試しください。",
   "management.internetLayerContract": "連携仕様",
@@ -180,6 +189,18 @@ assert.equal(
     t,
   }),
   "現在の検索対象: テキスト / Word / PDFはファイル名のみ / 未対応: 画像内文字",
+);
+assert.deepEqual(
+  Array.from(internetLayerSetupDisplayLines({ status: "done", logs: ["agent-reach install --channels=all", "如果 Agent Reach 帮到了你"] }, t)),
+  ["導入が完了しました。必要に応じて診断を実行してください。"],
+);
+assert.deepEqual(
+  Array.from(internetLayerSetupDisplayLines({ status: "running", step: 2, logs: ["pip install ..."] }, t)),
+  ["エージェントリーチを導入しています。"],
+);
+assert.deepEqual(
+  Array.from(internetLayerSetupDisplayLines({ status: "error", message: "Unexpected token '<'" }, t)),
+  ["導入で問題が発生しました。時間をおいて再実行してください。"],
 );
 
 const indexHtml = fs.readFileSync("web/index.html", "utf8");
@@ -236,6 +257,8 @@ renderPluginsPanel({
           github: { status: "ready" },
           youtube: { status: "ready" },
           rss: { status: "ready" },
+          v2ex: { status: "ready" },
+          bilibili: { status: "ready" },
           sns: { status: "permission-required" },
         },
       },
@@ -293,6 +316,8 @@ assert.match(indexHtml, /data-internet-channel="web"/);
 assert.match(indexHtml, /data-internet-channel="github"/);
 assert.match(indexHtml, /data-internet-channel="youtube"/);
 assert.match(indexHtml, /data-internet-channel="rss"/);
+assert.match(indexHtml, /data-internet-channel="v2ex"/);
+assert.match(indexHtml, /data-internet-channel="bilibili"/);
 assert.match(indexHtml, /data-internet-channel="sns"/);
 assert.match(indexHtml, /id="internet-layer-tool-status"/);
 assert.match(indexHtml, /data-i18n="management\.internetLayerSetupGuide"/);
@@ -311,8 +336,8 @@ assert.match(indexHtml, /id="internet-layer-doctor-progress"/);
 assert.match(indexHtml, /id="internet-layer-doctor-progress-bar"/);
 assert.match(indexHtml, /id="internet-layer-doctor-log"/);
 assert.match(indexHtml, /id="composer-external-research"/);
-assert.match(indexHtml, /src="\/person-relationship\.js\?v=0\.8\.207-tomos49"/);
-assert.match(indexHtml, /src="\/person-name-fortune\.js\?v=0\.8\.207-tomos49"/);
+assert.match(indexHtml, /src="\/person-relationship\.js\?v=0\.8\.207-tomos50"/);
+assert.match(indexHtml, /src="\/person-name-fortune\.js\?v=0\.8\.207-tomos50"/);
 assert.match(i18nJs, /"management\.personRelationship": "人物・関係メモ"/);
 assert.match(i18nJs, /"management\.actions": "操作"/);
 assert.match(i18nJs, /"person\.selfProfile": "自分の情報"/);
@@ -328,6 +353,8 @@ for (const key of personI18nKeys) {
 }
 assert.match(i18nJs, /"management\.internetLayerTitle": "インターネットレイヤー診断"/);
 assert.match(i18nJs, /"management\.internetLayerReady": "利用可能"/);
+assert.match(i18nJs, /"management\.internetLayerV2ex": "V2EX"/);
+assert.match(i18nJs, /"management\.internetLayerBilibili": "Bilibili"/);
 assert.match(i18nJs, /"management\.internetLayerMissing": "未検出"/);
 assert.match(i18nJs, /"management\.internetLayerToolReady": "エージェントリーチ: 検出済み"/);
 assert.match(i18nJs, /"management\.internetLayerOverallNotInstalled": "未導入"/);
@@ -440,8 +467,8 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.207-tomos49"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.207-tomos49"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.207-tomos50"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.207-tomos50"/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);

@@ -3439,6 +3439,20 @@ AGENT_REACH_INSTALL_GUIDE_URL = "https://raw.githubusercontent.com/Panniantong/a
 AGENT_REACH_DOCTOR_TIMEOUT_SECONDS = 15
 AGENT_REACH_VENV_DIR = Path.home() / ".agent-reach-venv"
 AGENT_REACH_PACKAGE_URL = "git+https://github.com/Panniantong/Agent-Reach.git"
+YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS = 45
+YOUTUBE_TRANSCRIPT_MAX_CHARS = 12000
+YOUTUBE_URL_RE = re.compile(
+    r"https?://(?:www\.)?(?:youtube\.com/(?:watch\?[^ \n\r\t]+|shorts/[^ \n\r\t]+|live/[^ \n\r\t]+)|youtu\.be/[^ \n\r\t]+)",
+    re.IGNORECASE,
+)
+WEB_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
+WEB_READER_TIMEOUT_SECONDS = 15
+WEB_READER_MAX_CHARS = 12000
+GITHUB_REPO_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", re.IGNORECASE)
+GITHUB_TIMEOUT_SECONDS = 20
+RSS_TIMEOUT_SECONDS = 15
+RSS_MAX_ITEMS = 5
+COMMUNITY_TIMEOUT_SECONDS = 15
 
 
 def agent_reach_venv_python() -> Path:
@@ -3447,6 +3461,14 @@ def agent_reach_venv_python() -> Path:
 
 def agent_reach_venv_executable() -> Path:
     return AGENT_REACH_VENV_DIR / ("Scripts/agent-reach.exe" if os.name == "nt" else "bin/agent-reach")
+
+
+def agent_reach_venv_ytdlp_command() -> list[str]:
+    venv_python = agent_reach_venv_python()
+    if venv_python.exists():
+        return [str(venv_python), "-m", "yt_dlp"]
+    resolved = shutil.which("yt-dlp")
+    return [resolved] if resolved else []
 
 
 def agent_reach_executable() -> str:
@@ -3485,6 +3507,378 @@ def agent_reach_command_contract(executable: str = "") -> dict[str, object]:
     }
 
 
+def extract_youtube_urls(text: str, limit: int = 2) -> list[str]:
+    urls: list[str] = []
+    for match in YOUTUBE_URL_RE.finditer(str(text or "")):
+        url = match.group(0).rstrip(").,、。]")
+        if url not in urls:
+            urls.append(url)
+        if len(urls) >= limit:
+            break
+    return urls
+
+
+def extract_web_urls(text: str, limit: int = 3) -> list[str]:
+    urls: list[str] = []
+    youtube_urls = set(extract_youtube_urls(text, limit=10))
+    for match in WEB_URL_RE.finditer(str(text or "")):
+        url = match.group(0).rstrip(").,、。]")
+        if url in youtube_urls or "youtube.com/" in url or "youtu.be/" in url or "github.com/" in url:
+            continue
+        if url not in urls:
+            urls.append(url)
+        if len(urls) >= limit:
+            break
+    return urls
+
+
+def extract_github_repos(text: str, limit: int = 3) -> list[str]:
+    repos: list[str] = []
+    for match in GITHUB_REPO_RE.finditer(str(text or "")):
+        owner = match.group(1).strip("/")
+        repo = match.group(2).strip("/").removesuffix(".git")
+        name = f"{owner}/{repo}"
+        if name not in repos:
+            repos.append(name)
+        if len(repos) >= limit:
+            break
+    return repos
+
+
+def clean_youtube_vtt_text(text: str, max_chars: int = YOUTUBE_TRANSCRIPT_MAX_CHARS) -> str:
+    lines: list[str] = []
+    previous = ""
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.upper().startswith("WEBVTT") or line.startswith("NOTE"):
+            continue
+        if "-->" in line or re.fullmatch(r"\d+", line):
+            continue
+        line = re.sub(r"<[^>]+>", "", line)
+        line = re.sub(r"&[a-zA-Z0-9#]+;", " ", line)
+        line = " ".join(line.split())
+        if not line or line == previous:
+            continue
+        lines.append(line)
+        previous = line
+        if sum(len(item) + 1 for item in lines) >= max_chars:
+            break
+    return "\n".join(lines)[:max_chars].strip()
+
+
+def clean_reader_text(text: str, max_chars: int = WEB_READER_MAX_CHARS) -> str:
+    cleaned = "\n".join(line.strip() for line in str(text or "").splitlines() if line.strip())
+    return cleaned[:max_chars].strip()
+
+
+def web_reader_result(url: str, opener=urllib.request.urlopen) -> dict[str, str] | None:
+    reader_url = f"https://r.jina.ai/{url}"
+    request = urllib.request.Request(
+        reader_url,
+        headers={"User-Agent": "Mozilla/5.0 TOMOS-AI/1.0"},
+    )
+    with opener(request, timeout=WEB_READER_TIMEOUT_SECONDS) as response:
+        text = response.read().decode("utf-8", errors="replace")
+    cleaned = clean_reader_text(text)
+    if not cleaned:
+        return None
+    title = url
+    for line in cleaned.splitlines()[:8]:
+        if line.lower().startswith("title:"):
+            title = line.split(":", 1)[1].strip() or title
+            break
+    return {
+        "title": f"Webページ本文: {title}",
+        "url": url,
+        "snippet": cleaned,
+        "source": "agent-reach:web",
+    }
+
+
+def github_repo_result(repo: str, runner=subprocess.run) -> dict[str, str] | None:
+    command = [
+        "gh",
+        "repo",
+        "view",
+        repo,
+        "--json",
+        "nameWithOwner,description,url,stargazerCount,primaryLanguage",
+    ]
+    result = runner(command, check=False, capture_output=True, timeout=GITHUB_TIMEOUT_SECONDS)
+    if getattr(result, "returncode", 1) != 0:
+        raise RuntimeError(decode_subprocess_output(getattr(result, "stderr", "")) or "GitHubリポジトリ情報を取得できませんでした。")
+    payload = json.loads(decode_subprocess_output(getattr(result, "stdout", "")) or "{}")
+    name = str(payload.get("nameWithOwner") or repo)
+    description = str(payload.get("description") or "")
+    language = payload.get("primaryLanguage") or {}
+    language_name = language.get("name") if isinstance(language, dict) else ""
+    stars = payload.get("stargazerCount")
+    snippet = "\n".join(
+        item for item in [
+            f"リポジトリ: {name}",
+            f"説明: {description}" if description else "",
+            f"主な言語: {language_name}" if language_name else "",
+            f"スター数: {stars}" if stars is not None else "",
+        ] if item
+    )
+    return {
+        "title": f"GitHubリポジトリ: {name}",
+        "url": str(payload.get("url") or f"https://github.com/{repo}"),
+        "snippet": snippet,
+        "source": "agent-reach:github",
+    }
+
+
+def github_search_results(query: str, runner=subprocess.run, limit: int = 5) -> list[dict[str, str]]:
+    command = [
+        "gh",
+        "search",
+        "repos",
+        query,
+        "--sort",
+        "stars",
+        "--limit",
+        str(max(1, min(limit, 10))),
+        "--json",
+        "fullName,description,url,stargazersCount",
+    ]
+    result = runner(command, check=False, capture_output=True, timeout=GITHUB_TIMEOUT_SECONDS)
+    if getattr(result, "returncode", 1) != 0:
+        raise RuntimeError(decode_subprocess_output(getattr(result, "stderr", "")) or "GitHub検索に失敗しました。")
+    payload = json.loads(decode_subprocess_output(getattr(result, "stdout", "")) or "[]")
+    results: list[dict[str, str]] = []
+    for item in payload if isinstance(payload, list) else []:
+        name = str(item.get("fullName") or item.get("url") or "GitHub")
+        description = str(item.get("description") or "")
+        stars = item.get("stargazersCount")
+        results.append({
+            "title": f"GitHub検索: {name}",
+            "url": str(item.get("url") or ""),
+            "snippet": "\n".join(part for part in [
+                f"リポジトリ: {name}",
+                f"説明: {description}" if description else "",
+                f"スター数: {stars}" if stars is not None else "",
+            ] if part),
+            "source": "agent-reach:github",
+        })
+    return [item for item in results if item["url"]]
+
+
+def xml_text(element: ET.Element | None, names: list[str]) -> str:
+    if element is None:
+        return ""
+    for name in names:
+        found = element.find(name)
+        if found is not None and found.text:
+            return " ".join(found.text.split())
+    return ""
+
+
+def rss_feed_result(url: str, opener=urllib.request.urlopen, limit: int = RSS_MAX_ITEMS) -> dict[str, str] | None:
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 TOMOS-AI/1.0"})
+    with opener(request, timeout=RSS_TIMEOUT_SECONDS) as response:
+        xml_bytes = response.read()
+    root = ET.fromstring(xml_bytes)
+    channel = root.find("channel")
+    feed_title = xml_text(channel, ["title"]) or xml_text(root, ["{http://www.w3.org/2005/Atom}title", "title"]) or url
+    items = list(channel.findall("item")) if channel is not None else list(root.findall("{http://www.w3.org/2005/Atom}entry"))
+    lines = [f"RSS/Atom: {feed_title}"]
+    for item in items[: max(1, min(limit, 10))]:
+        title = xml_text(item, ["title", "{http://www.w3.org/2005/Atom}title"]) or "無題"
+        link = xml_text(item, ["link"])
+        if not link:
+            link_element = item.find("{http://www.w3.org/2005/Atom}link")
+            link = str(link_element.attrib.get("href", "")) if link_element is not None else ""
+        summary = xml_text(item, ["description", "summary", "{http://www.w3.org/2005/Atom}summary"])
+        lines.append(f"- {title}{f' ({link})' if link else ''}{f': {summary[:180]}' if summary else ''}")
+    if len(lines) == 1:
+        lines.append("記事項目は見つかりませんでした。")
+    return {
+        "title": f"RSSフィード: {feed_title}",
+        "url": url,
+        "snippet": "\n".join(lines),
+        "source": "agent-reach:rss",
+    }
+
+
+def v2ex_hot_results(opener=urllib.request.urlopen, limit: int = 5) -> list[dict[str, str]]:
+    request = urllib.request.Request(
+        "https://www.v2ex.com/api/topics/hot.json",
+        headers={"User-Agent": "agent-reach/1.0 TOMOS-AI"},
+    )
+    with opener(request, timeout=COMMUNITY_TIMEOUT_SECONDS) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="replace") or "[]")
+    results: list[dict[str, str]] = []
+    for item in payload[: max(1, min(limit, 10))] if isinstance(payload, list) else []:
+        title = str(item.get("title") or "V2EX")
+        url = str(item.get("url") or "")
+        node = item.get("node") or {}
+        member = item.get("member") or {}
+        results.append({
+            "title": f"V2EX: {title}",
+            "url": url,
+            "snippet": "\n".join(part for part in [
+                f"タイトル: {title}",
+                f"ノード: {node.get('title')}" if isinstance(node, dict) and node.get("title") else "",
+                f"投稿者: {member.get('username')}" if isinstance(member, dict) and member.get("username") else "",
+                f"返信数: {item.get('replies')}" if item.get("replies") is not None else "",
+            ] if part),
+            "source": "agent-reach:v2ex",
+        })
+    return [item for item in results if item["url"]]
+
+
+def bilibili_search_results(query: str, opener=urllib.request.urlopen, limit: int = 5) -> list[dict[str, str]]:
+    params = urllib.parse.urlencode({"keyword": query, "page": 1})
+    request = urllib.request.Request(
+        f"https://api.bilibili.com/x/web-interface/search/all/v2?{params}",
+        headers={
+            "User-Agent": "Mozilla/5.0 TOMOS-AI/1.0",
+            "Referer": "https://www.bilibili.com/",
+        },
+    )
+    with opener(request, timeout=COMMUNITY_TIMEOUT_SECONDS) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="replace") or "{}")
+    groups = payload.get("data", {}).get("result", []) if isinstance(payload, dict) else []
+    videos: list[dict[str, object]] = []
+    for group in groups if isinstance(groups, list) else []:
+        if group.get("result_type") == "video" and isinstance(group.get("data"), list):
+            videos.extend(group["data"])
+    results: list[dict[str, str]] = []
+    for item in videos[: max(1, min(limit, 10))]:
+        title = re.sub(r"<[^>]+>", "", str(item.get("title") or "Bilibili"))
+        bvid = str(item.get("bvid") or "")
+        url = f"https://www.bilibili.com/video/{bvid}" if bvid else str(item.get("arcurl") or "")
+        author = str(item.get("author") or "")
+        description = str(item.get("description") or "")
+        results.append({
+            "title": f"Bilibili: {title}",
+            "url": url,
+            "snippet": "\n".join(part for part in [
+                f"タイトル: {title}",
+                f"投稿者: {author}" if author else "",
+                f"説明: {description[:220]}" if description else "",
+            ] if part),
+            "source": "agent-reach:bilibili",
+        })
+    return [item for item in results if item["url"]]
+
+
+def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str] | None:
+    command_base = agent_reach_venv_ytdlp_command()
+    if not command_base:
+        return None
+    metadata_result = runner(
+        [*command_base, "--dump-json", "--skip-download", "--no-warnings", url],
+        check=False,
+        capture_output=True,
+        timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
+    )
+    if getattr(metadata_result, "returncode", 1) != 0:
+        raise RuntimeError(decode_subprocess_output(getattr(metadata_result, "stderr", "")) or "YouTube情報を取得できませんでした。")
+    metadata_text = decode_subprocess_output(getattr(metadata_result, "stdout", ""))
+    metadata = json.loads(metadata_text.splitlines()[0]) if metadata_text.strip() else {}
+    video_id = str(metadata.get("id") or "")
+    title = str(metadata.get("title") or "YouTube")
+    description = " ".join(str(metadata.get("description") or "").split())[:1200]
+    transcript = ""
+    with tempfile.TemporaryDirectory(prefix="tomos-youtube-") as tmp:
+        output_template = str(Path(tmp) / "%(id)s.%(ext)s")
+        runner(
+            [
+                *command_base,
+                "--write-sub",
+                "--write-auto-sub",
+                "--sub-lang",
+                "ja,en,zh-Hans,zh-Hant,zh.*",
+                "--sub-format",
+                "vtt",
+                "--skip-download",
+                "--no-warnings",
+                "-o",
+                output_template,
+                url,
+            ],
+            check=False,
+            capture_output=True,
+            timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
+        )
+        subtitle_files = sorted(Path(tmp).glob("*.vtt"))
+        preferred = [path for path in subtitle_files if ".ja." in path.name] or subtitle_files
+        for path in preferred[:2]:
+            transcript = clean_youtube_vtt_text(path.read_text(encoding="utf-8", errors="replace"))
+            if transcript:
+                break
+    snippet_parts = [f"動画タイトル: {title}"]
+    if transcript:
+        snippet_parts.append(f"字幕抜粋:\n{transcript}")
+    elif description:
+        snippet_parts.append(f"説明欄抜粋:\n{description}")
+    else:
+        snippet_parts.append("字幕または説明欄の本文を取得できませんでした。")
+    return {
+        "title": f"YouTube動画: {title}",
+        "url": url,
+        "snippet": "\n\n".join(snippet_parts),
+        "source": "agent-reach:youtube",
+        "videoId": video_id,
+    }
+
+
+def internet_layer_context_results(query: str, channels: list[str], runner=subprocess.run) -> tuple[list[dict[str, str]], str]:
+    results: list[dict[str, str]] = []
+    errors: list[str] = []
+    if "youtube" in channels:
+        for url in extract_youtube_urls(query):
+            try:
+                result = youtube_transcript_result(url, runner=runner)
+                if result:
+                    results.append(result)
+            except Exception as exc:
+                errors.append(f"YouTube字幕取得: {exc}")
+    if "web" in channels:
+        for url in extract_web_urls(query):
+            try:
+                result = web_reader_result(url)
+                if result:
+                    results.append(result)
+            except Exception as exc:
+                errors.append(f"Web本文取得: {exc}")
+    if "github" in channels:
+        repos = extract_github_repos(query)
+        for repo in repos:
+            try:
+                result = github_repo_result(repo, runner=runner)
+                if result:
+                    results.append(result)
+            except Exception as exc:
+                errors.append(f"GitHub取得: {exc}")
+        if not repos and re.search(r"\bgithub\b|リポジトリ|repository|repo", query, re.IGNORECASE):
+            try:
+                results.extend(github_search_results(query, runner=runner, limit=3))
+            except Exception as exc:
+                errors.append(f"GitHub検索: {exc}")
+    if "rss" in channels and re.search(r"\brss\b|atom|フィード|feed", query, re.IGNORECASE):
+        for url in extract_web_urls(query):
+            try:
+                result = rss_feed_result(url)
+                if result:
+                    results.append(result)
+            except Exception as exc:
+                errors.append(f"RSS取得: {exc}")
+    if "v2ex" in channels and re.search(r"\bv2ex\b", query, re.IGNORECASE):
+        try:
+            results.extend(v2ex_hot_results(limit=5))
+        except Exception as exc:
+            errors.append(f"V2EX取得: {exc}")
+    if "bilibili" in channels and re.search(r"\bbilibili\b|B站|ビリビリ", query, re.IGNORECASE):
+        try:
+            results.extend(bilibili_search_results(query, limit=5))
+        except Exception as exc:
+            errors.append(f"Bilibili検索: {exc}")
+    return results, " / ".join(errors)
+
+
 def internet_layer_diagnostics_payload() -> dict[str, object]:
     executable = agent_reach_executable()
     detected = bool(executable)
@@ -3494,6 +3888,8 @@ def internet_layer_diagnostics_payload() -> dict[str, object]:
         "github": {"status": base_status, "requiresPermission": False},
         "youtube": {"status": base_status, "requiresPermission": False},
         "rss": {"status": base_status, "requiresPermission": False},
+        "v2ex": {"status": base_status, "requiresPermission": False},
+        "bilibili": {"status": base_status, "requiresPermission": False},
         "sns": {"status": "permission-required", "requiresPermission": True},
     }
     return {
@@ -3560,7 +3956,7 @@ def normalize_agent_reach_channel_status(value: object) -> str:
 def agent_reach_doctor_channels(doctor: dict[str, object]) -> dict[str, dict[str, object]]:
     raw_channels = doctor.get("channels") if isinstance(doctor.get("channels"), dict) else {}
     channels: dict[str, dict[str, object]] = {}
-    for channel in ["web", "github", "youtube", "rss", "sns"]:
+    for channel in ["web", "github", "youtube", "rss", "v2ex", "bilibili", "sns"]:
         raw_value = raw_channels.get(channel) if isinstance(raw_channels, dict) and channel in raw_channels else doctor.get(channel)
         if raw_value is None:
             raw_value = "permission-required" if channel == "sns" else "checking"
@@ -3577,7 +3973,7 @@ def agent_reach_doctor_channels(doctor: dict[str, object]) -> dict[str, dict[str
 def normalize_internet_layer_channels(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
-    allowed = {"web", "github", "youtube", "rss", "sns"}
+    allowed = {"web", "github", "youtube", "rss", "v2ex", "bilibili", "sns"}
     channels: list[str] = []
     for item in value:
         channel = str(item or "").strip().lower()
@@ -4423,9 +4819,18 @@ class Handler(BaseHTTPRequestHandler):
             if use_web_search:
                 query = str(body.get("search_query") or messages[-1].get("content", ""))
                 try:
-                    search_results = search_web(query, int(body.get("search_results", 4)))
+                    internet_results, internet_error = internet_layer_context_results(query, internet_layer_channels)
+                    search_results.extend(internet_results)
+                    if internet_error:
+                        search_error = internet_error
                 except Exception as exc:
                     search_error = str(exc)
+                try:
+                    max_results = max(0, int(body.get("search_results", 4)) - len(search_results))
+                    if max_results > 0:
+                        search_results.extend(search_web(query, max_results))
+                except Exception as exc:
+                    search_error = f"{search_error} / {exc}" if search_error else str(exc)
 
             prompt_messages = [{"role": "system", "content": system_prompt}]
             if is_translation_task and translation_target:

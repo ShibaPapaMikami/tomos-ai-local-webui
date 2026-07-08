@@ -548,6 +548,8 @@ window.GEMMA_MANAGEMENT = (() => {
         { id: "github", label: t("management.internetLayerGitHub"), status: internetLayerChannelStatusLabel(channels.github?.status, t) },
         { id: "youtube", label: t("management.internetLayerYouTube"), status: internetLayerChannelStatusLabel(channels.youtube?.status, t) },
         { id: "rss", label: t("management.internetLayerRss"), status: internetLayerChannelStatusLabel(channels.rss?.status, t) },
+        { id: "v2ex", label: t("management.internetLayerV2ex"), status: internetLayerChannelStatusLabel(channels.v2ex?.status, t) },
+        { id: "bilibili", label: t("management.internetLayerBilibili"), status: internetLayerChannelStatusLabel(channels.bilibili?.status, t) },
         { id: "sns", label: t("management.internetLayerSns"), status: internetLayerChannelStatusLabel(channels.sns?.status || "permission-required", t) },
       ],
     };
@@ -664,9 +666,8 @@ window.GEMMA_MANAGEMENT = (() => {
       status.dataset.internetLayerSetupState = job.status || "idle";
     }
     if (!progress) return;
-    const logs = Array.isArray(job.logs) ? job.logs : [];
-    const displayLines = logs.length > 0 ? logs : job.message ? [job.message] : [];
     const percent = Math.max(0, Math.min(100, Number(job.percent || (done ? 100 : running ? 5 : 0))));
+    const displayLines = internetLayerSetupDisplayLines(job, t);
     progress.hidden = !running && !done && !error && displayLines.length === 0;
     if (progressLabel) {
       const step = Number(job.step || 0);
@@ -684,6 +685,28 @@ window.GEMMA_MANAGEMENT = (() => {
         progressLog.appendChild(item);
       });
     }
+  }
+
+  function internetLayerSetupDisplayLines(job = {}, t) {
+    const translate = typeof t === "function" ? t : (key) => key;
+    const status = String(job.status || "");
+    if (status === "done") {
+      return [translate("management.internetLayerSetupDoneSummary")];
+    }
+    if (status === "error") {
+      return [translate("management.internetLayerSetupErrorSummary")];
+    }
+    if (status === "queued") {
+      return [translate("management.internetLayerSetupQueued")];
+    }
+    if (status === "running") {
+      const step = Number(job.step || 0);
+      if (step <= 1) return [translate("management.internetLayerSetupPreparing")];
+      if (step === 2) return [translate("management.internetLayerSetupInstalling")];
+      if (step === 3) return [translate("management.internetLayerSetupConfiguring")];
+      return [translate("management.internetLayerSetupVerifying")];
+    }
+    return [];
   }
 
   function renderInternetLayerDoctorProgress({ status = "idle", message = "", percent = 0, t } = {}) {
@@ -1540,6 +1563,7 @@ window.GEMMA_MANAGEMENT = (() => {
     savePlugins,
     formatPluginSearchCapabilities,
     internetLayerDiagnosticsModel,
+    internetLayerSetupDisplayLines,
     closeManagementPanels,
     setSidebarSettingsMode,
     handleEscapeKey,
