@@ -3606,6 +3606,8 @@ def direct_external_research_answer(query: str, results: list[dict[str, str]], e
     snippet = str(primary.get("snippet") or "").strip()
     transcript_match = re.search(r"字幕抜粋:\s*(.+)", snippet, re.S)
     has_transcript_excerpt = bool(transcript_match and transcript_match.group(1).strip())
+    if has_transcript_excerpt:
+        return ""
     unconfirmed_points: list[str] = []
     if not has_transcript_excerpt:
         unconfirmed_points.append("- 字幕本文を取得できていないため、動画内の具体的な発言内容は未確認です。")

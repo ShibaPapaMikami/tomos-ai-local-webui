@@ -1258,7 +1258,7 @@ def test_direct_external_research_answer_uses_available_source() -> None:
     assert "Web検索をON" not in answer
 
 
-def test_direct_external_research_answer_omits_empty_unconfirmed_section() -> None:
+def test_direct_external_research_answer_defers_to_model_when_transcript_exists() -> None:
     answer = server.direct_external_research_answer(
         "https://www.youtube.com/watch?v=vid123 この動画を分析して",
         [{
@@ -1268,7 +1268,7 @@ def test_direct_external_research_answer_omits_empty_unconfirmed_section() -> No
         }],
         "",
     )
-    assert "## 確認できていない点" not in answer
+    assert answer == ""
 
 
 def test_validate_model_remove_rejects_unknown_model() -> None:
@@ -1358,7 +1358,7 @@ if __name__ == "__main__":
     test_auto_internet_layer_channels_for_query_uses_ready_channels()
     test_external_research_answer_instruction_avoids_web_search_prompt()
     test_direct_external_research_answer_uses_available_source()
-    test_direct_external_research_answer_omits_empty_unconfirmed_section()
+    test_direct_external_research_answer_defers_to_model_when_transcript_exists()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")
