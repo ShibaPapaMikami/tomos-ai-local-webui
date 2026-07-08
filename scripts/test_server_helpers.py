@@ -1258,6 +1258,19 @@ def test_direct_external_research_answer_uses_available_source() -> None:
     assert "Web検索をON" not in answer
 
 
+def test_direct_external_research_answer_omits_empty_unconfirmed_section() -> None:
+    answer = server.direct_external_research_answer(
+        "https://www.youtube.com/watch?v=vid123 この動画を分析して",
+        [{
+            "title": "YouTube動画: Demo",
+            "url": "https://www.youtube.com/watch?v=vid123",
+            "snippet": "動画タイトル: Demo\n字幕抜粋: 半導体ショックについて解説します。",
+        }],
+        "",
+    )
+    assert "## 確認できていない点" not in answer
+
+
 def test_validate_model_remove_rejects_unknown_model() -> None:
     try:
         server.validate_model_remove("unknown:model")
@@ -1345,6 +1358,7 @@ if __name__ == "__main__":
     test_auto_internet_layer_channels_for_query_uses_ready_channels()
     test_external_research_answer_instruction_avoids_web_search_prompt()
     test_direct_external_research_answer_uses_available_source()
+    test_direct_external_research_answer_omits_empty_unconfirmed_section()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
     print("server helper tests passed")

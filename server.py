@@ -3604,6 +3604,13 @@ def direct_external_research_answer(query: str, results: list[dict[str, str]], e
     title = str(primary.get("title") or "外部調査結果").strip()
     url = str(primary.get("url") or "").strip()
     snippet = str(primary.get("snippet") or "").strip()
+    transcript_match = re.search(r"字幕抜粋:\s*(.+)", snippet, re.S)
+    has_transcript_excerpt = bool(transcript_match and transcript_match.group(1).strip())
+    unconfirmed_points: list[str] = []
+    if not has_transcript_excerpt:
+        unconfirmed_points.append("- 字幕本文を取得できていないため、動画内の具体的な発言内容は未確認です。")
+    if error:
+        unconfirmed_points.append(f"- 取得時の制限: {error}")
     lines = [
         "外部調査で確認できた範囲で分析します。",
         "",
@@ -3625,13 +3632,9 @@ def direct_external_research_answer(query: str, results: list[dict[str, str]], e
         "- 取得できた情報だけを見る限り、この動画は上記タイトルに関する話題を扱っています。",
         "- タイトルや検索結果から主題は推測できますが、動画内で実際に話された詳細、根拠、時系列、結論までは断定できません。",
         "- そのため、内容の深い要約や発言単位の分析には字幕または本文取得が必要です。",
-        "",
-        "## 確認できていない点",
     ])
-    if "字幕抜粋:" not in snippet:
-        lines.append("- 字幕本文を取得できていないため、動画内の具体的な発言内容は未確認です。")
-    if error:
-        lines.append(f"- 取得時の制限: {error}")
+    if unconfirmed_points:
+        lines.extend(["", "## 確認できていない点", *unconfirmed_points])
     return "\n".join(lines)
 
 
