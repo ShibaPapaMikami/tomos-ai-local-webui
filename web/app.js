@@ -4122,6 +4122,7 @@ const {
   searchPayloadOptions,
   searchResultsFromEvent,
   searchResultsFromResponse,
+  shouldAutoUseExternalResearch,
   toggleWebSearch,
 } = window.GEMMA_SEARCH || {};
 
@@ -4436,6 +4437,7 @@ function modelReasonText(reasonKey) {
 function chatRequestOptions(text, hasImages = false) {
   const translationMode = isTranslationRequest(text);
   const codingMode = !translationMode && isWorkspaceBuildRequest(text);
+  const useExternalResearch = Boolean(state.webSearch || (!codingMode && !translationMode && shouldAutoUseExternalResearch?.(text)));
   const hasStudyPackSelection = shouldApplyStudyPackToRequest(text, hasImages);
   const rewriteStudyPackMode = hasStudyPackSelection && (isStudyPackRewriteRequest(text) || isImplicitStudyPackWritingRequest(text));
   const lightweightMode = !hasStudyPackSelection && !codingMode && !translationMode && isLightweightChatRequest(text, hasImages);
@@ -4545,29 +4547,29 @@ function chatRequestOptions(text, hasImages = false) {
       historyTurns: codingMode ? Math.max(historyTurns, 6) : Math.max(historyTurns, 8),
       keepAlive: codingMode ? "30m" : "20m",
       think: false,
-      webSearch: state.webSearch,
+      webSearch: useExternalResearch,
       useStudyPackContext: hasStudyPackSelection,
       isolateUserMessage: hasStudyPackSelection,
     });
   }
   const searchBudget = applySearchBudget?.({
     codingMode,
-    webSearch: state.webSearch,
+    webSearch: useExternalResearch,
     maxTokens,
     contextSize,
     historyTurns,
   }) || {
-    numPredict: codingMode ? Math.max(maxTokens, 4096) : state.webSearch ? Math.max(maxTokens, 512) : Math.max(maxTokens, 256),
-    numCtx: codingMode ? Math.max(contextSize, 8192) : state.webSearch ? Math.max(contextSize, 4096) : contextSize,
-    historyTurns: codingMode ? Math.max(historyTurns, 6) : state.webSearch ? Math.min(Math.max(historyTurns, 3), 4) : historyTurns,
+    numPredict: codingMode ? Math.max(maxTokens, 4096) : useExternalResearch ? Math.max(maxTokens, 512) : Math.max(maxTokens, 256),
+    numCtx: codingMode ? Math.max(contextSize, 8192) : useExternalResearch ? Math.max(contextSize, 4096) : contextSize,
+    historyTurns: codingMode ? Math.max(historyTurns, 6) : useExternalResearch ? Math.min(Math.max(historyTurns, 3), 4) : historyTurns,
   };
   return applyThinkingBudget({
     codingMode,
     translationMode,
     responseMode: mode,
     thinkingMode,
-    progressLabel: codingMode ? t("progress.coding") : state.webSearch ? t("progress.search") : t("progress.generating"),
-    modelReason: modelReasonText(codingMode ? "model.reasonCoding" : state.webSearch ? "model.reasonWebSearch" : "model.reasonDefaultChat"),
+    progressLabel: codingMode ? t("progress.coding") : useExternalResearch ? t("progress.search") : t("progress.generating"),
+    modelReason: modelReasonText(codingMode ? "model.reasonCoding" : useExternalResearch ? "model.reasonWebSearch" : "model.reasonDefaultChat"),
     temperature: numberValue(els.temperature, 0.7),
     topP: numberValue(els.topP, 0.9),
     topK: numberValue(els.topK, 40),
@@ -4580,7 +4582,7 @@ function chatRequestOptions(text, hasImages = false) {
     historyTurns: searchBudget.historyTurns,
     keepAlive: codingMode ? "20m" : "15m",
     think: false,
-    webSearch: state.webSearch,
+    webSearch: useExternalResearch,
     useStudyPackContext: hasStudyPackSelection,
     isolateUserMessage: rewriteStudyPackMode,
   });

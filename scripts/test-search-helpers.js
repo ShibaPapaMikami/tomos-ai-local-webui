@@ -14,6 +14,7 @@ const {
   searchPayloadOptions,
   searchResultsFromEvent,
   searchResultsFromResponse,
+  shouldAutoUseExternalResearch,
   toggleWebSearch,
 } = context.window.GEMMA_SEARCH;
 
@@ -34,6 +35,10 @@ assert.deepEqual(
 assert.equal(searchEnabledForChat({ codingMode: false, webSearch: true }), true);
 assert.equal(searchEnabledForChat({ codingMode: true, webSearch: true }), false);
 assert.equal(searchEnabledForChat({ codingMode: false, webSearch: false }), false);
+assert.equal(shouldAutoUseExternalResearch("https://www.youtube.com/watch?v=zfN4QApep6s この動画を分析して"), true);
+assert.equal(shouldAutoUseExternalResearch("https://youtu.be/abc123 を要約して"), true);
+assert.equal(shouldAutoUseExternalResearch("https://github.com/openai/codex を調べて"), true);
+assert.equal(shouldAutoUseExternalResearch("https://www.youtube.com/watch?v=zfN4QApep6s"), false);
 assert.deepEqual(plain(searchPayloadOptions({ codingMode: false, webSearch: true }, 6)), {
   web_search: true,
   search_results: 6,
