@@ -3575,11 +3575,28 @@ def should_read_search_result_pages(query: str) -> bool:
     ))
 
 
+def web_result_priority_score(result: dict[str, str], index: int = 0) -> tuple[int, int]:
+    title = str(result.get("title") or "").lower()
+    url = str(result.get("url") or "").lower()
+    score = 50
+    if any(marker in url for marker in ("official", "gundam-official.com", ".go.jp", ".gov", ".edu")):
+        score -= 45
+    if "wikipedia.org" in url:
+        score -= 22
+    if any(marker in url for marker in ("wiki", "dictionary", "encyclopedia")):
+        score -= 12
+    if any(marker in title for marker in ("公式", "official", "一覧", "インデックス", "list")):
+        score -= 8
+    if any(marker in url for marker in ("blog", "note.", "note.com", "matome", "まとめ")):
+        score += 10
+    return score, index
+
+
 def augment_search_results_with_page_text(
     query: str,
     results: list[dict[str, str]],
     reader=None,
-    limit: int = 1,
+    limit: int = 3,
 ) -> tuple[list[dict[str, str]], str]:
     if not should_read_search_result_pages(query) or not results:
         return results, ""
@@ -3589,7 +3606,13 @@ def augment_search_results_with_page_text(
     errors: list[str] = []
     read_count = 0
     seen_urls = {str(result.get("url") or "").strip() for result in augmented}
-    for result in results:
+    prioritized_results = [
+        result for _, result in sorted(
+            enumerate(results),
+            key=lambda pair: web_result_priority_score(pair[1], pair[0]),
+        )
+    ]
+    for result in prioritized_results:
         url = str(result.get("url") or "").strip()
         if not url or not url.startswith(("http://", "https://")):
             continue
@@ -3675,6 +3698,55 @@ def remove_unverified_list_items(content: str, query: str, results: list[dict[st
     return filtered or content
 
 
+def clean_grounded_list_candidate(raw: str) -> str:
+    item = str(raw or "").strip()
+    item = re.sub(r"^(?:[*\-・•]|\d+[.)．、])\s*", "", item).strip()
+    item = re.sub(r"^(?:Webページ本文|YouTube動画|動画タイトル|Title)\s*[:：]\s*", "", item).strip()
+    item = item.strip(" -・•*`　。、「」『』")
+    item = re.sub(r"\s+", " ", item)
+    if not (4 <= len(item) <= 48):
+        return ""
+    generic_terms = {
+        "ガンダム",
+        "ガンダムシリーズ",
+        "ガンダム作品",
+        "ガンダムゲーム全般",
+        "sdガンダムシリーズ",
+    }
+    if normalized_fact_text(item) in {normalized_fact_text(term) for term in generic_terms}:
+        return ""
+    if any(marker in item for marker in ("http://", "https://", "一覧", "全体", "あらすじ", "公式サイト", "ページ")):
+        return ""
+    if re.search(r"[。！？!?]|[、,].{4,}|(?:です|ます|でした|しました|されています|とは|について|は、|は |を|から|まで)", item):
+        return ""
+    if item.endswith(("など", "全般", "一部")):
+        return ""
+    return item
+
+
+def extract_grounded_list_candidates_from_results(results: list[dict[str, str]], limit: int = 80) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for result in results:
+        snippet = str(result.get("snippet") or "")
+        for line in snippet.splitlines():
+            cells = [line]
+            if "|" in line:
+                cells = [cell for cell in line.split("|") if cell.strip()]
+            for cell in cells:
+                item = clean_grounded_list_candidate(cell)
+                if not item:
+                    continue
+                key = normalized_fact_text(item)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(item)
+                if len(candidates) >= limit:
+                    return candidates
+    return candidates
+
+
 def complete_list_grounding_instruction(query: str, results: list[dict[str, str]], error: str = "") -> str:
     if not should_read_search_result_pages(query) or not results:
         return ""
@@ -3693,6 +3765,11 @@ def complete_list_grounding_instruction(query: str, results: list[dict[str, str]
     ]
     if error:
         parts.append("- 取得エラーがある場合も、取得済みの出典本文だけを根拠にしてください。")
+    candidates = extract_grounded_list_candidates_from_results(results)
+    if candidates:
+        parts.append("")
+        parts.append("確認済み候補:")
+        parts.extend(f"- {item}" for item in candidates[:80])
     return "\n".join(parts)
 
 

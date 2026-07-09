@@ -1107,6 +1107,62 @@ def test_augment_search_results_with_page_text_reads_first_result() -> None:
     assert results[1]["title"] == "Webページ本文: ガンダムシリーズ一覧"
 
 
+def test_augment_search_results_with_page_text_reads_multiple_prioritized_results() -> None:
+    calls = []
+
+    def fake_reader(url):
+        calls.append(url)
+        return {
+            "title": f"Webページ本文: {url}",
+            "url": url,
+            "snippet": f"本文: {url}",
+            "source": "agent-reach:web",
+        }
+
+    results, error = server.augment_search_results_with_page_text(
+        "ガンダムの全シリーズを箇条書きして",
+        [
+            {"title": "個人ブログ", "url": "https://blog.example/gundam", "snippet": "感想"},
+            {"title": "製作年順インデックス", "url": "https://gundam-official.com/news/i/special-series/gundam-works/01_746", "snippet": "公式一覧"},
+            {"title": "ガンダムシリーズ一覧", "url": "https://ja.wikipedia.org/wiki/ガンダムシリーズ一覧", "snippet": "一覧"},
+            {"title": "別ブログ", "url": "https://note.example/gundam", "snippet": "まとめ"},
+        ],
+        reader=fake_reader,
+    )
+    assert error == ""
+    assert calls == [
+        "https://gundam-official.com/news/i/special-series/gundam-works/01_746",
+        "https://ja.wikipedia.org/wiki/ガンダムシリーズ一覧",
+        "https://blog.example/gundam",
+    ]
+    assert len(results) == 7
+
+
+def test_extract_grounded_list_candidates_rejects_fragments_and_categories() -> None:
+    candidates = server.extract_grounded_list_candidates_from_results([
+        {
+            "title": "Webページ本文: ガンダムシリーズ一覧",
+            "url": "https://example.com/gundam-list",
+            "snippet": "\n".join([
+                "- ガンダム",
+                "- ガンダムシリーズ",
+                "- 機動戦士ガンダム",
+                "- 機動戦士Ζガンダム",
+                "- 機動戦士ガンダム外伝 宇宙、閃光の果てに… 機動戦士ガンダム外伝 コロニーの落ちた地で…",
+                "ガンダム（IP）は、映像作品です",
+                "| 機動武闘伝Gガンダム | 1994 |",
+            ]),
+        },
+    ])
+    assert "機動戦士ガンダム" in candidates
+    assert "機動戦士Ζガンダム" in candidates
+    assert "機動武闘伝Gガンダム" in candidates
+    assert "ガンダム" not in candidates
+    assert "ガンダムシリーズ" not in candidates
+    assert all("宇宙、閃光" not in item for item in candidates)
+    assert all("映像作品" not in item for item in candidates)
+
+
 def test_build_search_context_blocks_unverified_list_completion() -> None:
     context = server.build_search_context([{
         "title": "ガンダムシリーズ一覧",
@@ -1157,7 +1213,8 @@ def test_complete_list_grounding_instruction_keeps_character_generation() -> Non
     assert "直前のAI回答、一般知識、推測、連想で項目を増やさない" in instruction
     assert "途中で切れた断片" in instruction
     assert "通常のマイキャラの口調" in instruction
-    assert "- 機動戦士ガンダム" not in instruction
+    assert "確認済み候補" in instruction
+    assert "- 機動戦士ガンダム" in instruction
 
 
 def test_extract_github_repos_reads_owner_repo() -> None:
@@ -1491,6 +1548,8 @@ if __name__ == "__main__":
     test_web_reader_result_uses_jina_reader_request()
     test_should_read_search_result_pages_detects_complete_list_request()
     test_augment_search_results_with_page_text_reads_first_result()
+    test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
+    test_extract_grounded_list_candidates_rejects_fragments_and_categories()
     test_build_search_context_blocks_unverified_list_completion()
     test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
     test_complete_list_grounding_instruction_keeps_character_generation()
