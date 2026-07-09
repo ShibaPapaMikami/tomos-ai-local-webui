@@ -4132,6 +4132,7 @@ function isWorkspaceBuildRequest(text) {
   if (!state.workspaceRoot) return false;
   if (isTranslationRequest(text)) return false;
   if (isBusinessEmailDraft(text)) return false;
+  if (isReplyDraftRequest(text)) return false;
   if (isStudyPackRewriteRequest(text) && !explicitlyRequestsWorkspaceSave(text)) return false;
   if (shouldKeepStudyPackReplyInChat(text)) return false;
   if (isWorkspaceLookupRequest(text)) return false;
@@ -4347,6 +4348,17 @@ function translationSystemPrompt() {
     "If the request says 和訳, translate into natural Japanese.",
     "If the request says 日本語に, translate into natural Japanese.",
     "If no target language is explicit, infer it from the request.",
+  ].join("\n");
+}
+
+function replyDraftContextSystemPrompt(text) {
+  if (!isReplyDraftRequest(text)) return "";
+  return [
+    "返信文作成ルール:",
+    "- すぐコピペできる返信本文案を中心に書いてください。",
+    "- ユーザーが求めていない限り、件名案、複数パターン、長い解説、送信前チェックは出さないでください。",
+    "- 既に書かれている冒頭文がある場合は、その続きとして自然につながる本文にしてください。",
+    "- 相手の配慮や提案を受け止め、こちらの責任と今後の連携姿勢を簡潔に伝えてください。",
   ].join("\n");
 }
 
@@ -5538,7 +5550,7 @@ async function sendMessage(text) {
             requestOptions.thinkingMode,
             requestOptions.translationMode,
           );
-    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${requestOptions.translationMode ? "" : personRelationshipContextSystemPrompt()}${selectedRecipientContextPrompt()}${baseRequestSystem}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${trainingContextSystemPrompt()}`;
+    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${requestOptions.translationMode ? "" : personRelationshipContextSystemPrompt()}${selectedRecipientContextPrompt()}${baseRequestSystem}${requestOptions.translationMode ? "" : replyDraftContextSystemPrompt(text)}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${trainingContextSystemPrompt()}`;
     const modelUserMessage = messageWithAttachmentContext(userMessage, attachmentContext);
     const requestMessages = requestOptions.translationMode || requestOptions.fastModel || requestOptions.isolateUserMessage
       ? [modelUserMessage]

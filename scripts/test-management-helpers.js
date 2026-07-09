@@ -846,6 +846,11 @@ async function runImportTests() {
   assert.match(appJs, /返信本文案:/);
   assert.match(appJs, /studyPackModeOutputPrompt\(selected, requestText = ""\)/);
   assert.match(appJs, /すぐコピペできる返信本文だけ/);
+  assert.match(appJs, /if \(isReplyDraftRequest\(text\)\) return false;/);
+  assert.match(appJs, /function replyDraftContextSystemPrompt\(text\)/);
+  assert.match(appJs, /すぐコピペできる返信本文案を中心に書いてください/);
+  assert.match(appJs, /件名案、複数パターン、長い解説、送信前チェックは出さない/);
+  assert.match(appJs, /replyDraftContextSystemPrompt\(text\)/);
   assert.match(appJs, /hasQuotedMail && hasReplyOpening/);
   assert.match(appJs, /件名案、変更した理由、送信前の確認事項/);
   assert.match(appJs, /studyPackContextSystemPrompt\(text\)/);
