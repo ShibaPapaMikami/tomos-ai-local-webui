@@ -1267,6 +1267,56 @@ def test_organize_mixed_list_categories_splits_generated_bullets() -> None:
     assert "## 確認できていない点" in organized
 
 
+def test_organize_mixed_list_categories_drops_metadata_and_empty_category_headings() -> None:
+    content = "\n".join([
+        "まさふみ、確認できた項目をまとめるね。",
+        "",
+        "## 映像・放送・配信",
+        "",
+        "## ゲーム",
+        "",
+        "## 確認できた項目",
+        "- Published Time: 2003-05-15T03:32:31Z",
+        "- Markdown Content:",
+        "- ## 概要",
+        "- ### 日本国内",
+        "- 星の旅人 【TV】全12話",
+        "- ゲーム「星の旅人バトル」",
+        "- 模型 星の旅人プラモデル",
+        "",
+        "## 確認できていない点",
+        "- 出典本文で確認できない項目は除外しました。",
+    ])
+    organized = server.organize_mixed_list_categories(
+        content,
+        "シリーズを箇条書きして",
+        [{
+            "title": "Webページ本文: シリーズ一覧",
+            "url": "https://example.com/series",
+            "snippet": "\n".join([
+                "Published Time: 2003-05-15T03:32:31Z",
+                "Markdown Content:",
+                "## 概要",
+                "### 日本国内",
+                "- 星の旅人 【TV】全12話",
+                "- ゲーム「星の旅人バトル」",
+                "- 模型 星の旅人プラモデル",
+            ]),
+        }],
+    )
+    assert "Published Time" not in organized
+    assert "Markdown Content" not in organized
+    assert "- ## 概要" not in organized
+    assert "- ### 日本国内" not in organized
+    organized_lines = organized.splitlines()
+    assert "## 映像・放送・配信" not in organized_lines
+    assert "## ゲーム" not in organized_lines
+    assert "### 映像・放送・配信" in organized
+    assert "### ゲーム" in organized
+    assert "### 商品・模型" in organized
+    assert "### 未分類" not in organized
+
+
 def test_build_search_context_blocks_unverified_list_completion() -> None:
     context = server.build_search_context([{
         "title": "ガンダムシリーズ一覧",
@@ -1657,6 +1707,7 @@ if __name__ == "__main__":
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
     test_complete_list_grounding_instruction_separates_mixed_categories_generically()
     test_organize_mixed_list_categories_splits_generated_bullets()
+    test_organize_mixed_list_categories_drops_metadata_and_empty_category_headings()
     test_build_search_context_blocks_unverified_list_completion()
     test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
     test_complete_list_grounding_instruction_keeps_character_generation()

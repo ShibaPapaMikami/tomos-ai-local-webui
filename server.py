@@ -3759,7 +3759,13 @@ def remove_unverified_list_items(content: str, query: str, results: list[dict[st
 
 def clean_grounded_list_candidate(raw: str) -> str:
     item = str(raw or "").strip()
+    if not item:
+        return ""
+    if re.match(r"^#{1,6}\s+", item):
+        return ""
     item = re.sub(r"^(?:[*\-・•]|\d+[.)．、])\s*", "", item).strip()
+    if re.match(r"^#{1,6}\s+", item):
+        return ""
     item = re.sub(r"^(?:Webページ本文|YouTube動画|動画タイトル|Title)\s*[:：]\s*", "", item).strip()
     item = item.strip(" -・•*`　。、")
     item = re.sub(r"\s+", " ", item)
@@ -3773,6 +3779,10 @@ def clean_grounded_list_candidate(raw: str) -> str:
         "sdガンダムシリーズ",
     }
     if normalized_fact_text(item) in {normalized_fact_text(term) for term in generic_terms}:
+        return ""
+    if re.search(r"^(published time|markdown content|title|url|source|snippet|出典|脚注|注釈|関連項目|概要)\s*[:：]?", item, re.IGNORECASE):
+        return ""
+    if re.search(r"wikipedia|フリー百科事典|記事のポイント|情報源", item, re.IGNORECASE):
         return ""
     if any(marker in item for marker in ("http://", "https://", "一覧", "全体", "あらすじ", "公式サイト", "ページ")):
         return ""
@@ -3827,6 +3837,14 @@ def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list
     return grouped
 
 
+def is_empty_generated_category_heading(line: str) -> bool:
+    stripped = str(line or "").strip()
+    if not stripped.startswith("## "):
+        return False
+    heading = stripped.lstrip("#").strip()
+    return heading in {"映像・放送・配信", "ゲーム", "書籍・漫画・小説", "商品・模型", "未分類"}
+
+
 def organize_mixed_list_categories(content: str, query: str, results: list[dict[str, str]]) -> str:
     if not should_read_search_result_pages(query) or not results:
         return content
@@ -3845,6 +3863,8 @@ def organize_mixed_list_categories(content: str, query: str, results: list[dict[
     saw_confirmed_heading = False
     for line in lines:
         stripped = line.strip()
+        if is_empty_generated_category_heading(line):
+            continue
         if stripped.startswith("## "):
             if "確認できた項目" in stripped:
                 in_confirmed_section = True
@@ -3856,12 +3876,18 @@ def organize_mixed_list_categories(content: str, query: str, results: list[dict[
         match = bullet_re.match(line)
         if (in_confirmed_section or not saw_confirmed_heading) and match:
             item = match.group(3).strip()
+            cleaned_item = clean_grounded_list_candidate(item)
+            if not cleaned_item:
+                continue
+            item = cleaned_item
             category = grounded_list_candidate_category(item)
+            if category == "未分類":
+                continue
             grouped.setdefault(category, []).append(f"- {item}")
             continue
         kept_non_bullets.append(line)
 
-    ordered_categories = ["映像・放送・配信", "ゲーム", "書籍・漫画・小説", "商品・模型", "未分類"]
+    ordered_categories = ["映像・放送・配信", "ゲーム", "書籍・漫画・小説", "商品・模型"]
     active_categories = [category for category in ordered_categories if grouped.get(category)]
     if len([category for category in active_categories if category != "未分類"]) < 2:
         return content
