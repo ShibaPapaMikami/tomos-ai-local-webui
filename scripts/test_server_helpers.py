@@ -1205,6 +1205,31 @@ def test_extract_grounded_list_candidates_rejects_fragments_and_categories() -> 
     assert all("映像作品" not in item for item in candidates)
 
 
+def test_complete_list_grounding_instruction_separates_mixed_categories_generically() -> None:
+    instruction = server.complete_list_grounding_instruction(
+        "シリーズを箇条書きして",
+        [{
+            "title": "Webページ本文: シリーズ一覧",
+            "url": "https://example.com/series",
+            "snippet": "\n".join([
+                "- 星の旅人 【TV】全12話",
+                "- 星の旅人 劇場版",
+                "- ゲーム「星の旅人バトル」",
+                "- 漫画 星の旅人外伝",
+                "- 小説 星の旅人ゼロ",
+                "- 模型 星の旅人プラモデル",
+            ]),
+        }],
+    )
+    assert "カテゴリ分離ルール" in instruction
+    assert "映像・放送・配信" in instruction
+    assert "ゲーム" in instruction
+    assert "書籍・漫画・小説" in instruction
+    assert "商品・模型" in instruction
+    assert "ゲーム「星の旅人バトル」" in instruction
+    assert "模型 星の旅人プラモデル" in instruction
+
+
 def test_build_search_context_blocks_unverified_list_completion() -> None:
     context = server.build_search_context([{
         "title": "ガンダムシリーズ一覧",
@@ -1593,6 +1618,7 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
+    test_complete_list_grounding_instruction_separates_mixed_categories_generically()
     test_build_search_context_blocks_unverified_list_completion()
     test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
     test_complete_list_grounding_instruction_keeps_character_generation()

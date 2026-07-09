@@ -3761,7 +3761,7 @@ def clean_grounded_list_candidate(raw: str) -> str:
     item = str(raw or "").strip()
     item = re.sub(r"^(?:[*\-・•]|\d+[.)．、])\s*", "", item).strip()
     item = re.sub(r"^(?:Webページ本文|YouTube動画|動画タイトル|Title)\s*[:：]\s*", "", item).strip()
-    item = item.strip(" -・•*`　。、「」『』")
+    item = item.strip(" -・•*`　。、")
     item = re.sub(r"\s+", " ", item)
     if not (4 <= len(item) <= 48):
         return ""
@@ -3776,11 +3776,24 @@ def clean_grounded_list_candidate(raw: str) -> str:
         return ""
     if any(marker in item for marker in ("http://", "https://", "一覧", "全体", "あらすじ", "公式サイト", "ページ")):
         return ""
-    if re.search(r"[。！？!?]|[、,].{4,}|(?:です|ます|でした|しました|されています|とは|について|は、|は |を|から|まで)", item):
+    if re.search(r"[。！？!?]|[、,].{4,}|(?:です|ます|でした|しました|されています|とは|について|は、|は )", item):
         return ""
     if item.endswith(("など", "全般", "一部")):
         return ""
     return item
+
+
+def grounded_list_candidate_category(item: str) -> str:
+    text = str(item or "")
+    if re.search(r"ゲーム|game|アプリ|mobile|switch|playstation|xbox|steam|ソフト", text, re.IGNORECASE):
+        return "ゲーム"
+    if re.search(r"漫画|マンガ|コミック|小説|書籍|本|novel|comic|manga|book", text, re.IGNORECASE):
+        return "書籍・漫画・小説"
+    if re.search(r"模型|プラモデル|フィギュア|玩具|商品|グッズ|カード|toy|figure|model|goods|merch", text, re.IGNORECASE):
+        return "商品・模型"
+    if re.search(r"【(?:TV|配信|映画|劇場|OVA|Web|WEB)】|全\d+話|劇場版|映画|配信|TV|テレビ|アニメ|動画|video|movie|film|anime|ova", text, re.IGNORECASE):
+        return "映像・放送・配信"
+    return "未分類"
 
 
 def extract_grounded_list_candidates_from_results(results: list[dict[str, str]], limit: int = 80) -> list[str]:
@@ -3806,6 +3819,14 @@ def extract_grounded_list_candidates_from_results(results: list[dict[str, str]],
     return candidates
 
 
+def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for item in candidates:
+        category = grounded_list_candidate_category(item)
+        grouped.setdefault(category, []).append(item)
+    return grouped
+
+
 def complete_list_grounding_instruction(query: str, results: list[dict[str, str]], error: str = "") -> str:
     if not should_read_search_result_pages(query) or not results:
         return ""
@@ -3819,6 +3840,7 @@ def complete_list_grounding_instruction(query: str, results: list[dict[str, str]
         "- 直前のAI回答、一般知識、推測、連想で項目を増やさないでください。",
         "- 見出し、カテゴリ名、途中で切れた断片を作品名や固有名詞として扱わないでください。",
         "- 出典本文で確認できない箇条書き項目は書かないでください。",
+        "- 複数カテゴリが混ざる場合は、ひとつの一覧に混ぜずカテゴリ別に分けてください。",
         "- 完全性を確認できない場合は、最後に「確認できていない点」として短く書いてください。",
         "- 通常のマイキャラの口調、呼びかけ、言い回しを維持してください。",
     ]
@@ -3829,6 +3851,16 @@ def complete_list_grounding_instruction(query: str, results: list[dict[str, str]
         parts.append("")
         parts.append("確認済み候補:")
         parts.extend(f"- {item}" for item in candidates[:80])
+        grouped = categorize_grounded_list_candidates(candidates)
+        if len(grouped) > 1:
+            parts.append("")
+            parts.append("カテゴリ分離ルール:")
+            parts.append("- 確認済み候補に複数カテゴリがあるため、回答ではカテゴリごとに分けてください。")
+            for category in ("映像・放送・配信", "ゲーム", "書籍・漫画・小説", "商品・模型", "未分類"):
+                items = grouped.get(category)
+                if not items:
+                    continue
+                parts.append(f"- {category}: {', '.join(items[:20])}")
     return "\n".join(parts)
 
 
