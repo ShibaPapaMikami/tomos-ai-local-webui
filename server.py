@@ -3564,6 +3564,52 @@ def should_auto_use_external_research(query: str) -> bool:
     ))
 
 
+def should_read_search_result_pages(query: str) -> bool:
+    normalized = str(query or "").strip()
+    if not normalized:
+        return False
+    return bool(re.search(
+        r"全(?:て|部|件|シリーズ|作品)?|すべて|一覧|箇条書き|リスト|網羅|全.*(?:教えて|出して|書いて)|complete list|all (?:series|works|items)",
+        normalized,
+        re.IGNORECASE,
+    ))
+
+
+def augment_search_results_with_page_text(
+    query: str,
+    results: list[dict[str, str]],
+    reader=None,
+    limit: int = 1,
+) -> tuple[list[dict[str, str]], str]:
+    if not should_read_search_result_pages(query) or not results:
+        return results, ""
+    if reader is None:
+        reader = web_reader_result
+    augmented = list(results)
+    errors: list[str] = []
+    read_count = 0
+    seen_urls = {str(result.get("url") or "").strip() for result in augmented}
+    for result in results:
+        url = str(result.get("url") or "").strip()
+        if not url or not url.startswith(("http://", "https://")):
+            continue
+        try:
+            page_result = reader(url)
+            if page_result:
+                page_url = str(page_result.get("url") or url).strip()
+                if page_url not in seen_urls:
+                    augmented.append(page_result)
+                    seen_urls.add(page_url)
+                else:
+                    augmented.append(page_result)
+                read_count += 1
+        except Exception as exc:
+            errors.append(f"Web本文取得: {exc}")
+        if read_count >= max(1, limit):
+            break
+    return augmented, " / ".join(errors)
+
+
 def auto_internet_layer_channels_for_query(query: str) -> list[str]:
     diagnostics = internet_layer_diagnostics_payload()
     channels = diagnostics.get("channels", {}) if isinstance(diagnostics, dict) else {}
@@ -3586,9 +3632,11 @@ def external_research_answer_instruction(results: list[dict[str, str]], error: s
     if not results:
         return ""
     parts = [
-        "外部調査回答ルール:",
-        "- 外部調査の出典があるため、「Web検索をONにしてください」とは案内しないでください。",
+        "Web調査回答ルール:",
+        "- Web調査の出典があるため、「Web調査をONにしてください」とは案内しないでください。",
         "- 取得できたタイトル、説明欄、字幕抜粋、検索スニペットだけを根拠として分析してください。",
+        "- 出典に文字として出てこない作品名、人名、会社名、日付、数値、箇条書き項目は追加しないでください。",
+        "- 「全件」「一覧」「すべて」などの依頼では、ページ本文が取得できていない場合は完全な一覧として断定しないでください。",
         "- 字幕本文やページ本文が不足している場合は、分析の冒頭ではなく最後に「確認できていない点」として短く書いてください。",
         "- 動画URLの分析では、動画タイトル、説明欄、字幕抜粋があれば内容の要点、論点、注意点を分けて答えてください。",
         "- 根拠にない事実、発言、数値、結論は作らないでください。",
@@ -3627,8 +3675,8 @@ def external_research_diagnostics(query: str, channels: list[str], results: list
             "type": "youtube-transcript",
             "status": "warning",
             "label": "YouTube字幕取得",
-            "message": "未実行。外部調査のYouTube字幕ルートに入っていません。",
-            "howToSucceed": "外部調査をONにして、YouTube URLと「分析して」「要約して」などの依頼を同じ文に入れてください。",
+            "message": "未実行。Web調査のYouTube字幕ルートに入っていません。",
+            "howToSucceed": "Web調査をONにして、YouTube URLと「分析して」「要約して」などの依頼を同じ文に入れてください。",
         })
         return diagnostics
     diagnostics.append({
@@ -3636,7 +3684,7 @@ def external_research_diagnostics(query: str, channels: list[str], results: list
         "status": "error",
         "label": "YouTube字幕取得",
         "message": "失敗。字幕本文を取得できませんでした。",
-        "howToSucceed": "外部調査診断でYouTube字幕が利用可能か確認し、時間をおいて再送信してください。YouTube側のbot判定や字幕未公開で失敗することがあります。",
+        "howToSucceed": "Web調査診断でYouTube字幕が利用可能か確認し、時間をおいて再送信してください。YouTube側のbot判定や字幕未公開で失敗することがあります。",
         "error": error,
     })
     return diagnostics
@@ -3646,7 +3694,7 @@ def direct_external_research_answer(query: str, results: list[dict[str, str]], e
     if not should_auto_use_external_research(query) or not results:
         return ""
     primary = results[0]
-    title = str(primary.get("title") or "外部調査結果").strip()
+    title = str(primary.get("title") or "Web調査結果").strip()
     url = str(primary.get("url") or "").strip()
     snippet = str(primary.get("snippet") or "").strip()
     transcript_match = re.search(r"字幕抜粋:\s*(.+)", snippet, re.S)
@@ -3659,7 +3707,7 @@ def direct_external_research_answer(query: str, results: list[dict[str, str]], e
     if error:
         unconfirmed_points.append(f"- 取得時の制限: {error}")
     lines = [
-        "外部調査で確認できた範囲で分析します。",
+        "Web調査で確認できた範囲で分析します。",
         "",
         "## 確認できた情報",
         f"- 出典: {title}",
@@ -5013,6 +5061,10 @@ class Handler(BaseHTTPRequestHandler):
                         search_results.extend(search_web(query, max_results))
                 except Exception as exc:
                     search_error = f"{search_error} / {exc}" if search_error else str(exc)
+                if search_results:
+                    search_results, reader_error = augment_search_results_with_page_text(query, search_results)
+                    if reader_error:
+                        search_error = f"{search_error} / {reader_error}" if search_error else reader_error
             search_diagnostics = external_research_diagnostics(query, internet_layer_channels, search_results, search_error) if use_web_search else []
 
             prompt_messages = [{"role": "system", "content": system_prompt}]

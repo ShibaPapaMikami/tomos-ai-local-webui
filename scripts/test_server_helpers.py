@@ -1074,6 +1074,49 @@ def test_web_reader_result_uses_jina_reader_request(monkeypatch=None) -> None:
     assert "Main body text" in result["snippet"]
 
 
+def test_should_read_search_result_pages_detects_complete_list_request() -> None:
+    assert server.should_read_search_result_pages("ガンダムの全シリーズを箇条書きして")
+    assert server.should_read_search_result_pages("作品一覧を出して")
+    assert not server.should_read_search_result_pages("ガンダムについて教えて")
+
+
+def test_augment_search_results_with_page_text_reads_first_result() -> None:
+    calls = []
+
+    def fake_reader(url):
+        calls.append(url)
+        return {
+            "title": "Webページ本文: ガンダムシリーズ一覧",
+            "url": url,
+            "snippet": "Title: ガンダムシリーズ一覧\n機動戦士ガンダム\n機動戦士Ζガンダム",
+            "source": "agent-reach:web",
+        }
+
+    results, error = server.augment_search_results_with_page_text(
+        "ガンダムの全シリーズを箇条書きして",
+        [{
+            "title": "ガンダムシリーズ一覧",
+            "url": "https://example.com/gundam-list",
+            "snippet": "シリーズ一覧",
+        }],
+        reader=fake_reader,
+    )
+    assert error == ""
+    assert calls == ["https://example.com/gundam-list"]
+    assert len(results) == 2
+    assert results[1]["title"] == "Webページ本文: ガンダムシリーズ一覧"
+
+
+def test_build_search_context_blocks_unverified_list_completion() -> None:
+    context = server.build_search_context([{
+        "title": "ガンダムシリーズ一覧",
+        "url": "https://example.com/gundam-list",
+        "snippet": "シリーズ一覧",
+    }])
+    assert "Do not invent titles, names, dates, numbers, or list items" in context
+    assert "complete list could not be confirmed" in context
+
+
 def test_extract_github_repos_reads_owner_repo() -> None:
     repos = server.extract_github_repos("https://github.com/Panniantong/Agent-Reach と https://github.com/openai/codex")
     assert repos == ["Panniantong/Agent-Reach", "openai/codex"]
@@ -1268,7 +1311,7 @@ def test_external_research_answer_instruction_avoids_web_search_prompt() -> None
         }],
         "YouTube字幕取得: unavailable",
     )
-    assert "Web検索をONにしてください" in instruction
+    assert "Web調査をONにしてください" in instruction
     assert "案内しないでください" in instruction
     assert "取得済みの出典があればその範囲で回答" in instruction
 
@@ -1283,10 +1326,10 @@ def test_direct_external_research_answer_uses_available_source() -> None:
         }],
         "YouTube字幕取得: unavailable",
     )
-    assert "外部調査で確認できた範囲で分析します" in answer
+    assert "Web調査で確認できた範囲で分析します" in answer
     assert "動画タイトル: Demo" in answer
     assert "字幕本文を取得できていない" in answer
-    assert "Web検索をON" not in answer
+    assert "Web調査をON" not in answer
 
 
 def test_direct_external_research_answer_defers_to_model_when_transcript_exists() -> None:
@@ -1403,6 +1446,9 @@ if __name__ == "__main__":
     test_youtube_transcript_from_metadata_uses_automatic_caption_url()
     test_extract_web_urls_excludes_youtube_urls()
     test_web_reader_result_uses_jina_reader_request()
+    test_should_read_search_result_pages_detects_complete_list_request()
+    test_augment_search_results_with_page_text_reads_first_result()
+    test_build_search_context_blocks_unverified_list_completion()
     test_extract_github_repos_reads_owner_repo()
     test_github_repo_result_uses_gh_runner()
     test_github_search_results_uses_gh_runner()

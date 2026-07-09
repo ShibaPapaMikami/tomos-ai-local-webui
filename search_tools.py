@@ -95,6 +95,8 @@ def build_search_context(results: list[dict[str, str]]) -> str:
         return "Web search was requested, but no search results were found."
     lines = [
         "Web search results follow. Use them as current context. Cite source numbers when relying on them.",
+        "Do not invent titles, names, dates, numbers, or list items that do not appear in the search result titles, snippets, or page text below.",
+        "If the user asks for every item, a complete list, or all works but the page text is missing or incomplete, say that the complete list could not be confirmed from the retrieved text.",
     ]
     for index, result in enumerate(results, start=1):
         lines.append(
