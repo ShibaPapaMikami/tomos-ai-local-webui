@@ -3610,6 +3610,71 @@ def augment_search_results_with_page_text(
     return augmented, " / ".join(errors)
 
 
+def normalized_fact_text(value: str) -> str:
+    text = str(value or "")
+    text = re.sub(r"[「」『』（）()【】\[\]<>〈〉《》]", "", text)
+    text = re.sub(r"[\s　:：・,，、。.!！?？/／\-―ー_※*＊`]+", "", text)
+    return text.lower()
+
+
+def source_text_for_results(results: list[dict[str, str]]) -> str:
+    return "\n".join(
+        part
+        for result in results
+        for part in (
+            str(result.get("title") or ""),
+            str(result.get("snippet") or ""),
+        )
+        if part
+    )
+
+
+def list_item_supported_by_sources(item: str, source_text: str) -> bool:
+    candidate = re.sub(r"^[\s>*\-・•]+", "", str(item or "")).strip()
+    candidate = re.sub(r"^\d+[.)．、]\s*", "", candidate).strip()
+    candidate = candidate.strip("*` ")
+    if not candidate:
+        return True
+    if len(candidate) <= 3:
+        return True
+    source_norm = normalized_fact_text(source_text)
+    candidate_norm = normalized_fact_text(candidate)
+    if candidate_norm and candidate_norm in source_norm:
+        return True
+    base = re.split(r"[（(【\[]", candidate, maxsplit=1)[0].strip()
+    base_norm = normalized_fact_text(base)
+    return bool(base_norm and len(base_norm) >= 4 and base_norm in source_norm)
+
+
+def remove_unverified_list_items(content: str, query: str, results: list[dict[str, str]]) -> str:
+    if not should_read_search_result_pages(query) or not results:
+        return content
+    source_text = source_text_for_results(results)
+    if not source_text.strip():
+        return content
+    removed: list[str] = []
+    kept_lines: list[str] = []
+    bullet_re = re.compile(r"^(\s*)([*\-・•]|\d+[.)．、])\s+(.+?)\s*$")
+    for line in str(content or "").splitlines():
+        match = bullet_re.match(line)
+        if not match:
+            kept_lines.append(line)
+            continue
+        item = match.group(3).strip()
+        if list_item_supported_by_sources(item, source_text):
+            kept_lines.append(line)
+        else:
+            removed.append(item)
+    filtered = "\n".join(kept_lines).strip()
+    if removed:
+        note = "出典本文で確認できない項目は除外しました。"
+        if "## 確認できていない点" in filtered:
+            filtered = f"{filtered}\n- {note}"
+        else:
+            filtered = f"{filtered}\n\n## 確認できていない点\n- {note}"
+    return filtered or content
+
+
 def auto_internet_layer_channels_for_query(query: str) -> list[str]:
     diagnostics = internet_layer_diagnostics_payload()
     channels = diagnostics.get("channels", {}) if isinstance(diagnostics, dict) else {}
@@ -5044,6 +5109,8 @@ class Handler(BaseHTTPRequestHandler):
             query = str(body.get("search_query") or messages[-1].get("content", ""))
             auto_external_research = should_auto_use_external_research(query)
             use_web_search = (bool(body.get("web_search", False)) or auto_external_research) and not is_translation_task
+            if use_web_search and should_read_search_result_pages(query):
+                recent_messages = sanitize_chat_messages(messages[-1:])
             internet_layer_channels = normalize_internet_layer_channels(body.get("internet_layer_channels", [])) if use_web_search else []
             if use_web_search and auto_external_research and not internet_layer_channels:
                 internet_layer_channels = auto_internet_layer_channels_for_query(query)
@@ -5199,6 +5266,8 @@ class Handler(BaseHTTPRequestHandler):
                 content = "".join(content_parts)
                 if is_translation_task:
                     content = clean_translation_output(content)
+                elif use_web_search:
+                    content = remove_unverified_list_items(content, query, search_results)
                 stream_json_event(
                     self,
                     {
@@ -5244,6 +5313,11 @@ class Handler(BaseHTTPRequestHandler):
             message = response.get("message", {})
             if is_translation_task and isinstance(message, dict):
                 message = {**message, "content": clean_translation_output(str(message.get("content", "")))}
+            elif use_web_search and isinstance(message, dict):
+                message = {
+                    **message,
+                    "content": remove_unverified_list_items(str(message.get("content", "")), query, search_results),
+                }
             json_response(
                 self,
                 200,

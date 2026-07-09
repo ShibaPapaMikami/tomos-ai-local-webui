@@ -1117,6 +1117,28 @@ def test_build_search_context_blocks_unverified_list_completion() -> None:
     assert "complete list could not be confirmed" in context
 
 
+def test_remove_unverified_list_items_filters_hallucinated_gundam_titles() -> None:
+    content = "\n".join([
+        "**宇宙世紀シリーズ**",
+        "* 機動戦士ガンダム（初代）",
+        "* 機動戦士ガンダム鋼の谷",
+        "* 機動戦士ガンダム逆襲のシャア",
+    ])
+    filtered = server.remove_unverified_list_items(
+        content,
+        "ガンダムの全シリーズを箇条書きして",
+        [{
+            "title": "Webページ本文: ガンダムシリーズ一覧",
+            "url": "https://example.com/gundam-list",
+            "snippet": "機動戦士ガンダム\n機動戦士ガンダム 逆襲のシャア\n機動戦士Ζガンダム",
+        }],
+    )
+    assert "機動戦士ガンダム（初代）" in filtered
+    assert "機動戦士ガンダム逆襲のシャア" in filtered
+    assert "機動戦士ガンダム鋼の谷" not in filtered
+    assert "出典本文で確認できない項目は除外しました" in filtered
+
+
 def test_extract_github_repos_reads_owner_repo() -> None:
     repos = server.extract_github_repos("https://github.com/Panniantong/Agent-Reach と https://github.com/openai/codex")
     assert repos == ["Panniantong/Agent-Reach", "openai/codex"]
@@ -1449,6 +1471,7 @@ if __name__ == "__main__":
     test_should_read_search_result_pages_detects_complete_list_request()
     test_augment_search_results_with_page_text_reads_first_result()
     test_build_search_context_blocks_unverified_list_completion()
+    test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
     test_extract_github_repos_reads_owner_repo()
     test_github_repo_result_uses_gh_runner()
     test_github_search_results_uses_gh_runner()
