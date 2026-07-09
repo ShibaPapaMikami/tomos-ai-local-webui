@@ -3448,7 +3448,7 @@ YOUTUBE_URL_RE = re.compile(
 )
 WEB_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 WEB_READER_TIMEOUT_SECONDS = 15
-WEB_READER_MAX_CHARS = 12000
+WEB_READER_MAX_CHARS = 24000
 GITHUB_REPO_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", re.IGNORECASE)
 GITHUB_TIMEOUT_SECONDS = 20
 RSS_TIMEOUT_SECONDS = 15
@@ -3592,11 +3592,48 @@ def web_result_priority_score(result: dict[str, str], index: int = 0) -> tuple[i
     return score, index
 
 
+def extract_list_followup_links(page_result: dict[str, str], limit: int = 8) -> list[str]:
+    base_url = str(page_result.get("url") or "").strip()
+    snippet = str(page_result.get("snippet") or "")
+    if not base_url or not snippet:
+        return []
+    parsed_base = urllib.parse.urlparse(base_url)
+    if not parsed_base.netloc:
+        return []
+    found: list[tuple[str, str]] = []
+    markdown_link_re = re.compile(r"\[([^\]]{1,80})\]\((https?://[^)\s]+|/[^)\s]+)\)")
+    raw_url_re = re.compile(r"https?://[^\s<>)]+")
+    for match in markdown_link_re.finditer(snippet):
+        found.append((match.group(1), urllib.parse.urljoin(base_url, match.group(2))))
+    for match in raw_url_re.finditer(snippet):
+        found.append(("", match.group(0)))
+
+    links: list[str] = []
+    seen: set[str] = {base_url}
+    for label, url in found:
+        clean_url = url.strip().rstrip(".,。)")
+        parsed = urllib.parse.urlparse(clean_url)
+        if parsed.netloc != parsed_base.netloc:
+            continue
+        text = f"{label} {clean_url}".lower()
+        if not re.search(r"次|続|一覧|インデックス|ページ|page|works|list|\d{2}[_-]\d+", text):
+            continue
+        normalized_url = urllib.parse.urlunparse(parsed._replace(fragment=""))
+        if normalized_url in seen:
+            continue
+        seen.add(normalized_url)
+        links.append(normalized_url)
+        if len(links) >= limit:
+            break
+    return links
+
+
 def augment_search_results_with_page_text(
     query: str,
     results: list[dict[str, str]],
     reader=None,
     limit: int = 3,
+    followup_limit: int = 8,
 ) -> tuple[list[dict[str, str]], str]:
     if not should_read_search_result_pages(query) or not results:
         return results, ""
@@ -3606,6 +3643,7 @@ def augment_search_results_with_page_text(
     errors: list[str] = []
     read_count = 0
     seen_urls = {str(result.get("url") or "").strip() for result in augmented}
+    followup_urls: list[str] = []
     prioritized_results = [
         result for _, result in sorted(
             enumerate(results),
@@ -3626,10 +3664,31 @@ def augment_search_results_with_page_text(
                 else:
                     augmented.append(page_result)
                 read_count += 1
+                for link in extract_list_followup_links(page_result):
+                    if link not in seen_urls and link not in followup_urls:
+                        followup_urls.append(link)
         except Exception as exc:
             errors.append(f"Web本文取得: {exc}")
         if read_count >= max(1, limit):
             break
+    followup_count = 0
+    for url in followup_urls:
+        if followup_count >= max(0, followup_limit):
+            break
+        if url in seen_urls:
+            continue
+        try:
+            page_result = reader(url)
+            if page_result:
+                page_url = str(page_result.get("url") or url).strip()
+                augmented.append(page_result)
+                seen_urls.add(page_url)
+                followup_count += 1
+                for link in extract_list_followup_links(page_result):
+                    if link not in seen_urls and link not in followup_urls:
+                        followup_urls.append(link)
+        except Exception as exc:
+            errors.append(f"Web本文取得: {exc}")
     return augmented, " / ".join(errors)
 
 

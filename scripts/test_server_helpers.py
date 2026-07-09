@@ -1138,6 +1138,48 @@ def test_augment_search_results_with_page_text_reads_multiple_prioritized_result
     assert len(results) == 7
 
 
+def test_augment_search_results_with_page_text_follows_list_page_links() -> None:
+    calls = []
+    pages = {
+        "https://gundam-official.com/news/i/special-series/gundam-works/01_746": (
+            "機動戦士ガンダム\n"
+            "[次の一覧](https://gundam-official.com/news/i/special-series/gundam-works/02_747)"
+        ),
+        "https://gundam-official.com/news/i/special-series/gundam-works/02_747": (
+            "機動戦士Ζガンダム\n"
+            "[3ページ目](https://gundam-official.com/news/i/special-series/gundam-works/03_748)"
+        ),
+        "https://gundam-official.com/news/i/special-series/gundam-works/03_748": "機動戦士ガンダムZZ",
+    }
+
+    def fake_reader(url):
+        calls.append(url)
+        return {
+            "title": f"Webページ本文: {url}",
+            "url": url,
+            "snippet": pages[url],
+            "source": "agent-reach:web",
+        }
+
+    results, error = server.augment_search_results_with_page_text(
+        "ガンダムの全シリーズを箇条書きして",
+        [{
+            "title": "製作年順インデックス",
+            "url": "https://gundam-official.com/news/i/special-series/gundam-works/01_746",
+            "snippet": "公式一覧",
+        }],
+        reader=fake_reader,
+    )
+    assert error == ""
+    assert calls == [
+        "https://gundam-official.com/news/i/special-series/gundam-works/01_746",
+        "https://gundam-official.com/news/i/special-series/gundam-works/02_747",
+        "https://gundam-official.com/news/i/special-series/gundam-works/03_748",
+    ]
+    source_text = server.source_text_for_results(results)
+    assert "機動戦士ガンダムZZ" in source_text
+
+
 def test_extract_grounded_list_candidates_rejects_fragments_and_categories() -> None:
     candidates = server.extract_grounded_list_candidates_from_results([
         {
@@ -1549,6 +1591,7 @@ if __name__ == "__main__":
     test_should_read_search_result_pages_detects_complete_list_request()
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
+    test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
     test_build_search_context_blocks_unverified_list_completion()
     test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
