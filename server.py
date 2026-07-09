@@ -3827,6 +3827,65 @@ def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list
     return grouped
 
 
+def organize_mixed_list_categories(content: str, query: str, results: list[dict[str, str]]) -> str:
+    if not should_read_search_result_pages(query) or not results:
+        return content
+    candidates = extract_grounded_list_candidates_from_results(results)
+    if not candidates:
+        return content
+    known_categories = categorize_grounded_list_candidates(candidates)
+    if len([category for category, items in known_categories.items() if category != "未分類" and items]) < 2:
+        return content
+
+    lines = str(content or "").splitlines()
+    bullet_re = re.compile(r"^(\s*)([*\-・•]|\d+[.)．、])\s+(.+?)\s*$")
+    grouped: dict[str, list[str]] = {}
+    kept_non_bullets: list[str] = []
+    in_confirmed_section = False
+    saw_confirmed_heading = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if "確認できた項目" in stripped:
+                in_confirmed_section = True
+                saw_confirmed_heading = True
+                kept_non_bullets.append(line)
+                continue
+            if saw_confirmed_heading:
+                in_confirmed_section = False
+        match = bullet_re.match(line)
+        if (in_confirmed_section or not saw_confirmed_heading) and match:
+            item = match.group(3).strip()
+            category = grounded_list_candidate_category(item)
+            grouped.setdefault(category, []).append(f"- {item}")
+            continue
+        kept_non_bullets.append(line)
+
+    ordered_categories = ["映像・放送・配信", "ゲーム", "書籍・漫画・小説", "商品・模型", "未分類"]
+    active_categories = [category for category in ordered_categories if grouped.get(category)]
+    if len([category for category in active_categories if category != "未分類"]) < 2:
+        return content
+
+    output: list[str] = []
+    inserted = False
+    for line in kept_non_bullets:
+        output.append(line)
+        if not inserted and line.strip().startswith("## ") and "確認できた項目" in line:
+            for category in active_categories:
+                output.append("")
+                output.append(f"### {category}")
+                output.extend(grouped[category])
+            inserted = True
+    if not inserted:
+        output.append("")
+        output.append("## 確認できた項目")
+        for category in active_categories:
+            output.append("")
+            output.append(f"### {category}")
+            output.extend(grouped[category])
+    return "\n".join(output).strip()
+
+
 def complete_list_grounding_instruction(query: str, results: list[dict[str, str]], error: str = "") -> str:
     if not should_read_search_result_pages(query) or not results:
         return ""
@@ -5463,6 +5522,7 @@ class Handler(BaseHTTPRequestHandler):
                     content = clean_translation_output(content)
                 elif use_web_search:
                     content = remove_unverified_list_items(content, query, search_results)
+                    content = organize_mixed_list_categories(content, query, search_results)
                 stream_json_event(
                     self,
                     {
@@ -5509,9 +5569,11 @@ class Handler(BaseHTTPRequestHandler):
             if is_translation_task and isinstance(message, dict):
                 message = {**message, "content": clean_translation_output(str(message.get("content", "")))}
             elif use_web_search and isinstance(message, dict):
+                web_content = remove_unverified_list_items(str(message.get("content", "")), query, search_results)
+                web_content = organize_mixed_list_categories(web_content, query, search_results)
                 message = {
                     **message,
-                    "content": remove_unverified_list_items(str(message.get("content", "")), query, search_results),
+                    "content": web_content,
                 }
             json_response(
                 self,

@@ -1230,6 +1230,43 @@ def test_complete_list_grounding_instruction_separates_mixed_categories_generica
     assert "模型 星の旅人プラモデル" in instruction
 
 
+def test_organize_mixed_list_categories_splits_generated_bullets() -> None:
+    content = "\n".join([
+        "まさふみ、確認できた項目をまとめるね。",
+        "",
+        "## 確認できた項目",
+        "- 星の旅人 【TV】全12話",
+        "- ゲーム「星の旅人バトル」",
+        "- 漫画 星の旅人外伝",
+        "- 模型 星の旅人プラモデル",
+        "",
+        "## 確認できていない点",
+        "- 出典本文で確認できない項目は除外しました。",
+    ])
+    organized = server.organize_mixed_list_categories(
+        content,
+        "シリーズを箇条書きして",
+        [{
+            "title": "Webページ本文: シリーズ一覧",
+            "url": "https://example.com/series",
+            "snippet": "\n".join([
+                "- 星の旅人 【TV】全12話",
+                "- ゲーム「星の旅人バトル」",
+                "- 漫画 星の旅人外伝",
+                "- 模型 星の旅人プラモデル",
+            ]),
+        }],
+    )
+    assert "まさふみ、確認できた項目をまとめるね。" in organized
+    assert "### 映像・放送・配信" in organized
+    assert "### ゲーム" in organized
+    assert "### 書籍・漫画・小説" in organized
+    assert "### 商品・模型" in organized
+    assert organized.index("### 映像・放送・配信") < organized.index("- 星の旅人 【TV】全12話")
+    assert organized.index("### ゲーム") < organized.index("- ゲーム「星の旅人バトル」")
+    assert "## 確認できていない点" in organized
+
+
 def test_build_search_context_blocks_unverified_list_completion() -> None:
     context = server.build_search_context([{
         "title": "ガンダムシリーズ一覧",
@@ -1619,6 +1656,7 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
     test_complete_list_grounding_instruction_separates_mixed_categories_generically()
+    test_organize_mixed_list_categories_splits_generated_bullets()
     test_build_search_context_blocks_unverified_list_completion()
     test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
     test_complete_list_grounding_instruction_keeps_character_generation()
