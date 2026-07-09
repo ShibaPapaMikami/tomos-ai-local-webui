@@ -3675,61 +3675,25 @@ def remove_unverified_list_items(content: str, query: str, results: list[dict[st
     return filtered or content
 
 
-def extract_confirmed_list_items_from_results(results: list[dict[str, str]], limit: int = 80) -> list[str]:
-    items: list[str] = []
-    seen: set[str] = set()
-    line_candidate_re = re.compile(
-        r"(?:^|[\n\r])\s*(?:[*\-・•]|\d+[.)．、])?\s*"
-        r"((?:機動戦士|機動武闘伝|新機動戦記|機動新世紀|∀|SD|ガンダム)[^\n\r|｜]{0,48})"
-    )
-    inline_candidate_re = re.compile(
-        r"(?:機動戦士|機動武闘伝|新機動戦記|機動新世紀|∀|SD|ガンダム)[^、。,\n\r|｜]{0,48}"
-    )
-    for result in results:
-        title = str(result.get("title") or "")
-        snippet = str(result.get("snippet") or "")
-        text = f"{title}\n{snippet}"
-        candidates = [match.group(1) for match in line_candidate_re.finditer(text)]
-        if not candidates:
-            candidates = [match.group(0) for match in inline_candidate_re.finditer(text)]
-        for raw in candidates:
-            item = re.sub(r"^(Webページ本文|YouTube動画|動画タイトル|Title)\s*[:：]\s*", "", raw).strip()
-            item = re.sub(r"\s+", " ", item)
-            item = item.strip(" -・•*`　。、「」『』")
-            item = re.split(r"\s+-\s+| – | — |について|とは|を|のあらすじ|全体|シリーズ一覧|一覧", item, maxsplit=1)[0].strip()
-            item = item.strip(" -・•*`　。、「」『』")
-            if len(item) < 4:
-                continue
-            key = normalized_fact_text(item)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            items.append(item)
-            if len(items) >= limit:
-                return items
-    return items
-
-
-def direct_complete_list_answer(query: str, results: list[dict[str, str]], error: str = "") -> str:
+def complete_list_grounding_instruction(query: str, results: list[dict[str, str]], error: str = "") -> str:
     if not should_read_search_result_pages(query) or not results:
         return ""
-    items = extract_confirmed_list_items_from_results(results)
-    if not items:
+    source_text = source_text_for_results(results).strip()
+    if not source_text:
         return ""
-    lines = [
-        "Web調査で確認できた項目だけを箇条書きします。",
-        "",
-        "## 確認できた項目",
+    parts = [
+        "一覧系Web調査回答ルール:",
+        "- これは完全一覧・箇条書き系の質問です。",
+        "- 回答はWeb調査結果の本文に文字として明示された項目だけにしてください。",
+        "- 直前のAI回答、一般知識、推測、連想で項目を増やさないでください。",
+        "- 見出し、カテゴリ名、途中で切れた断片を作品名や固有名詞として扱わないでください。",
+        "- 出典本文で確認できない箇条書き項目は書かないでください。",
+        "- 完全性を確認できない場合は、最後に「確認できていない点」として短く書いてください。",
+        "- 通常のマイキャラの口調、呼びかけ、言い回しを維持してください。",
     ]
-    lines.extend(f"- {item}" for item in items)
-    lines.extend([
-        "",
-        "## 確認できていない点",
-        "- 出典本文で確認できた項目だけを掲載しています。完全な一覧は、公式一覧や本文取得できたページで追加確認してください。",
-    ])
     if error:
-        lines.append(f"- 取得時の制限: {error}")
-    return "\n".join(lines)
+        parts.append("- 取得エラーがある場合も、取得済みの出典本文だけを根拠にしてください。")
+    return "\n".join(parts)
 
 
 def auto_internet_layer_channels_for_query(query: str) -> list[str]:
@@ -5211,6 +5175,9 @@ class Handler(BaseHTTPRequestHandler):
                 answer_instruction = external_research_answer_instruction(search_results, search_error)
                 if answer_instruction:
                     prompt_messages.append({"role": "system", "content": answer_instruction})
+                list_instruction = complete_list_grounding_instruction(query, search_results, search_error)
+                if list_instruction:
+                    prompt_messages.append({"role": "system", "content": list_instruction})
             if body.get("workspace") and not is_translation_task:
                 try:
                     workspace_context = build_workspace_context(body.get("workspace", {}))
@@ -5222,9 +5189,7 @@ class Handler(BaseHTTPRequestHandler):
             if is_translation_task or body.get("workspace"):
                 direct_answer = ""
             else:
-                direct_answer = direct_complete_list_answer(query, search_results, search_error)
-                if not direct_answer:
-                    direct_answer = direct_external_research_answer(query, search_results, search_error)
+                direct_answer = direct_external_research_answer(query, search_results, search_error)
             requested_model = str(body.get("model") or "").strip()
             is_coding_task = body.get("task") == "coding" or bool(body.get("coding", False))
             if requested_model:

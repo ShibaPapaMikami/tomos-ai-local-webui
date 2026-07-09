@@ -1139,8 +1139,8 @@ def test_remove_unverified_list_items_filters_hallucinated_gundam_titles() -> No
     assert "出典本文で確認できない項目は除外しました" in filtered
 
 
-def test_direct_complete_list_answer_uses_confirmed_source_items_only() -> None:
-    answer = server.direct_complete_list_answer(
+def test_complete_list_grounding_instruction_keeps_character_generation() -> None:
+    instruction = server.complete_list_grounding_instruction(
         "ガンダムの全シリーズを箇条書きして",
         [{
             "title": "Webページ本文: ガンダムシリーズ一覧",
@@ -1152,12 +1152,12 @@ def test_direct_complete_list_answer_uses_confirmed_source_items_only() -> None:
             ]),
         }],
     )
-    assert "Web調査で確認できた項目だけ" in answer
-    assert "- 機動戦士ガンダム" in answer
-    assert "- 機動戦士Ζガンダム" in answer
-    assert "- 機動戦士ガンダム 逆襲のシャア" in answer
-    assert "機動戦士ガンダム鋼の谷" not in answer
-    assert "完全な一覧" in answer
+    assert "一覧系Web調査回答ルール" in instruction
+    assert "本文に文字として明示された項目だけ" in instruction
+    assert "直前のAI回答、一般知識、推測、連想で項目を増やさない" in instruction
+    assert "途中で切れた断片" in instruction
+    assert "通常のマイキャラの口調" in instruction
+    assert "- 機動戦士ガンダム" not in instruction
 
 
 def test_extract_github_repos_reads_owner_repo() -> None:
@@ -1493,7 +1493,7 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_reads_first_result()
     test_build_search_context_blocks_unverified_list_completion()
     test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
-    test_direct_complete_list_answer_uses_confirmed_source_items_only()
+    test_complete_list_grounding_instruction_keeps_character_generation()
     test_extract_github_repos_reads_owner_repo()
     test_github_repo_result_uses_gh_runner()
     test_github_search_results_uses_gh_runner()
