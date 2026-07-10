@@ -1180,6 +1180,63 @@ def test_augment_search_results_with_page_text_follows_list_page_links() -> None
     assert "機動戦士ガンダムZZ" in source_text
 
 
+def test_extract_list_followup_links_rejects_image_assets() -> None:
+    links = server.extract_list_followup_links({
+        "title": "Webページ本文: 製作年順インデックス",
+        "url": "https://example.com/works/01_746",
+        "snippet": "\n".join([
+            "[次の一覧](https://example.com/works/02_747)",
+            "[1st_300x300.jpg](https://example.com/works/1st_300x300.jpg)",
+            "https://example.com/works/z_thum.jpg",
+        ]),
+    })
+    assert links == ["https://example.com/works/02_747"]
+
+
+def test_select_complete_list_grounding_results_prefers_one_authoritative_domain() -> None:
+    official_results = [
+        {
+            "title": f"Webページ本文: 公式一覧 {index}",
+            "url": f"https://official.example/works/{index}",
+            "snippet": f"## [星の旅人{index}](https://official.example/title/{index})",
+        }
+        for index in range(1, 4)
+    ]
+    mixed_results = [
+        {
+            "title": "Webページ本文: 関連作品一覧",
+            "url": "https://ja.wikipedia.org/wiki/星の旅人シリーズ",
+            "snippet": "- ゲーム『星の旅人バトル』\n- 漫画『星の旅人外伝』",
+        },
+        *official_results,
+    ]
+    selected = server.select_complete_list_grounding_results(mixed_results)
+    assert selected == official_results
+
+
+def test_complete_list_search_context_excludes_other_domain_categories() -> None:
+    results = [
+        {
+            "title": "Webページ本文: 関連作品一覧",
+            "url": "https://ja.wikipedia.org/wiki/星の旅人シリーズ",
+            "snippet": "- ゲーム『星の旅人バトル』\n- 漫画『星の旅人外伝』",
+        },
+        {
+            "title": "Webページ本文: 公式一覧",
+            "url": "https://official.example/works/1",
+            "snippet": "\n".join([
+                "## [星の旅人](https://official.example/title/1)",
+                "## [星の旅人Z](https://official.example/title/2)",
+                "## [星の旅人ZZ](https://official.example/title/3)",
+            ]),
+        },
+    ]
+    context = server.build_search_context_for_query("全シリーズを箇条書きして", results)
+    assert "星の旅人ZZ" in context
+    assert "星の旅人バトル" not in context
+    assert "星の旅人外伝" not in context
+
+
 def test_extract_grounded_list_candidates_rejects_fragments_and_categories() -> None:
     candidates = server.extract_grounded_list_candidates_from_results([
         {
@@ -1768,6 +1825,9 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_follows_list_page_links()
+    test_extract_list_followup_links_rejects_image_assets()
+    test_select_complete_list_grounding_results_prefers_one_authoritative_domain()
+    test_complete_list_search_context_excludes_other_domain_categories()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
     test_extract_grounded_list_candidates_reads_markdown_link_headings()
     test_complete_list_search_context_is_compact_and_keeps_linked_titles()

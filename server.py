@@ -3616,8 +3616,10 @@ def extract_list_followup_links(page_result: dict[str, str], limit: int = 8) -> 
         parsed = urllib.parse.urlparse(clean_url)
         if parsed.netloc != parsed_base.netloc:
             continue
+        if re.search(r"\.(?:jpe?g|png|gif|webp|svg|avif|ico)(?:$|\?)", parsed.path, re.IGNORECASE):
+            continue
         text = f"{label} {clean_url}".lower()
-        if not re.search(r"次|続|一覧|インデックス|ページ|page|works|list|\d{2}[_-]\d+", text):
+        if not re.search(r"次|続|一覧|インデックス|ページ|page|list|\d{2}[_-]\d+", text):
             continue
         normalized_url = urllib.parse.urlunparse(parsed._replace(fragment=""))
         if normalized_url in seen:
@@ -3854,18 +3856,50 @@ def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list
     return grouped
 
 
+def select_complete_list_grounding_results(results: list[dict[str, str]], minimum_candidates: int = 3) -> list[dict[str, str]]:
+    groups: dict[str, list[dict[str, str]]] = {}
+    first_indexes: dict[str, int] = {}
+    for index, result in enumerate(results):
+        title = str(result.get("title") or "")
+        source = str(result.get("source") or "")
+        if not title.startswith("Webページ本文:") and source != "agent-reach:web":
+            continue
+        url = str(result.get("url") or "").strip()
+        domain = urllib.parse.urlparse(url).netloc.lower()
+        if not domain:
+            continue
+        groups.setdefault(domain, []).append(result)
+        first_indexes.setdefault(domain, index)
+
+    eligible: list[tuple[tuple[int, int], list[dict[str, str]]]] = []
+    for domain, grouped_results in groups.items():
+        candidates = extract_grounded_list_candidates_from_results(grouped_results, limit=minimum_candidates)
+        if len(candidates) < minimum_candidates:
+            continue
+        best_score = min(
+            web_result_priority_score(result, first_indexes[domain])
+            for result in grouped_results
+        )
+        eligible.append((best_score, grouped_results))
+    if not eligible:
+        return results
+    eligible.sort(key=lambda item: item[0])
+    return eligible[0][1]
+
+
 def build_search_context_for_query(query: str, results: list[dict[str, str]]) -> str:
     if not should_read_search_result_pages(query):
         return build_search_context(results)
     if not results:
         return build_search_context(results)
 
+    grounding_results = select_complete_list_grounding_results(results)
     lines = [
         "Web search results follow. Use only the verified candidate strings and sources below.",
         "Do not invent or complete missing names from memory.",
         "Verified candidate strings:",
     ]
-    candidates = extract_grounded_list_candidates_from_results(results, limit=100)
+    candidates = extract_grounded_list_candidates_from_results(grounding_results, limit=100)
     for item in candidates:
         candidate_line = f"- {item}"
         if len("\n".join([*lines, candidate_line])) > COMPLETE_LIST_PROMPT_MAX_CHARS - 800:
@@ -3873,7 +3907,7 @@ def build_search_context_for_query(query: str, results: list[dict[str, str]]) ->
         lines.append(candidate_line)
 
     lines.extend(["", "Sources:"])
-    for index, result in enumerate(results[:10], start=1):
+    for index, result in enumerate(grounding_results[:10], start=1):
         title = str(result.get("title") or "").strip()
         url = str(result.get("url") or "").strip()
         source_line = f"[{index}] {title} | {url}"
@@ -3883,7 +3917,7 @@ def build_search_context_for_query(query: str, results: list[dict[str, str]]) ->
 
     if not candidates:
         lines.extend(["", "Retrieved excerpts:"])
-        for result in results[:3]:
+        for result in grounding_results[:3]:
             snippet = str(result.get("snippet") or "").strip()[:1200]
             if not snippet:
                 continue
@@ -3904,7 +3938,8 @@ def is_empty_generated_category_heading(line: str) -> bool:
 def organize_mixed_list_categories(content: str, query: str, results: list[dict[str, str]]) -> str:
     if not should_read_search_result_pages(query) or not results:
         return content
-    candidates = extract_grounded_list_candidates_from_results(results)
+    grounding_results = select_complete_list_grounding_results(results)
+    candidates = extract_grounded_list_candidates_from_results(grounding_results)
     if not candidates:
         return content
     known_categories = categorize_grounded_list_candidates(candidates)
@@ -3987,10 +4022,11 @@ def complete_list_grounding_instruction(query: str, results: list[dict[str, str]
     ]
     if error:
         parts.append("- 取得エラーがある場合も、取得済みの出典本文だけを根拠にしてください。")
-    candidates = extract_grounded_list_candidates_from_results(results)
+    grounding_results = select_complete_list_grounding_results(results)
+    candidates = extract_grounded_list_candidates_from_results(grounding_results)
     if candidates:
         grouped = categorize_grounded_list_candidates(candidates)
-        if len(grouped) > 1:
+        if len([category for category in grouped if category != "未分類"]) > 1:
             parts.append("")
             parts.append("カテゴリ分離ルール:")
             parts.append("- 確認済み候補に複数カテゴリがあるため、回答ではカテゴリごとに分けてください。")
