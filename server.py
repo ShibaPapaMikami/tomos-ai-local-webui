@@ -3579,7 +3579,7 @@ def should_read_search_result_pages(query: str) -> bool:
     list_suffix = r"(?=$|アップ|[\s、。,.，．・:：;；!?！？/／「」『』（）()\[\]【】]|(?:は|が|を|に|へ|で|と|の|も|や|か|から|まで|より|だけ|しか|でも|って))"
     if re.search(rf"(?<![ァ-ヶー])リスト{list_suffix}", normalized):
         return True
-    request_pattern = rf"(?:教えて|出して|書いて|見せて|一覧|箇条書き|(?<![ァ-ヶー])リスト{list_suffix}|網羅|まとめ)"
+    request_pattern = rf"(?:教えて|出して|書いて|見せて|一覧|箇条書き|(?<![ァ-ヶー])リスト{list_suffix}|網羅)"
     standalone_boundaries = "、。,.，．・:：;；!?！？/／「」『』（）()[]【】はがをにへでとのもやか"
     for marker in re.finditer(r"全(?:部|て|件)", normalized):
         left_ok = marker.start() == 0 or normalized[marker.start() - 1].isspace() or normalized[marker.start() - 1] in standalone_boundaries

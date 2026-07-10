@@ -1106,6 +1106,8 @@ def test_should_read_search_result_pages_detects_complete_list_request() -> None
     assert server.should_read_search_result_pages("全機種を出して")
     assert server.should_read_search_result_pages("全項目を書いて")
     assert server.should_read_search_result_pages("全記事を見せて")
+    assert server.should_read_search_result_pages("全記事を一覧にまとめて")
+    assert server.should_read_search_result_pages("全動画を箇条書きでまとめて")
     assert server.should_read_search_result_pages("作品の全エピソードを一覧にして")
     assert not server.should_read_search_result_pages("ガンダムについて教えて")
     assert not server.should_read_search_result_pages("全")
@@ -1136,6 +1138,8 @@ def test_should_read_search_result_pages_detects_complete_list_request() -> None
     assert not server.should_read_search_result_pages("全景を見せて")
     assert not server.should_read_search_result_pages("安全商品について教えて")
     assert not server.should_read_search_result_pages("全商品をミニマリストに")
+    assert not server.should_read_search_result_pages("全記事をまとめて")
+    assert not server.should_read_search_result_pages("全動画をまとめて")
 
 
 def test_augment_search_results_with_page_text_reads_first_result() -> None:
