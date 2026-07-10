@@ -1173,11 +1173,36 @@ def test_augment_search_results_with_page_text_follows_list_page_links() -> None
     assert error == ""
     assert calls == [
         "https://gundam-official.com/news/i/special-series/gundam-works/01_746",
-        "https://gundam-official.com/news/i/special-series/gundam-works/02_747",
-        "https://gundam-official.com/news/i/special-series/gundam-works/03_748",
     ]
     source_text = server.source_text_for_results(results)
-    assert "機動戦士ガンダムZZ" in source_text
+    assert "機動戦士ガンダムZZ" not in source_text
+
+
+def complete_list_page(url: str, items: list[str]) -> dict[str, str]:
+    return {
+        "title": "Webページ本文: シリーズ一覧",
+        "url": url,
+        "source": "agent-reach:web",
+        "snippet": "\n".join(f"- [{item}]({url}#{index})" for index, item in enumerate(items)),
+    }
+
+
+def test_complete_list_evidence_prefers_more_complete_trusted_source() -> None:
+    official = complete_list_page("https://official.example/works", ["星の旅人", "星の旅人Z", "星の旅人ZZ"])
+    encyclopedia = complete_list_page("https://ja.wikipedia.org/wiki/星の旅人", [f"星の旅人{i}" for i in range(12)])
+    evidence = server.build_complete_list_evidence("全シリーズを箇条書きして", [official, encyclopedia])
+    assert evidence.source_domain == "ja.wikipedia.org"
+    assert len(evidence.candidates) == 12
+    assert evidence.status == "source-backed"
+
+
+def test_complete_list_evidence_rejects_navigation_pages() -> None:
+    results = [
+        complete_list_page("https://ja.wikipedia.org/wiki/星の旅人", ["星の旅人", "星の旅人Z", "星の旅人ZZ"]),
+        complete_list_page("https://ja.wikipedia.org/w/index.php?title=特別:ログイン", ["ログイン", "アカウント作成"]),
+    ]
+    evidence = server.build_complete_list_evidence("全シリーズを箇条書きして", results)
+    assert all("ログイン" not in item for item in evidence.candidates)
 
 
 def test_extract_list_followup_links_rejects_image_assets() -> None:
@@ -1859,6 +1884,8 @@ if __name__ == "__main__":
     test_should_read_search_result_pages_detects_complete_list_request()
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
+    test_complete_list_evidence_prefers_more_complete_trusted_source()
+    test_complete_list_evidence_rejects_navigation_pages()
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_list_followup_links_rejects_image_assets()
     test_extract_list_followup_links_rejects_other_numeric_detail_paths()

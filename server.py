@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+from dataclasses import dataclass
 import hashlib
 import importlib.util
 import ipaddress
@@ -3658,7 +3659,6 @@ def augment_search_results_with_page_text(
     errors: list[str] = []
     read_count = 0
     seen_urls = {str(result.get("url") or "").strip() for result in augmented}
-    followup_urls: list[str] = []
     prioritized_results = [
         result for _, result in sorted(
             enumerate(results),
@@ -3679,31 +3679,10 @@ def augment_search_results_with_page_text(
                 else:
                     augmented.append(page_result)
                 read_count += 1
-                for link in extract_list_followup_links(page_result):
-                    if link not in seen_urls and link not in followup_urls:
-                        followup_urls.append(link)
         except Exception as exc:
             errors.append(f"Web本文取得: {exc}")
         if read_count >= max(1, limit):
             break
-    followup_count = 0
-    for url in followup_urls:
-        if followup_count >= max(0, followup_limit):
-            break
-        if url in seen_urls:
-            continue
-        try:
-            page_result = reader(url)
-            if page_result:
-                page_url = str(page_result.get("url") or url).strip()
-                augmented.append(page_result)
-                seen_urls.add(page_url)
-                followup_count += 1
-                for link in extract_list_followup_links(page_result):
-                    if link not in seen_urls and link not in followup_urls:
-                        followup_urls.append(link)
-        except Exception as exc:
-            errors.append(f"Web本文取得: {exc}")
     return augmented, " / ".join(errors)
 
 
@@ -3843,9 +3822,7 @@ def extract_grounded_list_candidates_from_results(results: list[dict[str, str]],
     for result in results:
         snippet = str(result.get("snippet") or "")
         for line in snippet.splitlines():
-            cells = [line]
-            if "|" in line:
-                cells = [cell for cell in line.split("|") if cell.strip()]
+            cells = structured_candidate_cells(line)
             for cell in cells:
                 item = clean_grounded_list_candidate(cell)
                 if not item:
@@ -3858,6 +3835,75 @@ def extract_grounded_list_candidates_from_results(results: list[dict[str, str]],
                 if len(candidates) >= limit:
                     return candidates
     return candidates
+
+
+@dataclass(frozen=True)
+class CompleteListEvidence:
+    query: str
+    source_domain: str
+    source_results: tuple[dict[str, str], ...]
+    candidates: tuple[str, ...]
+    status: str
+    warnings: tuple[str, ...]
+
+
+def complete_list_authority_band(domain: str) -> int:
+    if any(marker in domain for marker in ("official", ".go.jp", ".gov", ".edu")):
+        return 0
+    if any(marker in domain for marker in ("wikipedia.org", "wiki", "encyclopedia")):
+        return 1
+    return 2
+
+
+def complete_list_source_groups(results: list[dict[str, str]]) -> dict[str, dict[str, object]]:
+    groups: dict[str, dict[str, object]] = {}
+    for order, result in enumerate(results):
+        title = str(result.get("title") or "")
+        source = str(result.get("source") or "")
+        url = str(result.get("url") or "")
+        if not (title.startswith("Webページ本文:") or source == "agent-reach:web"):
+            continue
+        if re.search(r"ログイン|アカウント作成|login|sign.?up|url短縮|youtube playlist", f"{title} {url}", re.I):
+            continue
+        domain = urllib.parse.urlparse(url).netloc.lower()
+        if domain:
+            group = groups.setdefault(domain, {"order": order, "results": []})
+            group["results"].append(result)
+    return groups
+
+
+def rank_complete_list_sources(groups: dict[str, dict[str, object]]) -> list[tuple[str, list[dict[str, str]], list[str]]]:
+    ranked: list[tuple[str, list[dict[str, str]], list[str], int, int]] = []
+    for domain, group in groups.items():
+        source_results = group["results"]
+        candidates = extract_grounded_list_candidates_from_results(source_results)
+        if candidates:
+            ranked.append((domain, source_results, candidates, complete_list_authority_band(domain), group["order"]))
+    trusted = [item for item in ranked if item[3] <= 1]
+    target = trusted or ranked
+    return [item[:3] for item in sorted(target, key=lambda item: (-len(item[2]), item[3], item[4]))]
+
+
+def structured_candidate_cells(line: str) -> list[str]:
+    stripped = line.strip()
+    if re.match(r"^(?:[*\-・•]|\d+[.)．、])\s+", stripped):
+        return [stripped]
+    if re.match(r"^#{1,6}\s+\[[^\]]+\]\((?:https?://|/)[^)]+\)$", stripped):
+        return [stripped]
+    if "|" in stripped and not re.fullmatch(r"[|:\-\s]+", stripped):
+        return [cell.strip() for cell in stripped.split("|") if cell.strip()]
+    return []
+
+
+def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> CompleteListEvidence:
+    ranked = rank_complete_list_sources(complete_list_source_groups(results))
+    if not ranked:
+        return CompleteListEvidence(query, "", (), (), "unavailable", ("根拠ページ本文を取得できませんでした。",))
+    domain, source_results, candidates = ranked[0]
+    status = "source-backed" if len(candidates) >= 3 else "partial" if candidates else "unavailable"
+    unique_sources = tuple({result["url"]: result for result in source_results if result.get("url")}.values())
+    warnings = ("候補が100件を超えたため、100件まで表示します。",) if len(candidates) > 100 else ()
+    return CompleteListEvidence(query, domain, unique_sources, tuple(candidates[:100]), status, warnings)
 
 
 def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list[str]]:
