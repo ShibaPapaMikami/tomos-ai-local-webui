@@ -1414,8 +1414,8 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
         chunks = {
             "公式サイトの紹介作品を全て一覧": ["確認したよ。"],
             "YouTube動画を調べて、紹介作品を全て一覧": ["紹介作品は", "三作品です。"],
-            "GitHubリポジトリを調べて": ["GitHub結果は", "一件です。"],
-            "RSS記事を調べて": ["RSS結果は", "一件です。"],
+            "GitHubリポジトリを全て一覧": ["GitHub結果は", "一件です。"],
+            "RSSの全記事を一覧": ["RSS結果は", "一件です。"],
             "通常チャット": ["通常回答"],
         }[query]
         yield [
@@ -1469,8 +1469,8 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
 
         for query, channels, expected_chunks, results in (
             ("YouTube動画を調べて、紹介作品を全て一覧", ["youtube"], ["紹介作品は", "三作品です。"], [youtube_result]),
-            ("GitHubリポジトリを調べて", ["github"], ["GitHub結果は", "一件です。"], [github_result]),
-            ("RSS記事を調べて", ["rss"], ["RSS結果は", "一件です。"], [rss_result]),
+            ("GitHubリポジトリを全て一覧", ["github"], ["GitHub結果は", "一件です。"], [github_result]),
+            ("RSSの全記事を一覧", ["rss"], ["RSS結果は", "一件です。"], [rss_result]),
             ("通常チャット", [], ["通常回答"], []),
         ):
             events = post_events(url, query, channels, True)
