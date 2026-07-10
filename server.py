@@ -3571,7 +3571,7 @@ def should_read_search_result_pages(query: str) -> bool:
     if not normalized:
         return False
     return bool(re.search(
-        r"全(?:て|部|件|シリーズ|作品)?|すべて|一覧|箇条書き|リスト|網羅|全.*(?:教えて|出して|書いて)|complete list|all (?:series|works|items)",
+        r"全(?:て|部|件|シリーズ|作品)|すべて|一覧|箇条書き|リスト|網羅|complete list|all (?:series|works|items)",
         normalized,
         re.IGNORECASE,
     ))
@@ -3924,8 +3924,7 @@ def rank_complete_list_sources(groups: dict[str, dict[str, object]]) -> list[tup
         if candidates:
             ranked.append((domain, source_results, candidates, complete_list_authority_band(domain), group["order"]))
     trusted = [item for item in ranked if item[3] <= 1]
-    target = trusted or ranked
-    return [item[:3] for item in sorted(target, key=lambda item: (-len(item[2]), item[3], item[4]))]
+    return [item[:3] for item in sorted(trusted, key=lambda item: (-len(item[2]), item[3], item[4]))]
 
 
 def structured_candidate_cells(line: str) -> list[str]:
@@ -3938,7 +3937,7 @@ def structured_candidate_cells(line: str) -> list[str]:
         cells = [cell.strip() for cell in stripped.split("|") if cell.strip()]
         links = [cell for cell in cells if re.search(r"\[[^\]]+\]\((?:https?://|/)[^)]+\)", cell)]
         if links:
-            return links
+            return links[:1]
         return [cell for cell in cells if clean_grounded_list_candidate(cell)][:1]
     return []
 
@@ -3956,6 +3955,7 @@ def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> C
 
 def complete_list_intro(system_prompt: str) -> str:
     text = str(system_prompt or "")
+    ending = "まとめました。" if re.search(r"敬語|丁寧|です[・･]?ます", text) else "まとめたよ。"
     def setting(pattern: str) -> str:
         match = re.search(pattern, text)
         value = match.group(1).strip() if match else ""
@@ -3963,10 +3963,10 @@ def complete_list_intro(system_prompt: str) -> str:
     user_name = setting(r"ユーザーの呼び方は「([^」\n]{1,24})」です。")
     self_name = setting(r"自分自身を指すときは「([^」\n]{1,24})」を")
     if user_name and self_name:
-        return f"{user_name}、{self_name}が確認できた内容をまとめたよ。"
+        return f"{user_name}、{self_name}が確認できた内容を{ending}"
     if user_name:
-        return f"{user_name}、確認できた内容をまとめたよ。"
-    return f"{self_name}が確認できた内容をまとめたよ。" if self_name else "確認できた内容をまとめたよ。"
+        return f"{user_name}、確認できた内容を{ending}"
+    return f"{self_name}が確認できた内容を{ending}" if self_name else f"確認できた内容を{ending}"
 
 
 def render_complete_list_answer(system_prompt: str, evidence: CompleteListEvidence) -> str:

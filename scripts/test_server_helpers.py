@@ -1083,7 +1083,15 @@ def test_web_reader_result_uses_jina_reader_request(monkeypatch=None) -> None:
 def test_should_read_search_result_pages_detects_complete_list_request() -> None:
     assert server.should_read_search_result_pages("ガンダムの全シリーズを箇条書きして")
     assert server.should_read_search_result_pages("作品一覧を出して")
+    assert server.should_read_search_result_pages("全部の作品を見せて")
+    assert server.should_read_search_result_pages("全件を出して")
+    assert server.should_read_search_result_pages("全作品を網羅して")
+    assert server.should_read_search_result_pages("すべてをリストにして")
     assert not server.should_read_search_result_pages("ガンダムについて教えて")
+    assert not server.should_read_search_result_pages("全")
+    assert not server.should_read_search_result_pages("安全性について教えて")
+    assert not server.should_read_search_result_pages("完全な状態を説明して")
+    assert not server.should_read_search_result_pages("全国の人口を教えて")
 
 
 def test_augment_search_results_with_page_text_reads_first_result() -> None:
@@ -1523,6 +1531,27 @@ def test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warn
     assert evidence.warnings == ("候補が100件を超えたため、100件まで表示します。",)
 
 
+def test_complete_list_evidence_rejects_untrusted_sources() -> None:
+    source = complete_list_page(
+        "https://catalog.example/works",
+        ["星の旅人", "星の旅人Z", "星の旅人ZZ"],
+    )
+    groups = server.complete_list_source_groups([source])
+    evidence = server.build_complete_list_evidence("全作品を一覧", [source])
+    assert server.rank_complete_list_sources(groups) == []
+    assert evidence.status == "unavailable"
+    assert evidence.candidates == ()
+
+
+def test_complete_list_intro_uses_polite_ending_when_prompt_requests_politeness() -> None:
+    prompt = "\n".join([
+        "ユーザーの呼び方は「まさふみ」です。",
+        "自分自身を指すときは「ぼく」を使います。",
+        "敬語で丁寧に、です・ます調で答えてください。",
+    ])
+    assert server.complete_list_intro(prompt) == "まさふみ、ぼくが確認できた内容をまとめました。"
+
+
 def test_extract_list_followup_links_rejects_image_assets() -> None:
     links = server.extract_list_followup_links({
         "title": "Webページ本文: 製作年順インデックス",
@@ -1643,6 +1672,15 @@ def test_extract_grounded_list_candidates_rejects_fragments_and_categories() -> 
     assert all("宇宙、閃光" not in item for item in candidates)
     assert all("映像作品" not in item for item in candidates)
     assert not {"1993年", "全51話", "監督：富野由悠季", "会社：サンライズ", "次へ", "1986年", "第47話", "監督：今川泰宏", "ナビゲーション"} & set(candidates)
+
+
+def test_extract_grounded_list_candidates_uses_only_first_markdown_table_link() -> None:
+    candidates = server.extract_grounded_list_candidates_from_results([{
+        "title": "Webページ本文: 公式作品一覧",
+        "url": "https://official.example/works",
+        "snippet": "| [星の旅人](https://official.example/title/1) | [田中太郎](https://official.example/staff/1) | [架空会社](https://official.example/company) | [案内リンク](https://official.example/nav) | [次へ進む](https://official.example/next) |",
+    }])
+    assert candidates == ["星の旅人"]
 
 
 def test_complete_list_authority_requires_real_host_boundaries() -> None:
@@ -2236,6 +2274,8 @@ if __name__ == "__main__":
     test_complete_list_evidence_prefers_more_complete_trusted_source()
     test_complete_list_evidence_rejects_navigation_pages()
     test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns()
+    test_complete_list_evidence_rejects_untrusted_sources()
+    test_complete_list_intro_uses_polite_ending_when_prompt_requests_politeness()
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_list_followup_links_rejects_image_assets()
     test_extract_list_followup_links_rejects_other_numeric_detail_paths()
@@ -2243,6 +2283,7 @@ if __name__ == "__main__":
     test_select_complete_list_grounding_results_prefers_one_authoritative_domain()
     test_complete_list_search_context_excludes_other_domain_categories()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
+    test_extract_grounded_list_candidates_uses_only_first_markdown_table_link()
     test_complete_list_authority_requires_real_host_boundaries()
     test_extract_grounded_list_candidates_reads_markdown_link_headings()
     test_complete_list_search_context_is_compact_and_keeps_linked_titles()
