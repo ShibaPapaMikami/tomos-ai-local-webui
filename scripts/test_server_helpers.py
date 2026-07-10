@@ -1300,6 +1300,30 @@ def test_complete_list_diagnostic_reports_deterministic_mode() -> None:
     }
 
 
+def test_complete_list_stream_buffers_raw_model_chunks() -> None:
+    emitted = []
+    parts = []
+    server.emit_or_buffer_chat_chunk("- 架空作品", True, parts, emitted.append)
+    assert parts == ["- 架空作品"]
+    assert emitted == []
+
+
+def test_normal_web_stream_still_emits_model_chunks() -> None:
+    emitted = []
+    parts = []
+    server.emit_or_buffer_chat_chunk("通常回答", False, parts, emitted.append)
+    assert parts == ["通常回答"]
+    assert emitted == ["通常回答"]
+
+
+def test_complete_list_finalizer_returns_same_content_for_both_api_modes() -> None:
+    evidence = complete_list_test_evidence(["星の旅人", "星の旅人Z", "星の旅人ZZ"])
+    first = server.finalize_complete_list_answer("まとめるね。", [], evidence)
+    second = server.finalize_complete_list_answer("まとめるね。", [], evidence)
+    assert first == second
+    assert first[2]["mode"] == "deterministic-complete-list"
+
+
 def test_complete_list_evidence_prefers_more_complete_trusted_source() -> None:
     official = complete_list_page("https://official.example/works", ["星の旅人", "星の旅人Z", "星の旅人ZZ"])
     encyclopedia = complete_list_page("https://ja.wikipedia.org/wiki/星の旅人", [f"星の旅人{i}" for i in range(12)])
@@ -2018,6 +2042,9 @@ if __name__ == "__main__":
     test_complete_list_sources_deduplicate_urls()
     test_render_complete_list_exposes_over_100_warning()
     test_complete_list_diagnostic_reports_deterministic_mode()
+    test_complete_list_stream_buffers_raw_model_chunks()
+    test_normal_web_stream_still_emits_model_chunks()
+    test_complete_list_finalizer_returns_same_content_for_both_api_modes()
     test_complete_list_evidence_prefers_more_complete_trusted_source()
     test_complete_list_evidence_rejects_navigation_pages()
     test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns()

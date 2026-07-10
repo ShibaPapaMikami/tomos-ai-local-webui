@@ -3577,6 +3577,18 @@ def should_read_search_result_pages(query: str) -> bool:
     ))
 
 
+def should_buffer_complete_list_stream(use_web_search: bool, query: str) -> bool:
+    return use_web_search and should_read_search_result_pages(query)
+
+
+def emit_or_buffer_chat_chunk(chunk, buffer_output, parts, emit) -> None:
+    if not chunk:
+        return
+    parts.append(chunk)
+    if not buffer_output:
+        emit(chunk)
+
+
 def web_result_priority_score(result: dict[str, str], index: int = 0) -> tuple[int, int]:
     title = str(result.get("title") or "").lower()
     url = str(result.get("url") or "").lower()
@@ -5587,7 +5599,8 @@ class Handler(BaseHTTPRequestHandler):
             query = str(body.get("search_query") or messages[-1].get("content", ""))
             auto_external_research = should_auto_use_external_research(query)
             use_web_search = (bool(body.get("web_search", False)) or auto_external_research) and not is_translation_task
-            if use_web_search and should_read_search_result_pages(query):
+            complete_list_answer = should_buffer_complete_list_stream(use_web_search, query)
+            if complete_list_answer:
                 recent_messages = sanitize_chat_messages(messages[-1:])
             internet_layer_channels = normalize_internet_layer_channels(body.get("internet_layer_channels", [])) if use_web_search else []
             if use_web_search and auto_external_research and not internet_layer_channels:
@@ -5611,6 +5624,10 @@ class Handler(BaseHTTPRequestHandler):
                     if reader_error:
                         search_error = f"{search_error} / {reader_error}" if search_error else reader_error
             search_diagnostics = external_research_diagnostics(query, internet_layer_channels, search_results, search_error) if use_web_search else []
+            complete_list_evidence = build_complete_list_evidence(query, search_results) if complete_list_answer else None
+            answer_search_results = public_search_results_for_answer(search_results, complete_list_evidence)
+            if complete_list_evidence:
+                search_diagnostics.append(complete_list_diagnostic(complete_list_evidence))
 
             prompt_messages = [{"role": "system", "content": system_prompt}]
             if is_translation_task and translation_target:
@@ -5632,9 +5649,15 @@ class Handler(BaseHTTPRequestHandler):
                 answer_instruction = external_research_answer_instruction(search_results, search_error)
                 if answer_instruction:
                     prompt_messages.append({"role": "system", "content": answer_instruction})
-                list_instruction = complete_list_grounding_instruction(query, search_results, search_error)
-                if list_instruction:
-                    prompt_messages.append({"role": "system", "content": list_instruction})
+                if complete_list_answer:
+                    prompt_messages.append({
+                        "role": "system",
+                        "content": "一覧本文は決定論的に組み立てます。導入文だけを1文で返してください。「確認したよ。」または「調べたよ。」のどちらか1つだけを返してください。",
+                    })
+                else:
+                    list_instruction = complete_list_grounding_instruction(query, search_results, search_error)
+                    if list_instruction:
+                        prompt_messages.append({"role": "system", "content": list_instruction})
             if body.get("workspace") and not is_translation_task:
                 try:
                     workspace_context = build_workspace_context(body.get("workspace", {}))
@@ -5643,7 +5666,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as exc:
                     prompt_messages.append({"role": "system", "content": f"Workspace context error: {exc}"})
             prompt_messages.extend(recent_messages)
-            if is_translation_task or body.get("workspace"):
+            if is_translation_task or body.get("workspace") or complete_list_answer:
                 direct_answer = ""
             else:
                 direct_answer = direct_external_research_answer(query, search_results, search_error)
@@ -5691,7 +5714,7 @@ class Handler(BaseHTTPRequestHandler):
                         "task": "translation" if is_translation_task else "coding" if is_coding_task else "chat",
                         "search": {
                             "enabled": use_web_search,
-                            "results": search_results,
+                            "results": answer_search_results,
                             "error": search_error,
                             "channels": internet_layer_channels,
                             "diagnostics": search_diagnostics,
@@ -5711,7 +5734,7 @@ class Handler(BaseHTTPRequestHandler):
                             "done": True,
                             "search": {
                                 "enabled": use_web_search,
-                                "results": search_results,
+                                "results": answer_search_results,
                                 "error": search_error,
                                 "channels": internet_layer_channels,
                                 "diagnostics": search_diagnostics,
@@ -5728,9 +5751,12 @@ class Handler(BaseHTTPRequestHandler):
                                 continue
                             chunk_data = json.loads(line)
                             chunk = str(chunk_data.get("message", {}).get("content", ""))
-                            if chunk:
-                                content_parts.append(chunk)
-                                stream_json_event(self, {"ok": True, "type": "chunk", "content": chunk})
+                            emit_or_buffer_chat_chunk(
+                                chunk,
+                                complete_list_answer,
+                                content_parts,
+                                lambda content: stream_json_event(self, {"ok": True, "type": "chunk", "content": content}),
+                            )
                             if chunk_data.get("done"):
                                 break
                 except urllib.error.HTTPError as exc:
@@ -5750,6 +5776,13 @@ class Handler(BaseHTTPRequestHandler):
                 content = "".join(content_parts)
                 if is_translation_task:
                     content = clean_translation_output(content)
+                elif complete_list_evidence:
+                    content, answer_search_results, _ = finalize_complete_list_answer(
+                        content,
+                        search_results,
+                        complete_list_evidence,
+                    )
+                    stream_json_event(self, {"ok": True, "type": "chunk", "content": content})
                 elif use_web_search:
                     content = remove_unverified_list_items(content, query, search_results)
                     content = organize_mixed_list_categories(content, query, search_results)
@@ -5764,7 +5797,7 @@ class Handler(BaseHTTPRequestHandler):
                         "done": True,
                         "search": {
                             "enabled": use_web_search,
-                            "results": search_results,
+                            "results": answer_search_results,
                             "error": search_error,
                             "channels": internet_layer_channels,
                             "diagnostics": search_diagnostics,
@@ -5786,7 +5819,7 @@ class Handler(BaseHTTPRequestHandler):
                         "done": True,
                         "search": {
                             "enabled": use_web_search,
-                            "results": search_results,
+                            "results": answer_search_results,
                             "error": search_error,
                             "channels": internet_layer_channels,
                             "diagnostics": search_diagnostics,
@@ -5798,6 +5831,13 @@ class Handler(BaseHTTPRequestHandler):
             message = response.get("message", {})
             if is_translation_task and isinstance(message, dict):
                 message = {**message, "content": clean_translation_output(str(message.get("content", "")))}
+            elif complete_list_evidence and isinstance(message, dict):
+                content, answer_search_results, _ = finalize_complete_list_answer(
+                    str(message.get("content", "")),
+                    search_results,
+                    complete_list_evidence,
+                )
+                message = {**message, "content": content}
             elif use_web_search and isinstance(message, dict):
                 web_content = remove_unverified_list_items(str(message.get("content", "")), query, search_results)
                 web_content = organize_mixed_list_categories(web_content, query, search_results)
@@ -5816,7 +5856,7 @@ class Handler(BaseHTTPRequestHandler):
                     "done": response.get("done", True),
                     "search": {
                         "enabled": use_web_search,
-                        "results": search_results,
+                        "results": answer_search_results,
                         "error": search_error,
                         "channels": internet_layer_channels,
                         "diagnostics": search_diagnostics,
