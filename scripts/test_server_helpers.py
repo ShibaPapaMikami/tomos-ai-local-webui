@@ -1,11 +1,17 @@
 import sys
 from pathlib import Path
 import base64
+import contextlib
+import json
 import tempfile
+import threading
+import urllib.request
 import zipfile
 import urllib.error
 from datetime import datetime, timezone
+from http.server import ThreadingHTTPServer
 from io import BytesIO
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -1322,6 +1328,140 @@ def test_complete_list_finalizer_returns_same_content_for_both_api_modes() -> No
     second = server.finalize_complete_list_answer("まとめるね。", [], evidence)
     assert first == second
     assert first[2]["mode"] == "deterministic-complete-list"
+
+
+def test_complete_list_stream_excludes_specialized_channels_and_sources() -> None:
+    youtube_result = {
+        "title": "YouTube動画: 紹介動画",
+        "url": "https://www.youtube.com/watch?v=demo",
+        "snippet": "動画タイトル: 紹介動画",
+        "source": "agent-reach:youtube",
+    }
+    assert not server.should_buffer_complete_list_stream(
+        True,
+        "YouTube動画を調べて、紹介作品を全て一覧",
+        ["youtube"],
+        [youtube_result],
+    )
+    assert not server.should_buffer_complete_list_stream(
+        True,
+        "https://www.youtube.com/watch?v=demo の紹介作品を全て一覧",
+    )
+    assert not server.should_buffer_complete_list_stream(
+        True,
+        "https://github.com/openai/codex の全機能を一覧",
+    )
+    assert not server.should_buffer_complete_list_stream(True, "RSSの全記事を一覧", ["rss"])
+    assert server.should_buffer_complete_list_stream(
+        True,
+        "公式サイトの紹介作品を全て一覧",
+        ["web"],
+        [complete_list_page("https://official.example/works", ["星の旅人"])],
+    )
+
+
+@contextlib.contextmanager
+def local_chat_handler() -> object:
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}/api/chat"
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=3)
+        httpd.server_close()
+
+
+def post_local_chat(url: str, payload: dict) -> tuple[str, str]:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return response.headers.get_content_type(), response.read().decode("utf-8")
+
+
+def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
+    general_web_result = complete_list_page(
+        "https://official.example/works",
+        ["星の旅人", "星の旅人Z", "星の旅人ZZ"],
+    )
+    youtube_result = {
+        "title": "YouTube動画: 紹介動画",
+        "url": "https://www.youtube.com/watch?v=demo",
+        "snippet": "動画タイトル: 紹介動画",
+        "source": "agent-reach:youtube",
+    }
+
+    @contextlib.contextmanager
+    def fake_ollama_stream(*args, **kwargs):
+        yield [
+            json.dumps({"message": {"content": "確認したよ。"}}, ensure_ascii=False).encode("utf-8") + b"\n",
+            b'{"done":true}\n',
+        ]
+
+    def fake_ollama_json(*args, **kwargs):
+        return {"message": {"role": "assistant", "content": "確認したよ。"}, "done": True}
+
+    def fake_internet_results(query, channels):
+        return ([youtube_result], "") if channels == ["youtube"] else ([], "")
+
+    with patch.object(server, "search_web", lambda query, limit: [general_web_result]), patch.object(
+        server, "augment_search_results_with_page_text", lambda query, results: (results, "")
+    ), patch.object(server, "internet_layer_context_results", fake_internet_results), patch.object(
+        server, "ollama_stream", fake_ollama_stream
+    ), patch.object(server, "ollama_json", fake_ollama_json), local_chat_handler() as url:
+        content_type, stream_body = post_local_chat(url, {
+            "messages": [{"role": "user", "content": "公式サイトの紹介作品を全て一覧"}],
+            "web_search": True,
+            "internet_layer_channels": ["web"],
+            "stream": True,
+        })
+        stream_events = [json.loads(line) for line in stream_body.splitlines() if line]
+        assert content_type == "application/x-ndjson"
+        assert [event["type"] for event in stream_events] == ["start", "chunk", "done"]
+        assert stream_events[1]["content"] == stream_events[2]["message"]["content"]
+        assert stream_events[0]["search"]["results"] == [general_web_result]
+        assert stream_events[2]["search"]["diagnostics"][-1]["mode"] == "deterministic-complete-list"
+
+        content_type, response_body = post_local_chat(url, {
+            "messages": [{"role": "user", "content": "公式サイトの紹介作品を全て一覧"}],
+            "web_search": True,
+            "internet_layer_channels": ["web"],
+            "stream": False,
+        })
+        response = json.loads(response_body)
+        assert content_type == "application/json"
+        assert response["message"]["content"] == stream_events[1]["content"]
+        assert response["search"]["results"] == [general_web_result]
+        assert response["search"]["diagnostics"][-1]["mode"] == "deterministic-complete-list"
+
+        @contextlib.contextmanager
+        def fake_youtube_stream(*args, **kwargs):
+            yield [
+                json.dumps({"message": {"content": "紹介作品は"}}, ensure_ascii=False).encode("utf-8") + b"\n",
+                json.dumps({"message": {"content": "三作品です。"}}, ensure_ascii=False).encode("utf-8") + b"\n",
+                b'{"done":true}\n',
+            ]
+
+        with patch.object(server, "ollama_stream", fake_youtube_stream):
+            _, youtube_stream_body = post_local_chat(url, {
+                "messages": [{"role": "user", "content": "YouTube動画を調べて、紹介作品を全て一覧"}],
+                "web_search": True,
+                "internet_layer_channels": ["youtube"],
+                "stream": True,
+            })
+        youtube_events = [json.loads(line) for line in youtube_stream_body.splitlines() if line]
+        assert [event["type"] for event in youtube_events] == ["start", "chunk", "chunk", "done"]
+        assert [event["content"] for event in youtube_events[1:3]] == ["紹介作品は", "三作品です。"]
+        assert youtube_events[-1]["message"]["content"] == "紹介作品は三作品です。"
+        assert not any(
+            diagnostic.get("mode") == "deterministic-complete-list"
+            for diagnostic in youtube_events[-1]["search"]["diagnostics"]
+        )
 
 
 def test_complete_list_evidence_prefers_more_complete_trusted_source() -> None:

@@ -3577,8 +3577,24 @@ def should_read_search_result_pages(query: str) -> bool:
     ))
 
 
-def should_buffer_complete_list_stream(use_web_search: bool, query: str) -> bool:
-    return use_web_search and should_read_search_result_pages(query)
+def should_buffer_complete_list_stream(
+    use_web_search: bool,
+    query: str,
+    channels: list[str] | tuple[str, ...] = (),
+    results: list[dict[str, str]] | tuple[dict[str, str], ...] = (),
+) -> bool:
+    if not use_web_search or not should_read_search_result_pages(query):
+        return False
+    if extract_youtube_urls(query, limit=1) or extract_github_repos(query, limit=1):
+        return False
+    specialized_channels = {"youtube", "github", "rss", "v2ex", "bilibili", "sns"}
+    if any(str(channel or "").strip().lower() in specialized_channels for channel in channels):
+        return False
+    for result in results:
+        source = str(result.get("source") or "").strip().lower()
+        if source.startswith("agent-reach:") and source != "agent-reach:web":
+            return False
+    return True
 
 
 def emit_or_buffer_chat_chunk(chunk, buffer_output, parts, emit) -> None:
@@ -5599,9 +5615,6 @@ class Handler(BaseHTTPRequestHandler):
             query = str(body.get("search_query") or messages[-1].get("content", ""))
             auto_external_research = should_auto_use_external_research(query)
             use_web_search = (bool(body.get("web_search", False)) or auto_external_research) and not is_translation_task
-            complete_list_answer = should_buffer_complete_list_stream(use_web_search, query)
-            if complete_list_answer:
-                recent_messages = sanitize_chat_messages(messages[-1:])
             internet_layer_channels = normalize_internet_layer_channels(body.get("internet_layer_channels", [])) if use_web_search else []
             if use_web_search and auto_external_research and not internet_layer_channels:
                 internet_layer_channels = auto_internet_layer_channels_for_query(query)
@@ -5623,6 +5636,14 @@ class Handler(BaseHTTPRequestHandler):
                     search_results, reader_error = augment_search_results_with_page_text(query, search_results)
                     if reader_error:
                         search_error = f"{search_error} / {reader_error}" if search_error else reader_error
+            complete_list_answer = should_buffer_complete_list_stream(
+                use_web_search,
+                query,
+                internet_layer_channels,
+                search_results,
+            )
+            if complete_list_answer:
+                recent_messages = sanitize_chat_messages(messages[-1:])
             search_diagnostics = external_research_diagnostics(query, internet_layer_channels, search_results, search_error) if use_web_search else []
             complete_list_evidence = build_complete_list_evidence(query, search_results) if complete_list_answer else None
             answer_search_results = public_search_results_for_answer(search_results, complete_list_evidence)

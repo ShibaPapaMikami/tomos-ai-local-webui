@@ -21,3 +21,13 @@
 ## 懸念点
 
 - HTTPハンドラーの実通信テストは行わず、ストリーム送信の分岐は補助関数テストと既存回帰テストで確認した。
+
+## レビュー指摘の修正
+
+- 決定論的一覧回答の対象を一般Webページに限定し、YouTube/GitHub直接URL、選択済みの専用チャンネル、非Webの`agent-reach`結果sourceを除外した。
+- REDで専用チャンネル判定の不足と、「YouTube動画を調べて、紹介作品を全て一覧」の生チャンク集約を確認した。
+- ローカルHTTPの`/api/chat`テストで、一般Web一覧の`start → 完成本文1 chunk → done`、非ストリームとの本文・根拠出典・診断の一致、YouTube一覧のモデル生2 chunk維持を確認した。
+
+## 追加検証
+
+- `scripts/test_server_helpers.py`、`scripts/test-search-helpers.js`、`scripts/test-submit-classification.js`、`py_compile`、`git diff --check` はすべて終了コード0。
