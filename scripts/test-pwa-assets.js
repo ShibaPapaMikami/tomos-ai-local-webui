@@ -244,7 +244,7 @@ assert.match(mobileSyncScript, /--mobile-sync-only/);
   "Gemma4_12B_All_Start.bat",
 ].forEach((path) => {
   const launcher = fs.readFileSync(path, "utf8");
-  assert.match(launcher, /0\.8\.211/, `${path} should use the current app version`);
+  assert.match(launcher, /0\.8\.212/, `${path} should use the current app version`);
   assert.doesNotMatch(launcher, /0\.8\.196/, `${path} should not pin the old app version`);
 });
 
