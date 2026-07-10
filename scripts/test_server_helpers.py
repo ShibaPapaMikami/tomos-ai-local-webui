@@ -1097,6 +1097,9 @@ def test_should_read_search_result_pages_detects_complete_list_request() -> None
     assert server.should_read_search_result_pages("全タイトルを教えて")
     assert server.should_read_search_result_pages("全機種を出して")
     assert server.should_read_search_result_pages("全キャラクターを書いて")
+    assert server.should_read_search_result_pages("このゲームに登場する全キャラクターを教えて")
+    assert server.should_read_search_result_pages("公開された全作品を出して")
+    assert server.should_read_search_result_pages("一覧に含まれる全項目を書いて")
     assert server.should_read_search_result_pages("作品の全エピソードを一覧にして")
     assert not server.should_read_search_result_pages("ガンダムについて教えて")
     assert not server.should_read_search_result_pages("全")
@@ -1115,6 +1118,13 @@ def test_should_read_search_result_pages_detects_complete_list_request() -> None
     assert not server.should_read_search_result_pages("全面を出して")
     assert not server.should_read_search_result_pages("全世界を教えて")
     assert not server.should_read_search_result_pages("全年齢を教えて")
+    assert not server.should_read_search_result_pages("全体像を教えて")
+    assert not server.should_read_search_result_pages("全年齢版を出して")
+    assert not server.should_read_search_result_pages("全国版を出して")
+    assert not server.should_read_search_result_pages("全容を教えて")
+    assert not server.should_read_search_result_pages("全貌を教えて")
+    assert not server.should_read_search_result_pages("安全性を教えて")
+    assert not server.should_read_search_result_pages("完全版を教えて")
 
 
 def test_augment_search_results_with_page_text_reads_first_result() -> None:
@@ -1576,12 +1586,18 @@ def test_complete_list_intro_uses_polite_ending_when_prompt_requests_politeness(
 
 
 def test_complete_list_intro_uses_casual_ending_when_prompt_rejects_politeness() -> None:
-    prompt = "\n".join([
-        "ユーザーの呼び方は「まさふみ」です。",
-        "自分自身を指すときは「ぼく」を使います。",
+    for style in (
         "敬語は使わない。丁寧語は禁止。です・ます調は不要。",
-    ])
-    assert server.complete_list_intro(prompt) == "まさふみ、ぼくが確認できた内容をまとめたよ。"
+        "敬語を使わず答えて。",
+        "丁寧にしないで答えて。",
+        "です・ます調は避けて。",
+    ):
+        prompt = "\n".join([
+            "ユーザーの呼び方は「まさふみ」です。",
+            "自分自身を指すときは「ぼく」を使います。",
+            style,
+        ])
+        assert server.complete_list_intro(prompt) == "まさふみ、ぼくが確認できた内容をまとめたよ。"
 
 
 def test_extract_list_followup_links_rejects_image_assets() -> None:

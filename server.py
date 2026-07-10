@@ -3566,13 +3566,28 @@ def should_auto_use_external_research(query: str) -> bool:
     ))
 
 
+def complete_list_all_left_context_is_valid(query: str, start: int) -> bool:
+    if start <= 0:
+        return True
+    left = query[:start]
+    if left[-1].isspace() or left[-1] in "、。,.，．・:：;；!?！？/／「」『』（）()[]【】":
+        return True
+    if left[-1] in "はがをにへでとのもやか":
+        return True
+    return left.endswith(("する", "した", "された", "れる", "れた", "いる", "ある", "含む", "含まれる"))
+
+
+def complete_list_all_target_is_valid(target: str) -> bool:
+    excluded_prefixes = ("体", "年齢", "国", "容", "貌", "性", "然", "力", "面", "世界")
+    return bool(target and "の" not in target and not target.startswith(excluded_prefixes))
+
+
 def should_read_search_result_pages(query: str) -> bool:
     normalized = str(query or "").strip()
     if not normalized:
         return False
-    left_boundary = r"(?:^|[\s、。,.，．・:：;；!?！？/／「」『』（）()\[\]【】]|の)"
     if re.search(
-        rf"{left_boundary}(?:全て|全部|全件|全シリーズ|全作品)|すべて|一覧|箇条書き|網羅|complete list|all (?:series|works|items)",
+        r"すべて|一覧|箇条書き|網羅|complete list|all (?:series|works|items)",
         normalized,
         re.IGNORECASE,
     ):
@@ -3582,15 +3597,16 @@ def should_read_search_result_pages(query: str) -> bool:
         normalized,
     ):
         return True
-    all_request = re.search(
-        rf"{left_boundary}全([A-Za-z0-9ぁ-んァ-ヶ一-龯々ー]{{1,24}}?)(?:を|は)(?:教えて|出して|書いて|見せて|一覧にして|箇条書きして|リストにして|網羅して)",
+    for marker in re.finditer(r"全(?:て|部|件|シリーズ|作品)", normalized):
+        if complete_list_all_left_context_is_valid(normalized, marker.start()):
+            return True
+    for candidate in re.finditer(
+        r"全([A-Za-z0-9ぁ-んァ-ヶ一-龯々ー]{1,24}?)(?:を|は)(?:教えて|出して|書いて|見せて|一覧にして|箇条書きして|リストにして|網羅して)",
         normalized,
-    )
-    return bool(
-        all_request
-        and "の" not in all_request.group(1)
-        and all_request.group(1) not in {"体", "然", "力", "面", "世界", "年齢"}
-    )
+    ):
+        if complete_list_all_left_context_is_valid(normalized, candidate.start()) and complete_list_all_target_is_valid(candidate.group(1)):
+            return True
+    return False
 
 
 def should_buffer_complete_list_stream(
@@ -3972,7 +3988,7 @@ def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> C
 def complete_list_intro(system_prompt: str) -> str:
     text = str(system_prompt or "")
     rejects_politeness = re.search(
-        r"(?:敬語|丁寧語|です[・･]?ます(?:調)?)(?:は|を)?(?:使わない|禁止|不要)",
+        r"(?:敬語|丁寧(?:語)?|です[・･]?ます(?:調)?)(?:は|を|に)?(?:使わない|使わず|禁止|不要|避ける|避けて|しない)",
         text,
     )
     ending = "まとめました。" if not rejects_politeness and re.search(r"敬語|丁寧|です[・･]?ます", text) else "まとめたよ。"
