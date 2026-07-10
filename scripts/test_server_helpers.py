@@ -1232,6 +1232,13 @@ def test_render_complete_list_ignores_model_items_and_keeps_all_evidence() -> No
     assert content.count("\n- 星の旅人") == 3
 
 
+def test_render_complete_list_rejects_model_intro_with_fictional_fact() -> None:
+    evidence = complete_list_test_evidence(["星の旅人", "星の旅人Z", "星の旅人ZZ"])
+    content = server.render_complete_list_answer("架空作品も含まれます。", evidence)
+    assert "架空作品も含まれます。" not in content
+    assert content.startswith("確認できた内容をまとめたよ。")
+
+
 def test_public_complete_list_sources_include_only_grounding_pages() -> None:
     evidence = complete_list_test_evidence(["星の旅人", "星の旅人Z", "星の旅人ZZ"])
     public = server.public_search_results_for_answer([{"url": "https://noise.example"}], evidence)
@@ -1247,6 +1254,17 @@ def test_render_complete_list_marks_partial_and_unavailable() -> None:
     assert "完全な一覧としては確認できませんでした。" in partial
     assert "## 確認できていない点" in unavailable
     assert "一覧項目を抽出できませんでした。" in unavailable
+
+
+def test_complete_list_diagnostic_describes_unavailable_without_candidates() -> None:
+    evidence = server.CompleteListEvidence("全シリーズ", "", (), (), "unavailable", ())
+    diagnostic = server.complete_list_diagnostic(evidence)
+    assert diagnostic["message"] == "一覧の根拠ページを確認できませんでした。"
+
+
+def test_complete_list_diagnostic_describes_partial_as_incomplete() -> None:
+    diagnostic = server.complete_list_diagnostic(complete_list_test_evidence(["星の旅人"]))
+    assert diagnostic["message"] == "根拠ページから一部の項目を確認しました。完全な一覧ではありません。"
 
 
 def test_complete_list_sources_deduplicate_urls() -> None:
@@ -1274,7 +1292,7 @@ def test_complete_list_diagnostic_reports_deterministic_mode() -> None:
         "type": "complete-list-grounding",
         "status": "warning",
         "label": "一覧根拠",
-        "message": "単一の根拠ドメインから1件を確認しました。",
+        "message": "根拠ページから一部の項目を確認しました。完全な一覧ではありません。",
         "sourceDomain": "official.example",
         "sourceCount": 1,
         "candidateCount": 1,
@@ -1992,8 +2010,11 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail()
     test_render_complete_list_ignores_model_items_and_keeps_all_evidence()
+    test_render_complete_list_rejects_model_intro_with_fictional_fact()
     test_public_complete_list_sources_include_only_grounding_pages()
     test_render_complete_list_marks_partial_and_unavailable()
+    test_complete_list_diagnostic_describes_unavailable_without_candidates()
+    test_complete_list_diagnostic_describes_partial_as_incomplete()
     test_complete_list_sources_deduplicate_urls()
     test_render_complete_list_exposes_over_100_warning()
     test_complete_list_diagnostic_reports_deterministic_mode()

@@ -3908,15 +3908,15 @@ def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> C
     return CompleteListEvidence(query, domain, unique_sources, tuple(candidates[:100]), status, warnings)
 
 
+_COMPLETE_LIST_APPROVED_INTROS = frozenset({
+    "確認したよ。",
+    "調べたよ。",
+})
+
+
 def safe_complete_list_intro(content: str, evidence: CompleteListEvidence) -> str:
-    intro = next((part.strip() for part in re.split(r"\n\s*\n", content or "") if part.strip()), "")
-    if not intro or len(intro) > 120 or len(intro.splitlines()) > 2:
-        return ""
-    if re.search(r"^\s*(?:#|[*\-・•]|\d+[.)．、])|\d", intro, re.M):
-        return ""
-    if any(normalized_fact_text(item) in normalized_fact_text(intro) for item in evidence.candidates):
-        return ""
-    return intro
+    intro = (content or "").strip()
+    return intro if intro in _COMPLETE_LIST_APPROVED_INTROS else ""
 
 
 def render_complete_list_answer(character_intro: str, evidence: CompleteListEvidence) -> str:
@@ -3937,11 +3937,17 @@ def public_search_results_for_answer(results, evidence):
 
 def complete_list_diagnostic(evidence: CompleteListEvidence) -> dict[str, object]:
     status = "success" if evidence.status == "source-backed" else "warning" if evidence.status == "partial" else "error"
+    if evidence.status == "unavailable":
+        message = "一覧の根拠ページを確認できませんでした。"
+    elif evidence.status == "partial":
+        message = "根拠ページから一部の項目を確認しました。完全な一覧ではありません。"
+    else:
+        message = f"単一の根拠ドメインから{len(evidence.candidates)}件を確認しました。"
     return {
         "type": "complete-list-grounding",
         "status": status,
         "label": "一覧根拠",
-        "message": f"単一の根拠ドメインから{len(evidence.candidates)}件を確認しました。",
+        "message": message,
         "sourceDomain": evidence.source_domain,
         "sourceCount": len(evidence.source_results),
         "candidateCount": len(evidence.candidates),
