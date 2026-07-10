@@ -3448,7 +3448,7 @@ YOUTUBE_URL_RE = re.compile(
 )
 WEB_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 WEB_READER_TIMEOUT_SECONDS = 15
-WEB_READER_MAX_CHARS = 24000
+WEB_READER_MAX_CHARS = 80000
 COMPLETE_LIST_PROMPT_MAX_CHARS = 6000
 GITHUB_REPO_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", re.IGNORECASE)
 GITHUB_TIMEOUT_SECONDS = 20
@@ -3601,6 +3601,9 @@ def extract_list_followup_links(page_result: dict[str, str], limit: int = 8) -> 
     parsed_base = urllib.parse.urlparse(base_url)
     if not parsed_base.netloc:
         return []
+    base_path = parsed_base.path.rstrip("/")
+    base_parent = base_path.rsplit("/", 1)[0] if "/" in base_path else ""
+    base_name = base_path.rsplit("/", 1)[-1]
     found: list[tuple[str, str]] = []
     markdown_link_re = re.compile(r"\[([^\]]{1,80})\]\((https?://[^)\s]+|/[^)\s]+)\)")
     raw_url_re = re.compile(r"https?://[^\s<>)]+")
@@ -3619,7 +3622,16 @@ def extract_list_followup_links(page_result: dict[str, str], limit: int = 8) -> 
         if re.search(r"\.(?:jpe?g|png|gif|webp|svg|avif|ico)(?:$|\?)", parsed.path, re.IGNORECASE):
             continue
         text = f"{label} {clean_url}".lower()
-        if not re.search(r"次|続|一覧|インデックス|ページ|page|list|\d{2}[_-]\d+", text):
+        candidate_path = parsed.path.rstrip("/")
+        candidate_parent = candidate_path.rsplit("/", 1)[0] if "/" in candidate_path else ""
+        candidate_name = candidate_path.rsplit("/", 1)[-1]
+        explicit_pagination = bool(re.search(r"次|続|一覧|インデックス|ページ|page|list|module", text, re.IGNORECASE))
+        same_sequence = bool(
+            candidate_parent == base_parent
+            and re.fullmatch(r"\d{2}[_-]\d+", base_name)
+            and re.fullmatch(r"\d{2}[_-]\d+", candidate_name)
+        )
+        if not explicit_pagination and not same_sequence:
             continue
         normalized_url = urllib.parse.urlunparse(parsed._replace(fragment=""))
         if normalized_url in seen:

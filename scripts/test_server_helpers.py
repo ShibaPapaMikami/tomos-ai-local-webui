@@ -1193,6 +1193,41 @@ def test_extract_list_followup_links_rejects_image_assets() -> None:
     assert links == ["https://example.com/works/02_747"]
 
 
+def test_extract_list_followup_links_rejects_other_numeric_detail_paths() -> None:
+    links = server.extract_list_followup_links({
+        "title": "Webページ本文: 製作年順インデックス",
+        "url": "https://example.com/special/gundam-works/01_746",
+        "snippet": "\n".join([
+            "[MODULE.002](https://example.com/special/gundam-works/02_747)",
+            "[機動戦士ガンダム](https://example.com/works/01_001)",
+            "[Gのレコンギスタ](https://example.com/works/14_026)",
+        ]),
+    })
+    assert links == ["https://example.com/special/gundam-works/02_747"]
+
+
+def test_web_reader_keeps_titles_after_legacy_24k_boundary() -> None:
+    late_title = "## [後半にある作品](https://example.com/works/late)"
+    body = "Title: 公式一覧\n" + ("説明文" * 9000) + "\n" + late_title
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return body.encode("utf-8")
+
+    result = server.web_reader_result(
+        "https://example.com/works",
+        opener=lambda request, timeout=0: FakeResponse(),
+    )
+    assert result is not None
+    assert late_title in result["snippet"]
+
+
 def test_select_complete_list_grounding_results_prefers_one_authoritative_domain() -> None:
     official_results = [
         {
@@ -1826,6 +1861,8 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_list_followup_links_rejects_image_assets()
+    test_extract_list_followup_links_rejects_other_numeric_detail_paths()
+    test_web_reader_keeps_titles_after_legacy_24k_boundary()
     test_select_complete_list_grounding_results_prefers_one_authoritative_domain()
     test_complete_list_search_context_excludes_other_domain_categories()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
