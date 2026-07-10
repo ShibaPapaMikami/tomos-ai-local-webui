@@ -78,7 +78,7 @@ def test_sarashina_ocr_status_payload_shape() -> None:
     assert payload["ok"] is True
     assert payload["id"] == "sarashina2.2-ocr"
     assert payload["model"] == "sbintuitions/sarashina2.2-ocr"
-    assert payload["status"] in {"ready", "needs_runner", "needs_dependencies", "needs_model_download"}
+    assert payload["status"] in {"ready", "needs_dependencies", "needs_model_download"}
     assert isinstance(payload["missing"], list)
     assert payload["externalApi"] is False
 
@@ -826,14 +826,6 @@ def test_mobile_api_access_allows_pc_lan_address_for_management_apis() -> None:
 
 
 def test_mobile_qr_svg_contains_svg_modules() -> None:
-    if server.segno is None:
-        try:
-            server.mobile_qr_svg("http://192.168.1.20:54877/m")
-        except RuntimeError as exc:
-            assert str(exc) == "segno is not installed"
-        else:
-            raise AssertionError("mobile QR SVG should require segno")
-        return
     svg = server.mobile_qr_svg("http://192.168.1.20:54877/m")
     assert svg.startswith("<svg")
     assert 'class="segno"' in svg
@@ -1357,6 +1349,49 @@ def test_extract_complete_list_keeps_tv_game_sections_for_game_request() -> None
     assert server.extract_grounded_list_candidates_from_results(
         [result], query="ゲームシリーズを一覧にして"
     ) == ["星の旅人バトル", "星の旅人レーシング"]
+
+
+def test_extract_complete_list_keeps_all_explicit_categories() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## アニメ作品", "- 星の旅人",
+        "## ゲーム作品", "- 星の旅人バトル",
+        "## 書籍作品", "- 星の旅人外伝",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="アニメ作品とゲーム作品を一覧にして"
+    ) == ["星の旅人", "星の旅人バトル"]
+
+
+def test_extract_complete_list_excludes_account_headings_at_h2_and_h3() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## 映像作品", "- 星の旅人",
+        "## ログイン", "- ログイン限定作品",
+        "## アカウント作成", "- 新規登録特典作品",
+        "## login", "- Login Bonus Story",
+        "## sign in", "- Sign In Story",
+        "## 映像作品", "### ログイン", "- 会員向け作品",
+        "### アカウント作成", "- 登録者向け作品",
+        "### sign up", "- Sign Up Story",
+        "### アニメ", "- 星の旅人Z",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="アニメ作品を一覧にして"
+    ) == ["星の旅人", "星の旅人Z"]
+
+
+def test_extract_complete_list_uses_linked_category_heading_without_candidate() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## [映像作品](https://works-official.example/anime)",
+        "- 星の旅人",
+        "## [ゲーム作品](https://works-official.example/games)",
+        "- 星の旅人バトル",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="アニメ作品を一覧にして"
+    ) == ["星の旅人"]
 
 
 def complete_list_test_evidence(items: list[str]) -> server.CompleteListEvidence:
@@ -2434,6 +2469,13 @@ if __name__ == "__main__":
     test_should_read_search_result_pages_detects_complete_list_request()
     test_extract_complete_list_reads_standalone_official_title_cards()
     test_extract_complete_list_filters_sections_by_requested_kind()
+    test_extract_complete_list_excludes_other_video_sections_for_series_request()
+    test_extract_complete_list_excludes_navigation_labels_from_standalone_bold()
+    test_extract_complete_list_excludes_mixed_game_book_sections_for_game_request()
+    test_extract_complete_list_keeps_tv_game_sections_for_game_request()
+    test_extract_complete_list_keeps_all_explicit_categories()
+    test_extract_complete_list_excludes_account_headings_at_h2_and_h3()
+    test_extract_complete_list_uses_linked_category_heading_without_candidate()
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail()

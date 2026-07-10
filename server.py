@@ -3815,7 +3815,7 @@ def complete_list_intents(query: str) -> frozenset[str]:
         "game": r"ゲーム|game",
         "book": r"漫画|マンガ|書籍|小説|comic|manga|book|novel",
         "product": r"商品|模型|玩具|グッズ|model|toy|goods",
-        "series": r"シリーズ|アニメ|映像作品|TV|OVA|劇場|配信|series|anime",
+        "series": r"アニメ|映像作品|TV|OVA|劇場|配信|anime",
     }.items():
         if re.search(pattern, text, re.IGNORECASE):
             intents.add(intent)
@@ -3830,7 +3830,7 @@ def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
         normalized.append(text)
     if any(
         re.search(
-            r"脚注|注釈|出典|参考文献|関連項目|外部リンク|footnotes?|references?|external\s*links?|related\s*items?",
+            r"脚注|注釈|出典|参考文献|関連項目|外部リンク|ログイン|アカウント作成|footnotes?|references?|external\s*links?|related\s*items?|login|sign[-_]?in|sign[-_]?up",
             heading,
             re.IGNORECASE,
         )
@@ -3839,9 +3839,7 @@ def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
         return False
 
     intents = complete_list_intents(query)
-    requested = set(intents) & {"game", "book", "product"}
-    if not requested and "series" in intents:
-        requested = {"series"}
+    requested = set(intents) & {"series", "game", "book", "product"}
     if not requested:
         return True
 
@@ -3965,6 +3963,12 @@ def extract_grounded_list_candidates_from_results(
                 elif level == 3:
                     headings = headings[:1] + [heading]
             if not complete_list_section_allowed(query, headings):
+                continue
+            if heading_match and re.search(
+                r"ゲーム|game|漫画|マンガ|書籍|小説|comic|manga|book|novel|商品|模型|玩具|グッズ|model|toy|goods|その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio|映像|アニメ|(?:TV|テレビ)(?!ゲーム)|OVA|劇場|映画|配信|series|anime|movie|film|video",
+                heading,
+                re.IGNORECASE,
+            ):
                 continue
             cells = structured_candidate_cells(line)
             for cell in cells:
