@@ -37,3 +37,12 @@
 - 専用チャンネル判定テストとHTTPイベント列テストを末尾の実行一覧へ登録した。
 - 一般Web一覧でストリーム完了イベントと非ストリーム応答の本文、`search.results`、`search.diagnostics`全体を直接比較するようにした。
 - HTTPテストを共通投稿補助関数とケース表で整理し、YouTube、GitHub、RSS、通常チャットの生chunkと実イベント列を`/api/chat`経由で確認するようにした。
+
+## 最終回帰確認
+
+- 実行環境: Python 3.11.9、既存のローカルSarashina OCRランナーを明示。
+- `scripts/test_server_helpers.py`: `server helper tests passed`。
+- ローカルHTTP `/api/chat`: 6リクエストすべてHTTP 200。
+- `scripts/test-search-helpers.js`: `search helper tests passed`。
+- `scripts/test-submit-classification.js`: `submit classification tests passed`。
+- `py_compile`、`git diff --check`: 成功。
