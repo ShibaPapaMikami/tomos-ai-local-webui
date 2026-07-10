@@ -3855,7 +3855,7 @@ def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
             categories.add("product")
         if re.search(r"その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio", heading, re.IGNORECASE):
             categories.add("other")
-        if re.search(r"映像|アニメ|TV|テレビ|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
+        if re.search(r"映像|アニメ|(?:TV|テレビ)(?!ゲーム)|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
             categories.add("series")
     if not categories:
         return True

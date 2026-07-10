@@ -1340,6 +1340,17 @@ def test_extract_complete_list_excludes_mixed_game_book_sections_for_game_reques
     ) == ["星の旅人バトル"]
 
 
+def test_extract_complete_list_keeps_tv_game_sections_for_game_request() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## テレビゲーム", "- 星の旅人バトル",
+        "## TVゲーム", "- 星の旅人レーシング",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="ゲームシリーズを一覧にして"
+    ) == ["星の旅人バトル", "星の旅人レーシング"]
+
+
 def complete_list_test_evidence(items: list[str]) -> server.CompleteListEvidence:
     source = complete_list_page("https://official.example/works", items)
     return server.CompleteListEvidence(
