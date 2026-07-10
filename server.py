@@ -3853,10 +3853,10 @@ def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
             categories.add("book")
         elif re.search(r"商品|模型|玩具|グッズ|model|toy|goods", heading, re.IGNORECASE):
             categories.add("product")
-        elif re.search(r"映像|アニメ|TV|テレビ|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
-            categories.add("series")
         elif re.search(r"その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio", heading, re.IGNORECASE):
             categories.add("other")
+        elif re.search(r"映像|アニメ|TV|テレビ|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
+            categories.add("series")
     if not categories:
         return True
     return bool(categories & requested) and categories <= requested
@@ -3908,6 +3908,12 @@ def clean_grounded_list_candidate(raw: str) -> str:
     if re.fullmatch(r"(?:全|第)?\d+(?:話|本|巻|冊|回|期)", item):
         return ""
     if re.match(r"^(?:監督|会社|制作|製作|放送局|配給|公開日|発売日|ナビゲーション)\s*(?:[:：]|$)", item):
+        return ""
+    if re.fullmatch(
+        r"(?:(?:公式|最新)?(?:ニュース|お知らせ|情報|チャンネル|サイト|ホーム|トップ|メニュー|ログイン|検索|次へ|前へ)(?:一覧|情報|ページ|リンク)?|(?:official\s+)?(?:news|notice|announcements?|channel|site|home|top|menu|login|search|next|previous))",
+        item,
+        re.IGNORECASE,
+    ):
         return ""
     if re.search(r"youtube|チャンネル|channel", item, re.IGNORECASE):
         return ""

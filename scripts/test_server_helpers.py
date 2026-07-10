@@ -1303,6 +1303,32 @@ def test_extract_complete_list_filters_sections_by_requested_kind() -> None:
     ) == ["星の旅人バトル"]
 
 
+def test_extract_complete_list_excludes_other_video_sections_for_series_request() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## 映像作品", "- 星の旅人",
+        "## その他の映像作品", "- 星の旅人外伝",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="アニメシリーズを一覧にして"
+    ) == ["星の旅人"]
+
+
+def test_extract_complete_list_excludes_navigation_labels_from_standalone_bold() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## 映像作品",
+        "**星の旅人**",
+        "**公式ニュース**",
+        "**お知らせ**",
+        "**公式チャンネル**",
+        "**星の旅人Z**",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="アニメシリーズを一覧にして"
+    ) == ["星の旅人", "星の旅人Z"]
+
+
 def complete_list_test_evidence(items: list[str]) -> server.CompleteListEvidence:
     source = complete_list_page("https://official.example/works", items)
     return server.CompleteListEvidence(
