@@ -3819,13 +3819,35 @@ def complete_list_intents(query: str) -> frozenset[str]:
     }.items():
         if re.search(pattern, text, re.IGNORECASE):
             intents.add(intent)
+    if not intents and re.search(r"シリーズ|series", text, re.IGNORECASE):
+        intents.add("series")
     return frozenset(intents or {"generic"})
+
+
+def complete_list_heading_label(heading: str) -> str:
+    text = re.sub(r"^#{1,6}\s+", "", str(heading or "")).strip()
+    link_match = re.fullmatch(r"\[([^\]]+)\]\((?:https?://|/)[^)]+\)", text)
+    if link_match:
+        text = link_match.group(1).strip()
+    return re.sub(r"^(?:\*\*|__)(.+?)(?:\*\*|__)$", r"\1", text).strip()
+
+
+def complete_list_is_category_heading(heading: str) -> bool:
+    label = re.sub(r"\s+", "", complete_list_heading_label(heading)).lower()
+    return label in {
+        "シリーズ", "映像作品", "アニメ", "アニメ作品", "tv", "tv作品", "テレビ", "テレビ作品",
+        "ova", "ova作品", "劇場", "劇場作品", "劇場版", "映画", "映画作品", "配信", "配信作品",
+        "ゲーム", "ゲーム作品", "テレビゲーム", "tvゲーム",
+        "漫画", "漫画作品", "マンガ", "マンガ作品", "書籍", "書籍作品", "小説", "小説作品", "ゲーム関連書籍",
+        "商品", "商品作品", "模型", "玩具", "グッズ",
+        "その他", "その他の作品", "その他の映像作品", "音楽", "実写", "舞台", "ラジオ",
+    }
 
 
 def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
     normalized = []
     for heading in headings or []:
-        text = re.sub(r"^#{1,6}\s+", "", str(heading or ""))
+        text = complete_list_heading_label(heading)
         text = re.sub(r"\s+", "", text).lower()
         normalized.append(text)
     if any(
@@ -3964,11 +3986,7 @@ def extract_grounded_list_candidates_from_results(
                     headings = headings[:1] + [heading]
             if not complete_list_section_allowed(query, headings):
                 continue
-            if heading_match and re.search(
-                r"ゲーム|game|漫画|マンガ|書籍|小説|comic|manga|book|novel|商品|模型|玩具|グッズ|model|toy|goods|その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio|映像|アニメ|(?:TV|テレビ)(?!ゲーム)|OVA|劇場|映画|配信|series|anime|movie|film|video",
-                heading,
-                re.IGNORECASE,
-            ):
+            if heading_match and complete_list_is_category_heading(heading):
                 continue
             cells = structured_candidate_cells(line)
             for cell in cells:

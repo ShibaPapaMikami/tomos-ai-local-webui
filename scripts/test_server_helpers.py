@@ -1394,6 +1394,28 @@ def test_extract_complete_list_uses_linked_category_heading_without_candidate() 
     ) == ["星の旅人"]
 
 
+def test_extract_complete_list_series_word_falls_back_to_series_category() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## 映像作品", "- 星の旅人",
+        "## ゲーム作品", "- 星の旅人バトル",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="全シリーズを一覧にして"
+    ) == ["星の旅人"]
+
+
+def test_extract_complete_list_ignores_category_words_in_link_heading_urls() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## [星の旅人](https://works-official.example/anime/first)",
+        "## [星の旅人Z](https://works-official.example/movie/zeta)",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="全シリーズを一覧にして"
+    ) == ["星の旅人", "星の旅人Z"]
+
+
 def complete_list_test_evidence(items: list[str]) -> server.CompleteListEvidence:
     source = complete_list_page("https://official.example/works", items)
     return server.CompleteListEvidence(
@@ -2476,6 +2498,8 @@ if __name__ == "__main__":
     test_extract_complete_list_keeps_all_explicit_categories()
     test_extract_complete_list_excludes_account_headings_at_h2_and_h3()
     test_extract_complete_list_uses_linked_category_heading_without_candidate()
+    test_extract_complete_list_series_word_falls_back_to_series_category()
+    test_extract_complete_list_ignores_category_words_in_link_heading_urls()
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail()
