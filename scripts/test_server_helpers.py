@@ -1623,13 +1623,39 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
             )
 
 
-def test_complete_list_evidence_prefers_more_complete_trusted_source() -> None:
-    official = complete_list_page("https://official.example/works", ["星の旅人", "星の旅人Z", "星の旅人ZZ"])
-    encyclopedia = complete_list_page("https://ja.wikipedia.org/wiki/星の旅人", [f"星の旅人{i}" for i in range(12)])
-    evidence = server.build_complete_list_evidence("全シリーズを箇条書きして", [official, encyclopedia])
-    assert evidence.source_domain == "ja.wikipedia.org"
-    assert len(evidence.candidates) == 12
-    assert evidence.status == "source-backed"
+def test_complete_list_evidence_prefers_authority_before_candidate_count() -> None:
+    official = complete_list_page(
+        "https://works-official.example/works",
+        ["星の旅人", "星の旅人Z", "星の旅人ZZ"],
+    )
+    encyclopedia = complete_list_page(
+        "https://ja.wikipedia.org/wiki/星の旅人",
+        [f"星の旅人{index}" for index in range(12)],
+    )
+    evidence = server.build_complete_list_evidence(
+        "アニメの全シリーズを箇条書きして", [official, encyclopedia]
+    )
+    assert evidence.source_domain == "works-official.example"
+    assert evidence.candidates == ("星の旅人", "星の旅人Z", "星の旅人ZZ")
+
+
+def test_complete_list_evidence_uses_only_requested_official_sections() -> None:
+    official = complete_list_page("https://works-official.example/catalog", [])
+    official["snippet"] = "\n".join([
+        "## 映像作品",
+        "[**星の旅人**](https://works-official.example/first)",
+        "**星の旅人Z**",
+        "**星の旅人ZZ**",
+        "## ゲーム作品", "- 星の旅人バトル",
+    ])
+    noisy = complete_list_page("https://ja.wikipedia.org/wiki/星の旅人", [
+        "ゲーム 星の旅人モバイル", "漫画 星の旅人外伝", "架空出版社",
+    ])
+    evidence = server.build_complete_list_evidence(
+        "アニメの全シリーズを箇条書きして", [noisy, official]
+    )
+    assert evidence.source_domain == "works-official.example"
+    assert evidence.candidates == ("星の旅人", "星の旅人Z", "星の旅人ZZ")
 
 
 def test_complete_list_evidence_rejects_navigation_pages() -> None:
@@ -2415,7 +2441,8 @@ if __name__ == "__main__":
     test_complete_list_finalizer_returns_same_content_for_both_api_modes()
     test_complete_list_stream_excludes_specialized_channels_and_sources()
     test_chat_http_complete_list_events_and_youtube_stream_regression()
-    test_complete_list_evidence_prefers_more_complete_trusted_source()
+    test_complete_list_evidence_prefers_authority_before_candidate_count()
+    test_complete_list_evidence_uses_only_requested_official_sections()
     test_complete_list_evidence_rejects_navigation_pages()
     test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns()
     test_complete_list_evidence_rejects_untrusted_sources()

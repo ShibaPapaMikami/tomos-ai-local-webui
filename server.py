@@ -4025,15 +4025,17 @@ def complete_list_source_groups(results: list[dict[str, str]]) -> dict[str, dict
     return groups
 
 
-def rank_complete_list_sources(groups: dict[str, dict[str, object]]) -> list[tuple[str, list[dict[str, str]], list[str]]]:
+def rank_complete_list_sources(
+    groups: dict[str, dict[str, object]], query: str = ""
+) -> list[tuple[str, list[dict[str, str]], list[str]]]:
     ranked: list[tuple[str, list[dict[str, str]], list[str], int, int]] = []
     for domain, group in groups.items():
         source_results = group["results"]
-        candidates = extract_grounded_list_candidates_from_results(source_results)
+        candidates = extract_grounded_list_candidates_from_results(source_results, query=query)
         if candidates:
             ranked.append((domain, source_results, candidates, complete_list_authority_band(domain), group["order"]))
     trusted = [item for item in ranked if item[3] <= 1]
-    return [item[:3] for item in sorted(trusted, key=lambda item: (-len(item[2]), item[3], item[4]))]
+    return [item[:3] for item in sorted(trusted, key=lambda item: (item[3], -len(item[2]), item[4]))]
 
 
 def structured_candidate_cells(line: str) -> list[str]:
@@ -4056,12 +4058,12 @@ def structured_candidate_cells(line: str) -> list[str]:
 
 
 def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> CompleteListEvidence:
-    ranked = rank_complete_list_sources(complete_list_source_groups(results))
+    ranked = rank_complete_list_sources(complete_list_source_groups(results), query=query)
     if not ranked:
         return CompleteListEvidence(query, "", (), (), "unavailable", ("根拠ページ本文を取得できませんでした。",))
     domain, source_results, candidates = ranked[0]
     status = "source-backed" if len(candidates) >= 3 else "partial" if candidates else "unavailable"
-    unique_sources = tuple({result["url"]: result for result in source_results if result.get("url") and extract_grounded_list_candidates_from_results([result])}.values())
+    unique_sources = tuple({result["url"]: result for result in source_results if result.get("url") and extract_grounded_list_candidates_from_results([result], query=query)}.values())
     warnings = ("候補が100件を超えたため、100件まで表示します。",) if len(candidates) > 100 else ()
     return CompleteListEvidence(query, domain, unique_sources, tuple(candidates[:100]), status, warnings)
 
@@ -4138,7 +4140,9 @@ def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list
     return grouped
 
 
-def select_complete_list_grounding_results(results: list[dict[str, str]], minimum_candidates: int = 3) -> list[dict[str, str]]:
+def select_complete_list_grounding_results(
+    results: list[dict[str, str]], query: str = "", minimum_candidates: int = 3
+) -> list[dict[str, str]]:
     groups: dict[str, list[dict[str, str]]] = {}
     first_indexes: dict[str, int] = {}
     for index, result in enumerate(results):
@@ -4155,7 +4159,9 @@ def select_complete_list_grounding_results(results: list[dict[str, str]], minimu
 
     eligible: list[tuple[tuple[int, int], list[dict[str, str]]]] = []
     for domain, grouped_results in groups.items():
-        candidates = extract_grounded_list_candidates_from_results(grouped_results, limit=minimum_candidates)
+        candidates = extract_grounded_list_candidates_from_results(
+            grouped_results, query=query, limit=minimum_candidates
+        )
         if len(candidates) < minimum_candidates:
             continue
         best_score = min(
@@ -4175,13 +4181,13 @@ def build_search_context_for_query(query: str, results: list[dict[str, str]]) ->
     if not results:
         return build_search_context(results)
 
-    grounding_results = select_complete_list_grounding_results(results)
+    grounding_results = select_complete_list_grounding_results(results, query=query)
     lines = [
         "Web search results follow. Use only the verified candidate strings and sources below.",
         "Do not invent or complete missing names from memory.",
         "Verified candidate strings:",
     ]
-    candidates = extract_grounded_list_candidates_from_results(grounding_results, limit=100)
+    candidates = extract_grounded_list_candidates_from_results(grounding_results, query=query, limit=100)
     for item in candidates:
         candidate_line = f"- {item}"
         if len("\n".join([*lines, candidate_line])) > COMPLETE_LIST_PROMPT_MAX_CHARS - 800:
@@ -4220,8 +4226,8 @@ def is_empty_generated_category_heading(line: str) -> bool:
 def organize_mixed_list_categories(content: str, query: str, results: list[dict[str, str]]) -> str:
     if not should_read_search_result_pages(query) or not results:
         return content
-    grounding_results = select_complete_list_grounding_results(results)
-    candidates = extract_grounded_list_candidates_from_results(grounding_results)
+    grounding_results = select_complete_list_grounding_results(results, query=query)
+    candidates = extract_grounded_list_candidates_from_results(grounding_results, query=query)
     if not candidates:
         return content
     known_categories = categorize_grounded_list_candidates(candidates)
@@ -4304,8 +4310,8 @@ def complete_list_grounding_instruction(query: str, results: list[dict[str, str]
     ]
     if error:
         parts.append("- 取得エラーがある場合も、取得済みの出典本文だけを根拠にしてください。")
-    grounding_results = select_complete_list_grounding_results(results)
-    candidates = extract_grounded_list_candidates_from_results(grounding_results)
+    grounding_results = select_complete_list_grounding_results(results, query=query)
+    candidates = extract_grounded_list_candidates_from_results(grounding_results, query=query)
     if candidates:
         grouped = categorize_grounded_list_candidates(candidates)
         if len([category for category in grouped if category != "未分類"]) > 1:
