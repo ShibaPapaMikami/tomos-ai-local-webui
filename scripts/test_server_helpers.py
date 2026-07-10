@@ -78,7 +78,7 @@ def test_sarashina_ocr_status_payload_shape() -> None:
     assert payload["ok"] is True
     assert payload["id"] == "sarashina2.2-ocr"
     assert payload["model"] == "sbintuitions/sarashina2.2-ocr"
-    assert payload["status"] in {"ready", "needs_dependencies", "needs_model_download"}
+    assert payload["status"] in {"ready", "needs_runner", "needs_dependencies", "needs_model_download"}
     assert isinstance(payload["missing"], list)
     assert payload["externalApi"] is False
 
@@ -826,6 +826,14 @@ def test_mobile_api_access_allows_pc_lan_address_for_management_apis() -> None:
 
 
 def test_mobile_qr_svg_contains_svg_modules() -> None:
+    if server.segno is None:
+        try:
+            server.mobile_qr_svg("http://192.168.1.20:54877/m")
+        except RuntimeError as exc:
+            assert str(exc) == "segno is not installed"
+        else:
+            raise AssertionError("mobile QR SVG should require segno")
+        return
     svg = server.mobile_qr_svg("http://192.168.1.20:54877/m")
     assert svg.startswith("<svg")
     assert 'class="segno"' in svg
