@@ -2424,6 +2424,8 @@ if __name__ == "__main__":
     test_extract_web_urls_excludes_youtube_urls()
     test_web_reader_result_uses_jina_reader_request()
     test_should_read_search_result_pages_detects_complete_list_request()
+    test_extract_complete_list_reads_standalone_official_title_cards()
+    test_extract_complete_list_filters_sections_by_requested_kind()
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail()
