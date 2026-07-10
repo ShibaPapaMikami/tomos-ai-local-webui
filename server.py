@@ -3570,11 +3570,23 @@ def should_read_search_result_pages(query: str) -> bool:
     normalized = str(query or "").strip()
     if not normalized:
         return False
-    return bool(re.search(
-        r"全(?:て|部|件|シリーズ|作品)|すべて|一覧|箇条書き|リスト|網羅|complete list|all (?:series|works|items)",
+    if re.search(
+        r"全(?:て|部|件|シリーズ|作品)|すべて|一覧|箇条書き|網羅|complete list|all (?:series|works|items)",
         normalized,
         re.IGNORECASE,
-    ))
+    ):
+        return True
+    if re.search(r"(?<![ァ-ヶー])リスト", normalized):
+        return True
+    all_request = re.search(
+        r"全([A-Za-z0-9ぁ-んァ-ヶ一-龯々ー]{1,24}?)(?:を|は)(?:教えて|出して|書いて|見せて|一覧にして|箇条書きして|リストにして|網羅して)",
+        normalized,
+    )
+    return bool(
+        all_request
+        and "の" not in all_request.group(1)
+        and all_request.group(1) not in {"体", "然", "力", "面", "世界", "年齢"}
+    )
 
 
 def should_buffer_complete_list_stream(
@@ -3955,7 +3967,11 @@ def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> C
 
 def complete_list_intro(system_prompt: str) -> str:
     text = str(system_prompt or "")
-    ending = "まとめました。" if re.search(r"敬語|丁寧|です[・･]?ます", text) else "まとめたよ。"
+    rejects_politeness = re.search(
+        r"(?:敬語|丁寧語|です[・･]?ます(?:調)?)(?:は|を)?(?:使わない|禁止|不要)",
+        text,
+    )
+    ending = "まとめました。" if not rejects_politeness and re.search(r"敬語|丁寧|です[・･]?ます", text) else "まとめたよ。"
     def setting(pattern: str) -> str:
         match = re.search(pattern, text)
         value = match.group(1).strip() if match else ""

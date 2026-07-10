@@ -1087,11 +1087,28 @@ def test_should_read_search_result_pages_detects_complete_list_request() -> None
     assert server.should_read_search_result_pages("全件を出して")
     assert server.should_read_search_result_pages("全作品を網羅して")
     assert server.should_read_search_result_pages("すべてをリストにして")
+    assert server.should_read_search_result_pages("作品リストを出して")
+    assert server.should_read_search_result_pages("商品リストを出して")
+    assert server.should_read_search_result_pages("リストにして")
+    assert server.should_read_search_result_pages("リストを出して")
+    assert server.should_read_search_result_pages("全タイトルを教えて")
+    assert server.should_read_search_result_pages("全機種を出して")
+    assert server.should_read_search_result_pages("全キャラクターを書いて")
+    assert server.should_read_search_result_pages("作品の全エピソードを一覧にして")
     assert not server.should_read_search_result_pages("ガンダムについて教えて")
     assert not server.should_read_search_result_pages("全")
+    assert not server.should_read_search_result_pages("ミニマリストについて教えて")
+    assert not server.should_read_search_result_pages("スタイリストについて教えて")
+    assert not server.should_read_search_result_pages("スペシャリストについて教えて")
     assert not server.should_read_search_result_pages("安全性について教えて")
     assert not server.should_read_search_result_pages("完全な状態を説明して")
     assert not server.should_read_search_result_pages("全国の人口を教えて")
+    assert not server.should_read_search_result_pages("全体を教えて")
+    assert not server.should_read_search_result_pages("全然わからない")
+    assert not server.should_read_search_result_pages("全力を出して")
+    assert not server.should_read_search_result_pages("全面を出して")
+    assert not server.should_read_search_result_pages("全世界を教えて")
+    assert not server.should_read_search_result_pages("全年齢を教えて")
 
 
 def test_augment_search_results_with_page_text_reads_first_result() -> None:
@@ -1550,6 +1567,15 @@ def test_complete_list_intro_uses_polite_ending_when_prompt_requests_politeness(
         "敬語で丁寧に、です・ます調で答えてください。",
     ])
     assert server.complete_list_intro(prompt) == "まさふみ、ぼくが確認できた内容をまとめました。"
+
+
+def test_complete_list_intro_uses_casual_ending_when_prompt_rejects_politeness() -> None:
+    prompt = "\n".join([
+        "ユーザーの呼び方は「まさふみ」です。",
+        "自分自身を指すときは「ぼく」を使います。",
+        "敬語は使わない。丁寧語は禁止。です・ます調は不要。",
+    ])
+    assert server.complete_list_intro(prompt) == "まさふみ、ぼくが確認できた内容をまとめたよ。"
 
 
 def test_extract_list_followup_links_rejects_image_assets() -> None:
@@ -2276,6 +2302,7 @@ if __name__ == "__main__":
     test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns()
     test_complete_list_evidence_rejects_untrusted_sources()
     test_complete_list_intro_uses_polite_ending_when_prompt_requests_politeness()
+    test_complete_list_intro_uses_casual_ending_when_prompt_rejects_politeness()
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_list_followup_links_rejects_image_assets()
     test_extract_list_followup_links_rejects_other_numeric_detail_paths()
