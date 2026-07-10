@@ -1395,73 +1395,93 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
         "snippet": "動画タイトル: 紹介動画",
         "source": "agent-reach:youtube",
     }
+    github_result = {
+        "title": "GitHubリポジトリ: openai/codex",
+        "url": "https://github.com/openai/codex",
+        "snippet": "ローカルエージェント用ツール",
+        "source": "agent-reach:github",
+    }
+    rss_result = {
+        "title": "RSSフィード: Example Feed",
+        "url": "https://example.com/feed.xml",
+        "snippet": "最新記事",
+        "source": "agent-reach:rss",
+    }
 
     @contextlib.contextmanager
-    def fake_ollama_stream(*args, **kwargs):
+    def fake_ollama_stream(path, payload, *args, **kwargs):
+        query = payload["messages"][-1]["content"]
+        chunks = {
+            "公式サイトの紹介作品を全て一覧": ["確認したよ。"],
+            "YouTube動画を調べて、紹介作品を全て一覧": ["紹介作品は", "三作品です。"],
+            "GitHubリポジトリを調べて": ["GitHub結果は", "一件です。"],
+            "RSS記事を調べて": ["RSS結果は", "一件です。"],
+            "通常チャット": ["通常回答"],
+        }[query]
         yield [
-            json.dumps({"message": {"content": "確認したよ。"}}, ensure_ascii=False).encode("utf-8") + b"\n",
+            *[
+                json.dumps({"message": {"content": chunk}}, ensure_ascii=False).encode("utf-8") + b"\n"
+                for chunk in chunks
+            ],
             b'{"done":true}\n',
         ]
 
-    def fake_ollama_json(*args, **kwargs):
+    def fake_ollama_json(path, payload, *args, **kwargs):
+        assert payload["messages"][-1]["content"] == "公式サイトの紹介作品を全て一覧"
         return {"message": {"role": "assistant", "content": "確認したよ。"}, "done": True}
 
     def fake_internet_results(query, channels):
-        return ([youtube_result], "") if channels == ["youtube"] else ([], "")
+        results = {
+            "youtube": [youtube_result],
+            "github": [github_result],
+            "rss": [rss_result],
+        }
+        return (results.get(channels[0], []), "") if channels else ([], "")
 
-    with patch.object(server, "search_web", lambda query, limit: [general_web_result]), patch.object(
+    def post_events(url: str, query: str, channels: list[str], stream: bool) -> list[dict]:
+        _, body = post_local_chat(url, {
+            "messages": [{"role": "user", "content": query}],
+            "web_search": bool(channels),
+            "internet_layer_channels": channels,
+            "stream": stream,
+        })
+        if stream:
+            return [json.loads(line) for line in body.splitlines() if line]
+        return [json.loads(body)]
+
+    def fake_search_web(query, limit):
+        return [general_web_result] if query == "公式サイトの紹介作品を全て一覧" else []
+
+    with patch.object(server, "search_web", fake_search_web), patch.object(
         server, "augment_search_results_with_page_text", lambda query, results: (results, "")
     ), patch.object(server, "internet_layer_context_results", fake_internet_results), patch.object(
         server, "ollama_stream", fake_ollama_stream
     ), patch.object(server, "ollama_json", fake_ollama_json), local_chat_handler() as url:
-        content_type, stream_body = post_local_chat(url, {
-            "messages": [{"role": "user", "content": "公式サイトの紹介作品を全て一覧"}],
-            "web_search": True,
-            "internet_layer_channels": ["web"],
-            "stream": True,
-        })
-        stream_events = [json.loads(line) for line in stream_body.splitlines() if line]
-        assert content_type == "application/x-ndjson"
+        stream_events = post_events(url, "公式サイトの紹介作品を全て一覧", ["web"], True)
         assert [event["type"] for event in stream_events] == ["start", "chunk", "done"]
-        assert stream_events[1]["content"] == stream_events[2]["message"]["content"]
+        stream_done = stream_events[-1]
         assert stream_events[0]["search"]["results"] == [general_web_result]
-        assert stream_events[2]["search"]["diagnostics"][-1]["mode"] == "deterministic-complete-list"
+        response = post_events(url, "公式サイトの紹介作品を全て一覧", ["web"], False)[0]
+        assert response["message"]["content"] == stream_done["message"]["content"] == stream_events[1]["content"]
+        assert response["search"]["results"] == stream_done["search"]["results"] == [general_web_result]
+        assert response["search"]["diagnostics"] == stream_done["search"]["diagnostics"]
+        assert stream_done["search"]["diagnostics"][-1]["mode"] == "deterministic-complete-list"
 
-        content_type, response_body = post_local_chat(url, {
-            "messages": [{"role": "user", "content": "公式サイトの紹介作品を全て一覧"}],
-            "web_search": True,
-            "internet_layer_channels": ["web"],
-            "stream": False,
-        })
-        response = json.loads(response_body)
-        assert content_type == "application/json"
-        assert response["message"]["content"] == stream_events[1]["content"]
-        assert response["search"]["results"] == [general_web_result]
-        assert response["search"]["diagnostics"][-1]["mode"] == "deterministic-complete-list"
-
-        @contextlib.contextmanager
-        def fake_youtube_stream(*args, **kwargs):
-            yield [
-                json.dumps({"message": {"content": "紹介作品は"}}, ensure_ascii=False).encode("utf-8") + b"\n",
-                json.dumps({"message": {"content": "三作品です。"}}, ensure_ascii=False).encode("utf-8") + b"\n",
-                b'{"done":true}\n',
-            ]
-
-        with patch.object(server, "ollama_stream", fake_youtube_stream):
-            _, youtube_stream_body = post_local_chat(url, {
-                "messages": [{"role": "user", "content": "YouTube動画を調べて、紹介作品を全て一覧"}],
-                "web_search": True,
-                "internet_layer_channels": ["youtube"],
-                "stream": True,
-            })
-        youtube_events = [json.loads(line) for line in youtube_stream_body.splitlines() if line]
-        assert [event["type"] for event in youtube_events] == ["start", "chunk", "chunk", "done"]
-        assert [event["content"] for event in youtube_events[1:3]] == ["紹介作品は", "三作品です。"]
-        assert youtube_events[-1]["message"]["content"] == "紹介作品は三作品です。"
-        assert not any(
-            diagnostic.get("mode") == "deterministic-complete-list"
-            for diagnostic in youtube_events[-1]["search"]["diagnostics"]
-        )
+        for query, channels, expected_chunks, results in (
+            ("YouTube動画を調べて、紹介作品を全て一覧", ["youtube"], ["紹介作品は", "三作品です。"], [youtube_result]),
+            ("GitHubリポジトリを調べて", ["github"], ["GitHub結果は", "一件です。"], [github_result]),
+            ("RSS記事を調べて", ["rss"], ["RSS結果は", "一件です。"], [rss_result]),
+            ("通常チャット", [], ["通常回答"], []),
+        ):
+            events = post_events(url, query, channels, True)
+            assert [event["type"] for event in events] == ["start"] + ["chunk"] * len(expected_chunks) + ["done"]
+            assert [event["content"] for event in events[1:-1]] == expected_chunks
+            assert events[-1]["message"]["content"] == "".join(expected_chunks)
+            assert events[-1]["search"]["results"] == results
+            assert not any(
+                diagnostic.get("mode") == "deterministic-complete-list"
+                for diagnostic in events[-1]["search"]["diagnostics"]
+            )
 
 
 def test_complete_list_evidence_prefers_more_complete_trusted_source() -> None:
@@ -2185,6 +2205,8 @@ if __name__ == "__main__":
     test_complete_list_stream_buffers_raw_model_chunks()
     test_normal_web_stream_still_emits_model_chunks()
     test_complete_list_finalizer_returns_same_content_for_both_api_modes()
+    test_complete_list_stream_excludes_specialized_channels_and_sources()
+    test_chat_http_complete_list_events_and_youtube_stream_regression()
     test_complete_list_evidence_prefers_more_complete_trusted_source()
     test_complete_list_evidence_rejects_navigation_pages()
     test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns()
