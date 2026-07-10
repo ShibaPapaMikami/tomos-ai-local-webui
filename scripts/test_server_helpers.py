@@ -1205,6 +1205,47 @@ def test_extract_grounded_list_candidates_rejects_fragments_and_categories() -> 
     assert all("映像作品" not in item for item in candidates)
 
 
+def test_extract_grounded_list_candidates_reads_markdown_link_headings() -> None:
+    candidates = server.extract_grounded_list_candidates_from_results([
+        {
+            "title": "Webページ本文: 製作年順インデックス",
+            "url": "https://example.com/works",
+            "snippet": "\n".join([
+                "## [機動戦士ガンダム](https://example.com/works/first)",
+                "【TV】全43話",
+                "## [機動戦士Ζガンダム](https://example.com/works/zeta)",
+                "【TV】全50話",
+                "[![Image: first](https://example.com/first.jpg)](https://example.com/works/first)",
+            ]),
+        },
+    ])
+    assert candidates == ["機動戦士ガンダム", "機動戦士Ζガンダム"]
+
+
+def test_complete_list_search_context_is_compact_and_keeps_linked_titles() -> None:
+    long_noise = "説明文です。" * 5000
+    context = server.build_search_context_for_query(
+        "全シリーズを箇条書きして",
+        [
+            {
+                "title": "Webページ本文: 公式一覧",
+                "url": "https://example.com/works",
+                "snippet": "\n".join([
+                    "## [星の旅人](https://example.com/works/first)",
+                    "【TV】全12話",
+                    "## [星の旅人Z](https://example.com/works/zeta)",
+                    "【TV】全24話",
+                    long_noise,
+                ]),
+            },
+        ],
+    )
+    assert "星の旅人" in context
+    assert "星の旅人Z" in context
+    assert "説明文です。説明文です。説明文です。" not in context
+    assert len(context) <= server.COMPLETE_LIST_PROMPT_MAX_CHARS
+
+
 def test_complete_list_grounding_instruction_separates_mixed_categories_generically() -> None:
     instruction = server.complete_list_grounding_instruction(
         "シリーズを箇条書きして",
@@ -1226,8 +1267,9 @@ def test_complete_list_grounding_instruction_separates_mixed_categories_generica
     assert "ゲーム" in instruction
     assert "書籍・漫画・小説" in instruction
     assert "商品・模型" in instruction
-    assert "ゲーム「星の旅人バトル」" in instruction
-    assert "模型 星の旅人プラモデル" in instruction
+    assert "確認済み候補:" not in instruction
+    assert "ゲーム「星の旅人バトル」" not in instruction
+    assert "模型 星の旅人プラモデル" not in instruction
 
 
 def test_organize_mixed_list_categories_splits_generated_bullets() -> None:
@@ -1317,6 +1359,28 @@ def test_organize_mixed_list_categories_drops_metadata_and_empty_category_headin
     assert "### 未分類" not in organized
 
 
+def test_organize_mixed_list_categories_keeps_unclassified_titles() -> None:
+    content = "\n".join([
+        "まさふみ、確認できた項目をまとめるね。",
+        "",
+        "## 確認できた項目",
+        "- 機動戦士ガンダム",
+        "- 機動戦士Ζガンダム",
+        "- ゲーム『ガンダムバトル』",
+        "- 模型 ガンダムモデル",
+    ])
+    organized = server.organize_mixed_list_categories(
+        content,
+        "全シリーズを箇条書きして",
+        [{
+            "title": "Webページ本文: シリーズ一覧",
+            "url": "https://example.com/series",
+            "snippet": content,
+        }],
+    )
+    assert organized == content
+
+
 def test_build_search_context_blocks_unverified_list_completion() -> None:
     context = server.build_search_context([{
         "title": "ガンダムシリーズ一覧",
@@ -1367,8 +1431,8 @@ def test_complete_list_grounding_instruction_keeps_character_generation() -> Non
     assert "直前のAI回答、一般知識、推測、連想で項目を増やさない" in instruction
     assert "途中で切れた断片" in instruction
     assert "通常のマイキャラの口調" in instruction
-    assert "確認済み候補" in instruction
-    assert "- 機動戦士ガンダム" in instruction
+    assert "確認済み候補:" not in instruction
+    assert "- 機動戦士ガンダム" not in instruction
 
 
 def test_extract_github_repos_reads_owner_repo() -> None:
@@ -1705,9 +1769,12 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
+    test_extract_grounded_list_candidates_reads_markdown_link_headings()
+    test_complete_list_search_context_is_compact_and_keeps_linked_titles()
     test_complete_list_grounding_instruction_separates_mixed_categories_generically()
     test_organize_mixed_list_categories_splits_generated_bullets()
     test_organize_mixed_list_categories_drops_metadata_and_empty_category_headings()
+    test_organize_mixed_list_categories_keeps_unclassified_titles()
     test_build_search_context_blocks_unverified_list_completion()
     test_remove_unverified_list_items_filters_hallucinated_gundam_titles()
     test_complete_list_grounding_instruction_keeps_character_generation()

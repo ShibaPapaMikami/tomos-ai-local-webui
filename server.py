@@ -3449,6 +3449,7 @@ YOUTUBE_URL_RE = re.compile(
 WEB_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 WEB_READER_TIMEOUT_SECONDS = 15
 WEB_READER_MAX_CHARS = 24000
+COMPLETE_LIST_PROMPT_MAX_CHARS = 6000
 GITHUB_REPO_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", re.IGNORECASE)
 GITHUB_TIMEOUT_SECONDS = 20
 RSS_TIMEOUT_SECONDS = 15
@@ -3761,11 +3762,17 @@ def clean_grounded_list_candidate(raw: str) -> str:
     item = str(raw or "").strip()
     if not item:
         return ""
-    if re.match(r"^#{1,6}\s+", item):
-        return ""
     item = re.sub(r"^(?:[*\-・•]|\d+[.)．、])\s*", "", item).strip()
-    if re.match(r"^#{1,6}\s+", item):
+    heading_match = re.match(r"^#{1,6}\s+(.+)$", item)
+    if heading_match:
+        item = heading_match.group(1).strip()
+        if not re.fullmatch(r"\[[^\]]+\]\((?:https?://|/)[^)]+\)", item):
+            return ""
+    if item.startswith(("![", "[![")):
         return ""
+    markdown_link_match = re.fullmatch(r"\[([^\]]+)\]\((?:https?://|/)[^)]+\)", item)
+    if markdown_link_match:
+        item = markdown_link_match.group(1).strip()
     item = re.sub(r"^(?:Webページ本文|YouTube動画|動画タイトル|Title)\s*[:：]\s*", "", item).strip()
     item = item.strip(" -・•*`　。、")
     item = re.sub(r"\s+", " ", item)
@@ -3783,6 +3790,16 @@ def clean_grounded_list_candidate(raw: str) -> str:
     if re.search(r"^(published time|markdown content|title|url|source|snippet|出典|脚注|注釈|関連項目|概要)\s*[:：]?", item, re.IGNORECASE):
         return ""
     if re.search(r"wikipedia|フリー百科事典|記事のポイント|情報源", item, re.IGNORECASE):
+        return ""
+    if re.fullmatch(r"【[^】]{1,16}】(?:全\d+(?:話|本|巻|冊))?", item, re.IGNORECASE):
+        return ""
+    if re.fullmatch(r"全\d+(?:話|本|巻|冊)", item, re.IGNORECASE):
+        return ""
+    if re.fullmatch(r"\d{4}年.*(?:配信|放送|公開|発売)?", item):
+        return ""
+    if re.search(r"\.(?:jpe?g|png|gif|webp|svg)(?:\?.*)?$", item, re.IGNORECASE):
+        return ""
+    if re.fullmatch(r"MODULE\.\d+\s*//?", item, re.IGNORECASE):
         return ""
     if any(marker in item for marker in ("http://", "https://", "一覧", "全体", "あらすじ", "公式サイト", "ページ")):
         return ""
@@ -3837,6 +3854,45 @@ def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list
     return grouped
 
 
+def build_search_context_for_query(query: str, results: list[dict[str, str]]) -> str:
+    if not should_read_search_result_pages(query):
+        return build_search_context(results)
+    if not results:
+        return build_search_context(results)
+
+    lines = [
+        "Web search results follow. Use only the verified candidate strings and sources below.",
+        "Do not invent or complete missing names from memory.",
+        "Verified candidate strings:",
+    ]
+    candidates = extract_grounded_list_candidates_from_results(results, limit=100)
+    for item in candidates:
+        candidate_line = f"- {item}"
+        if len("\n".join([*lines, candidate_line])) > COMPLETE_LIST_PROMPT_MAX_CHARS - 800:
+            break
+        lines.append(candidate_line)
+
+    lines.extend(["", "Sources:"])
+    for index, result in enumerate(results[:10], start=1):
+        title = str(result.get("title") or "").strip()
+        url = str(result.get("url") or "").strip()
+        source_line = f"[{index}] {title} | {url}"
+        if len("\n".join([*lines, source_line])) > COMPLETE_LIST_PROMPT_MAX_CHARS:
+            break
+        lines.append(source_line)
+
+    if not candidates:
+        lines.extend(["", "Retrieved excerpts:"])
+        for result in results[:3]:
+            snippet = str(result.get("snippet") or "").strip()[:1200]
+            if not snippet:
+                continue
+            if len("\n".join([*lines, snippet])) > COMPLETE_LIST_PROMPT_MAX_CHARS:
+                break
+            lines.append(snippet)
+    return "\n".join(lines)[:COMPLETE_LIST_PROMPT_MAX_CHARS].strip()
+
+
 def is_empty_generated_category_heading(line: str) -> bool:
     stripped = str(line or "").strip()
     if not stripped.startswith("## "):
@@ -3882,7 +3938,7 @@ def organize_mixed_list_categories(content: str, query: str, results: list[dict[
             item = cleaned_item
             category = grounded_list_candidate_category(item)
             if category == "未分類":
-                continue
+                return content
             grouped.setdefault(category, []).append(f"- {item}")
             continue
         kept_non_bullets.append(line)
@@ -3933,9 +3989,6 @@ def complete_list_grounding_instruction(query: str, results: list[dict[str, str]
         parts.append("- 取得エラーがある場合も、取得済みの出典本文だけを根拠にしてください。")
     candidates = extract_grounded_list_candidates_from_results(results)
     if candidates:
-        parts.append("")
-        parts.append("確認済み候補:")
-        parts.extend(f"- {item}" for item in candidates[:80])
         grouped = categorize_grounded_list_candidates(candidates)
         if len(grouped) > 1:
             parts.append("")
@@ -3945,7 +3998,7 @@ def complete_list_grounding_instruction(query: str, results: list[dict[str, str]
                 items = grouped.get(category)
                 if not items:
                     continue
-                parts.append(f"- {category}: {', '.join(items[:20])}")
+                parts.append(f"- {category}")
     return "\n".join(parts)
 
 
@@ -5421,7 +5474,7 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 })
             if use_web_search:
-                search_context = build_search_context(search_results)
+                search_context = build_search_context_for_query(query, search_results)
                 if search_error:
                     search_context += f"\n\nSearch error: {search_error}"
                 prompt_messages.append({"role": "system", "content": search_context})
