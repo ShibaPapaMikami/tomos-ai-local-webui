@@ -1100,6 +1100,12 @@ def test_should_read_search_result_pages_detects_complete_list_request() -> None
     assert server.should_read_search_result_pages("このゲームに登場する全キャラクターを教えて")
     assert server.should_read_search_result_pages("公開された全作品を出して")
     assert server.should_read_search_result_pages("一覧に含まれる全項目を書いて")
+    assert server.should_read_search_result_pages("選べる全キャラクターを教えて")
+    assert server.should_read_search_result_pages("購入できる全商品を教えて")
+    assert server.should_read_search_result_pages("登場する全タイトルを一覧にして")
+    assert server.should_read_search_result_pages("全機種を出して")
+    assert server.should_read_search_result_pages("全項目を書いて")
+    assert server.should_read_search_result_pages("全記事を見せて")
     assert server.should_read_search_result_pages("作品の全エピソードを一覧にして")
     assert not server.should_read_search_result_pages("ガンダムについて教えて")
     assert not server.should_read_search_result_pages("全")
@@ -1125,6 +1131,11 @@ def test_should_read_search_result_pages_detects_complete_list_request() -> None
     assert not server.should_read_search_result_pages("全貌を教えて")
     assert not server.should_read_search_result_pages("安全性を教えて")
     assert not server.should_read_search_result_pages("完全版を教えて")
+    assert not server.should_read_search_result_pages("全文を出して")
+    assert not server.should_read_search_result_pages("全身像を見せて")
+    assert not server.should_read_search_result_pages("全景を見せて")
+    assert not server.should_read_search_result_pages("安全商品について教えて")
+    assert not server.should_read_search_result_pages("全商品をミニマリストに")
 
 
 def test_augment_search_results_with_page_text_reads_first_result() -> None:
@@ -1591,6 +1602,9 @@ def test_complete_list_intro_uses_casual_ending_when_prompt_rejects_politeness()
         "敬語を使わず答えて。",
         "丁寧にしないで答えて。",
         "です・ます調は避けて。",
+        "敬語なしで。",
+        "丁寧ではなく自然に。",
+        "です・ます調じゃなくて。",
     ):
         prompt = "\n".join([
             "ユーザーの呼び方は「まさふみ」です。",

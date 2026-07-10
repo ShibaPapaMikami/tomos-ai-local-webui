@@ -3566,22 +3566,6 @@ def should_auto_use_external_research(query: str) -> bool:
     ))
 
 
-def complete_list_all_left_context_is_valid(query: str, start: int) -> bool:
-    if start <= 0:
-        return True
-    left = query[:start]
-    if left[-1].isspace() or left[-1] in "、。,.，．・:：;；!?！？/／「」『』（）()[]【】":
-        return True
-    if left[-1] in "はがをにへでとのもやか":
-        return True
-    return left.endswith(("する", "した", "された", "れる", "れた", "いる", "ある", "含む", "含まれる"))
-
-
-def complete_list_all_target_is_valid(target: str) -> bool:
-    excluded_prefixes = ("体", "年齢", "国", "容", "貌", "性", "然", "力", "面", "世界")
-    return bool(target and "の" not in target and not target.startswith(excluded_prefixes))
-
-
 def should_read_search_result_pages(query: str) -> bool:
     normalized = str(query or "").strip()
     if not normalized:
@@ -3592,19 +3576,29 @@ def should_read_search_result_pages(query: str) -> bool:
         re.IGNORECASE,
     ):
         return True
-    if re.search(
-        r"(?<![ァ-ヶー])リスト(?=$|アップ|[\s、。,.，．・:：;；!?！？/／「」『』（）()\[\]【】]|(?:は|が|を|に|へ|で|と|の|も|や|か|から|まで|より|だけ|しか|でも|って))",
-        normalized,
-    ):
+    list_suffix = r"(?=$|アップ|[\s、。,.，．・:：;；!?！？/／「」『』（）()\[\]【】]|(?:は|が|を|に|へ|で|と|の|も|や|か|から|まで|より|だけ|しか|でも|って))"
+    if re.search(rf"(?<![ァ-ヶー])リスト{list_suffix}", normalized):
         return True
-    for marker in re.finditer(r"全(?:て|部|件|シリーズ|作品)", normalized):
-        if complete_list_all_left_context_is_valid(normalized, marker.start()):
+    request_pattern = rf"(?:教えて|出して|書いて|見せて|一覧|箇条書き|(?<![ァ-ヶー])リスト{list_suffix}|網羅|まとめ)"
+    standalone_boundaries = "、。,.，．・:：;；!?！？/／「」『』（）()[]【】はがをにへでとのもやか"
+    for marker in re.finditer(r"全(?:部|て|件)", normalized):
+        left_ok = marker.start() == 0 or normalized[marker.start() - 1].isspace() or normalized[marker.start() - 1] in standalone_boundaries
+        tail = normalized[marker.end():]
+        right_ok = not tail or tail[0].isspace() or tail[0] in standalone_boundaries or re.match(request_pattern, tail)
+        if left_ok and right_ok:
             return True
-    for candidate in re.finditer(
-        r"全([A-Za-z0-9ぁ-んァ-ヶ一-龯々ー]{1,24}?)(?:を|は)(?:教えて|出して|書いて|見せて|一覧にして|箇条書きして|リストにして|網羅して)",
-        normalized,
-    ):
-        if complete_list_all_left_context_is_valid(normalized, candidate.start()) and complete_list_all_target_is_valid(candidate.group(1)):
+    enumerable_targets = (
+        "キャラクター", "エピソード", "バージョン", "シリーズ", "タイトル", "メンバー",
+        "アルバム", "イベント", "商品", "製品", "項目", "記事", "候補", "種類", "モデル",
+        "プラン", "機能", "店舗", "楽曲", "映画", "動画", "ゲーム", "書籍", "型番", "名称",
+        "作品", "機種", "話", "曲", "巻", "章", "回",
+    )
+    target_pattern = "|".join(re.escape(target) for target in enumerable_targets)
+    for candidate in re.finditer(rf"全(?:{target_pattern})", normalized):
+        if candidate.start() > 0 and normalized[candidate.start() - 1] in "安完":
+            continue
+        tail = normalized[candidate.end():candidate.end() + 24]
+        if re.search(rf"^[^。！？\n]{{0,16}}{request_pattern}", tail):
             return True
     return False
 
@@ -3988,7 +3982,7 @@ def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> C
 def complete_list_intro(system_prompt: str) -> str:
     text = str(system_prompt or "")
     rejects_politeness = re.search(
-        r"(?:敬語|丁寧(?:語)?|です[・･]?ます(?:調)?)(?:は|を|に)?(?:使わない|使わず|禁止|不要|避ける|避けて|しない)",
+        r"(?:敬語|丁寧(?:語)?|です[・･]?ます(?:調)?)(?:は|を|に)?(?:なし|使わない|使わず|ではなく|じゃなく(?:て)?|避け|しない|禁止|不要)",
         text,
     )
     ending = "まとめました。" if not rejects_politeness and re.search(r"敬語|丁寧|です[・･]?ます", text) else "まとめたよ。"
