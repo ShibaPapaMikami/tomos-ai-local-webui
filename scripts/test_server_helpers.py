@@ -1138,6 +1138,30 @@ def test_augment_search_results_with_page_text_reads_multiple_prioritized_result
     assert len(results) == 7
 
 
+def test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail() -> None:
+    calls = []
+
+    def failing_reader(url):
+        calls.append(url)
+        if len(calls) == 1:
+            return None
+        raise RuntimeError("reader failed")
+
+    server.augment_search_results_with_page_text(
+        "ガンダムの全シリーズを箇条書きして",
+        [
+            {"title": f"一覧ページ {index}", "url": f"https://example.com/works/{index}", "snippet": "一覧"}
+            for index in range(1, 5)
+        ],
+        reader=failing_reader,
+    )
+    assert calls == [
+        "https://example.com/works/1",
+        "https://example.com/works/2",
+        "https://example.com/works/3",
+    ]
+
+
 def test_augment_search_results_with_page_text_follows_list_page_links() -> None:
     calls = []
     pages = {
@@ -1203,6 +1227,17 @@ def test_complete_list_evidence_rejects_navigation_pages() -> None:
     ]
     evidence = server.build_complete_list_evidence("全シリーズを箇条書きして", results)
     assert all("ログイン" not in item for item in evidence.candidates)
+
+
+def test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns() -> None:
+    source = complete_list_page(
+        "https://official.example/works",
+        [f"作品{index:03d}" for index in range(1, 102)],
+    )
+    evidence = server.build_complete_list_evidence("全作品を箇条書きして", [source])
+    assert len(server.rank_complete_list_sources(server.complete_list_source_groups([source]))[0][2]) == 101
+    assert len(evidence.candidates) == 100
+    assert evidence.warnings == ("候補が100件を超えたため、100件まで表示します。",)
 
 
 def test_extract_list_followup_links_rejects_image_assets() -> None:
@@ -1884,8 +1919,10 @@ if __name__ == "__main__":
     test_should_read_search_result_pages_detects_complete_list_request()
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
+    test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail()
     test_complete_list_evidence_prefers_more_complete_trusted_source()
     test_complete_list_evidence_rejects_navigation_pages()
+    test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns()
     test_augment_search_results_with_page_text_follows_list_page_links()
     test_extract_list_followup_links_rejects_image_assets()
     test_extract_list_followup_links_rejects_other_numeric_detail_paths()

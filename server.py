@@ -3657,6 +3657,7 @@ def augment_search_results_with_page_text(
         reader = web_reader_result
     augmented = list(results)
     errors: list[str] = []
+    attempt_count = 0
     read_count = 0
     seen_urls = {str(result.get("url") or "").strip() for result in augmented}
     prioritized_results = [
@@ -3669,6 +3670,7 @@ def augment_search_results_with_page_text(
         url = str(result.get("url") or "").strip()
         if not url or not url.startswith(("http://", "https://")):
             continue
+        attempt_count += 1
         try:
             page_result = reader(url)
             if page_result:
@@ -3681,7 +3683,7 @@ def augment_search_results_with_page_text(
                 read_count += 1
         except Exception as exc:
             errors.append(f"Web本文取得: {exc}")
-        if read_count >= max(1, limit):
+        if attempt_count >= max(1, limit):
             break
     return augmented, " / ".join(errors)
 
@@ -3816,7 +3818,7 @@ def grounded_list_candidate_category(item: str) -> str:
     return "未分類"
 
 
-def extract_grounded_list_candidates_from_results(results: list[dict[str, str]], limit: int = 80) -> list[str]:
+def extract_grounded_list_candidates_from_results(results: list[dict[str, str]], limit: int = 101) -> list[str]:
     candidates: list[str] = []
     seen: set[str] = set()
     for result in results:
