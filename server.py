@@ -3609,9 +3609,10 @@ def web_result_priority_score(result: dict[str, str], index: int = 0) -> tuple[i
     title = str(result.get("title") or "").lower()
     url = str(result.get("url") or "").lower()
     score = 50
-    if any(marker in url for marker in ("official", "gundam-official.com", ".go.jp", ".gov", ".edu")):
+    authority_band = complete_list_authority_band(url)
+    if authority_band == 0:
         score -= 45
-    if "wikipedia.org" in url:
+    if authority_band == 1:
         score -= 22
     if any(marker in url for marker in ("wiki", "dictionary", "encyclopedia")):
         score -= 12
@@ -3818,7 +3819,11 @@ def clean_grounded_list_candidate(raw: str) -> str:
         return ""
     if re.fullmatch(r"全\d+(?:話|本|巻|冊)", item, re.IGNORECASE):
         return ""
-    if re.fullmatch(r"\d{4}年.*(?:配信|放送|公開|発売)?", item):
+    if re.fullmatch(r"\d{4}(?:年)?(?:[-/]\d{1,2}(?:[-/]\d{1,2})?)?", item):
+        return ""
+    if re.fullmatch(r"(?:全|第)?\d+(?:話|本|巻|冊|回|期)", item):
+        return ""
+    if re.match(r"^(?:監督|会社|制作|製作|放送局|配給|公開日|発売日|ナビゲーション)\s*(?:[:：]|$)", item):
         return ""
     if re.search(r"\.(?:jpe?g|png|gif|webp|svg)(?:\?.*)?$", item, re.IGNORECASE):
         return ""
@@ -3846,7 +3851,7 @@ def grounded_list_candidate_category(item: str) -> str:
     return "未分類"
 
 
-def extract_grounded_list_candidates_from_results(results: list[dict[str, str]], limit: int = 101) -> list[str]:
+def extract_grounded_list_candidates_from_results(results: list[dict[str, str]], limit: int | None = None) -> list[str]:
     candidates: list[str] = []
     seen: set[str] = set()
     for result in results:
@@ -3862,7 +3867,7 @@ def extract_grounded_list_candidates_from_results(results: list[dict[str, str]],
                     continue
                 seen.add(key)
                 candidates.append(item)
-                if len(candidates) >= limit:
+                if limit is not None and len(candidates) >= limit:
                     return candidates
     return candidates
 
@@ -3877,10 +3882,19 @@ class CompleteListEvidence:
     warnings: tuple[str, ...]
 
 
+def complete_list_host(value: str) -> str:
+    parsed = urllib.parse.urlparse(value if "://" in value else f"//{value}")
+    return (parsed.hostname or "").rstrip(".").lower()
+
+
 def complete_list_authority_band(domain: str) -> int:
-    if any(marker in domain for marker in ("official", ".go.jp", ".gov", ".edu")):
+    host = complete_list_host(domain)
+    labels = host.split(".")
+    suffix = ".".join(labels[-2:])
+    registrable = labels[-3] if suffix in {"co.jp", "ne.jp", "or.jp", "ac.jp", "com.au", "co.uk", "org.uk"} and len(labels) >= 3 else labels[-2] if len(labels) >= 2 else ""
+    if host.endswith(".go.jp") or host.endswith(".gov") or host.endswith(".edu") or registrable == "official" or registrable.endswith("-official"):
         return 0
-    if any(marker in domain for marker in ("wikipedia.org", "wiki", "encyclopedia")):
+    if host == "wikipedia.org" or host.endswith(".wikipedia.org"):
         return 1
     return 2
 
@@ -3895,7 +3909,7 @@ def complete_list_source_groups(results: list[dict[str, str]]) -> dict[str, dict
             continue
         if re.search(r"ログイン|アカウント作成|login|sign.?up|url短縮|youtube playlist", f"{title} {url}", re.I):
             continue
-        domain = urllib.parse.urlparse(url).netloc.lower()
+        domain = complete_list_host(url)
         if domain:
             group = groups.setdefault(domain, {"order": order, "results": []})
             group["results"].append(result)
@@ -3921,7 +3935,11 @@ def structured_candidate_cells(line: str) -> list[str]:
     if re.match(r"^#{1,6}\s+\[[^\]]+\]\((?:https?://|/)[^)]+\)$", stripped):
         return [stripped]
     if "|" in stripped and not re.fullmatch(r"[|:\-\s]+", stripped):
-        return [cell.strip() for cell in stripped.split("|") if cell.strip()]
+        cells = [cell.strip() for cell in stripped.split("|") if cell.strip()]
+        links = [cell for cell in cells if re.search(r"\[[^\]]+\]\((?:https?://|/)[^)]+\)", cell)]
+        if links:
+            return links
+        return [cell for cell in cells if clean_grounded_list_candidate(cell)][:1]
     return []
 
 
@@ -3931,24 +3949,28 @@ def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> C
         return CompleteListEvidence(query, "", (), (), "unavailable", ("根拠ページ本文を取得できませんでした。",))
     domain, source_results, candidates = ranked[0]
     status = "source-backed" if len(candidates) >= 3 else "partial" if candidates else "unavailable"
-    unique_sources = tuple({result["url"]: result for result in source_results if result.get("url")}.values())
+    unique_sources = tuple({result["url"]: result for result in source_results if result.get("url") and extract_grounded_list_candidates_from_results([result])}.values())
     warnings = ("候補が100件を超えたため、100件まで表示します。",) if len(candidates) > 100 else ()
     return CompleteListEvidence(query, domain, unique_sources, tuple(candidates[:100]), status, warnings)
 
 
-_COMPLETE_LIST_APPROVED_INTROS = frozenset({
-    "確認したよ。",
-    "調べたよ。",
-})
+def complete_list_intro(system_prompt: str) -> str:
+    text = str(system_prompt or "")
+    def setting(pattern: str) -> str:
+        match = re.search(pattern, text)
+        value = match.group(1).strip() if match else ""
+        return value if re.fullmatch(r"[A-Za-z0-9ぁ-んァ-ヶ一-龯ー]{1,24}", value) else ""
+    user_name = setting(r"ユーザーの呼び方は「([^」\n]{1,24})」です。")
+    self_name = setting(r"自分自身を指すときは「([^」\n]{1,24})」を")
+    if user_name and self_name:
+        return f"{user_name}、{self_name}が確認できた内容をまとめたよ。"
+    if user_name:
+        return f"{user_name}、確認できた内容をまとめたよ。"
+    return f"{self_name}が確認できた内容をまとめたよ。" if self_name else "確認できた内容をまとめたよ。"
 
 
-def safe_complete_list_intro(content: str, evidence: CompleteListEvidence) -> str:
-    intro = (content or "").strip()
-    return intro if intro in _COMPLETE_LIST_APPROVED_INTROS else ""
-
-
-def render_complete_list_answer(character_intro: str, evidence: CompleteListEvidence) -> str:
-    intro = safe_complete_list_intro(character_intro, evidence) or "確認できた内容をまとめたよ。"
+def render_complete_list_answer(system_prompt: str, evidence: CompleteListEvidence) -> str:
+    intro = complete_list_intro(system_prompt)
     if evidence.status == "unavailable":
         return f"{intro}\n\n## 確認できていない点\n- 一覧項目を抽出できませんでした。対象ページのURLを指定して再度お試しください。"
     lines = [intro, "", f"## 確認できた項目（{len(evidence.candidates)}件）"]
@@ -3983,9 +4005,9 @@ def complete_list_diagnostic(evidence: CompleteListEvidence) -> dict[str, object
     }
 
 
-def finalize_complete_list_answer(character_intro, results, evidence):
+def finalize_complete_list_answer(system_prompt, results, evidence):
     return (
-        render_complete_list_answer(character_intro, evidence),
+        render_complete_list_answer(system_prompt, evidence),
         public_search_results_for_answer(results, evidence),
         complete_list_diagnostic(evidence),
     )
@@ -4008,7 +4030,7 @@ def select_complete_list_grounding_results(results: list[dict[str, str]], minimu
         if not title.startswith("Webページ本文:") and source != "agent-reach:web":
             continue
         url = str(result.get("url") or "").strip()
-        domain = urllib.parse.urlparse(url).netloc.lower()
+        domain = complete_list_host(url)
         if not domain:
             continue
         groups.setdefault(domain, []).append(result)
@@ -5799,7 +5821,7 @@ class Handler(BaseHTTPRequestHandler):
                     content = clean_translation_output(content)
                 elif complete_list_evidence:
                     content, answer_search_results, _ = finalize_complete_list_answer(
-                        content,
+                        system_prompt,
                         search_results,
                         complete_list_evidence,
                     )
@@ -5854,7 +5876,7 @@ class Handler(BaseHTTPRequestHandler):
                 message = {**message, "content": clean_translation_output(str(message.get("content", "")))}
             elif complete_list_evidence and isinstance(message, dict):
                 content, answer_search_results, _ = finalize_complete_list_answer(
-                    str(message.get("content", "")),
+                    system_prompt,
                     search_results,
                     complete_list_evidence,
                 )

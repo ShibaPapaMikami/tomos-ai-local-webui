@@ -1275,7 +1275,8 @@ def test_complete_list_diagnostic_describes_partial_as_incomplete() -> None:
 
 def test_complete_list_sources_deduplicate_urls() -> None:
     source = complete_list_page("https://official.example/works", ["星の旅人", "星の旅人Z", "星の旅人ZZ"])
-    evidence = server.build_complete_list_evidence("全シリーズ", [source, dict(source)])
+    empty = {**source, "url": "https://official.example/works/metadata", "snippet": "2024年\n監督：架空 太郎"}
+    evidence = server.build_complete_list_evidence("全シリーズ", [source, dict(source), empty])
     assert [result["url"] for result in evidence.source_results] == ["https://official.example/works"]
 
 
@@ -1324,9 +1325,11 @@ def test_normal_web_stream_still_emits_model_chunks() -> None:
 
 def test_complete_list_finalizer_returns_same_content_for_both_api_modes() -> None:
     evidence = complete_list_test_evidence(["星の旅人", "星の旅人Z", "星の旅人ZZ"])
-    first = server.finalize_complete_list_answer("まとめるね。", [], evidence)
-    second = server.finalize_complete_list_answer("まとめるね。", [], evidence)
+    system_prompt = "ユーザーの呼び方は「まさふみ」です。\n自分自身を指すときは「ぼく」を使います。"
+    first = server.finalize_complete_list_answer(system_prompt, [], evidence)
+    second = server.finalize_complete_list_answer(system_prompt, [], evidence)
     assert first == second
+    assert first[0].startswith("まさふみ、ぼくが確認できた内容をまとめたよ。")
     assert first[2]["mode"] == "deterministic-complete-list"
 
 
@@ -1428,7 +1431,7 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
 
     def fake_ollama_json(path, payload, *args, **kwargs):
         assert payload["messages"][-1]["content"] == "公式サイトの紹介作品を全て一覧"
-        return {"message": {"role": "assistant", "content": "確認したよ。"}, "done": True}
+        return {"message": {"role": "assistant", "content": "調べたよ。"}, "done": True}
 
     def fake_internet_results(query, channels):
         results = {
@@ -1441,6 +1444,7 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
     def post_events(url: str, query: str, channels: list[str], stream: bool) -> list[dict]:
         _, body = post_local_chat(url, {
             "messages": [{"role": "user", "content": query}],
+            "system": "ユーザーの呼び方は「まさふみ」です。自分自身を指すときは「ぼく」を使います。",
             "web_search": bool(channels),
             "internet_layer_channels": channels,
             "stream": stream,
@@ -1463,6 +1467,7 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
         assert stream_events[0]["search"]["results"] == [general_web_result]
         response = post_events(url, "公式サイトの紹介作品を全て一覧", ["web"], False)[0]
         assert response["message"]["content"] == stream_done["message"]["content"] == stream_events[1]["content"]
+        assert stream_done["message"]["content"].startswith("まさふみ、ぼくが確認できた内容をまとめたよ。")
         assert response["search"]["results"] == stream_done["search"]["results"] == [general_web_result]
         assert response["search"]["diagnostics"] == stream_done["search"]["diagnostics"]
         assert stream_done["search"]["diagnostics"][-1]["mode"] == "deterministic-complete-list"
@@ -1507,8 +1512,13 @@ def test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warn
         "https://official.example/works",
         [f"作品{index:03d}" for index in range(1, 102)],
     )
-    evidence = server.build_complete_list_evidence("全作品を箇条書きして", [source])
+    more_complete = complete_list_page(
+        "https://archive-official.example/works",
+        [f"別作品{index:03d}" for index in range(1, 151)],
+    )
+    evidence = server.build_complete_list_evidence("全作品を箇条書きして", [source, more_complete])
     assert len(server.rank_complete_list_sources(server.complete_list_source_groups([source]))[0][2]) == 101
+    assert evidence.source_domain == "archive-official.example"
     assert len(evidence.candidates) == 100
     assert evidence.warnings == ("候補が100件を超えたため、100件まで表示します。",)
 
@@ -1618,16 +1628,32 @@ def test_extract_grounded_list_candidates_rejects_fragments_and_categories() -> 
                 "- 機動戦士ガンダム外伝 宇宙、閃光の果てに… 機動戦士ガンダム外伝 コロニーの落ちた地で…",
                 "ガンダム（IP）は、映像作品です",
                 "| 機動武闘伝Gガンダム | 1994 |",
+                "| [機動戦士Vガンダム](https://example.com/v) | 1993年 | 全51話 | 監督：富野由悠季 | 会社：サンライズ | 次へ |",
+                "| 機動戦士ガンダムZZ | 1986年 | 第47話 | 監督：今川泰宏 | ナビゲーション |",
             ]),
         },
     ])
     assert "機動戦士ガンダム" in candidates
     assert "機動戦士Ζガンダム" in candidates
     assert "機動武闘伝Gガンダム" in candidates
+    assert "機動戦士Vガンダム" in candidates
+    assert "機動戦士ガンダムZZ" in candidates
     assert "ガンダム" not in candidates
     assert "ガンダムシリーズ" not in candidates
     assert all("宇宙、閃光" not in item for item in candidates)
     assert all("映像作品" not in item for item in candidates)
+    assert not {"1993年", "全51話", "監督：富野由悠季", "会社：サンライズ", "次へ", "1986年", "第47話", "監督：今川泰宏", "ナビゲーション"} & set(candidates)
+
+
+def test_complete_list_authority_requires_real_host_boundaries() -> None:
+    assert server.complete_list_authority_band("ja.wikipedia.org") == 1
+    assert server.complete_list_authority_band("wikipedia.org.example.com") == 2
+    assert server.complete_list_authority_band("foo.go.jp") == 0
+    assert server.complete_list_authority_band("foo.go.jp.example.com") == 2
+    assert server.complete_list_authority_band("agency.gov") == 0
+    assert server.complete_list_authority_band("university.edu") == 0
+    assert server.complete_list_authority_band("gundam-official.com") == 0
+    assert server.complete_list_authority_band("official.example.com") == 2
 
 
 def test_extract_grounded_list_candidates_reads_markdown_link_headings() -> None:
@@ -2217,6 +2243,7 @@ if __name__ == "__main__":
     test_select_complete_list_grounding_results_prefers_one_authoritative_domain()
     test_complete_list_search_context_excludes_other_domain_categories()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
+    test_complete_list_authority_requires_real_host_boundaries()
     test_extract_grounded_list_candidates_reads_markdown_link_headings()
     test_complete_list_search_context_is_compact_and_keeps_linked_titles()
     test_complete_list_grounding_instruction_separates_mixed_categories_generically()
