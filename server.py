@@ -3808,6 +3808,60 @@ def remove_unverified_list_items(content: str, query: str, results: list[dict[st
     return filtered or content
 
 
+def complete_list_intents(query: str) -> frozenset[str]:
+    text = str(query or "")
+    intents = set()
+    for intent, pattern in {
+        "game": r"ゲーム|game",
+        "book": r"漫画|マンガ|書籍|小説|comic|manga|book|novel",
+        "product": r"商品|模型|玩具|グッズ|model|toy|goods",
+        "series": r"シリーズ|アニメ|映像作品|TV|OVA|劇場|配信|series|anime",
+    }.items():
+        if re.search(pattern, text, re.IGNORECASE):
+            intents.add(intent)
+    return frozenset(intents or {"generic"})
+
+
+def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
+    normalized = []
+    for heading in headings or []:
+        text = re.sub(r"^#{1,6}\s+", "", str(heading or ""))
+        text = re.sub(r"\s+", "", text).lower()
+        normalized.append(text)
+    if any(
+        re.search(
+            r"脚注|注釈|出典|参考文献|関連項目|外部リンク|footnotes?|references?|external\s*links?|related\s*items?",
+            heading,
+            re.IGNORECASE,
+        )
+        for heading in normalized
+    ):
+        return False
+
+    intents = complete_list_intents(query)
+    requested = set(intents) & {"game", "book", "product"}
+    if not requested and "series" in intents:
+        requested = {"series"}
+    if not requested:
+        return True
+
+    categories = set()
+    for heading in normalized:
+        if re.search(r"ゲーム|game", heading, re.IGNORECASE):
+            categories.add("game")
+        elif re.search(r"漫画|マンガ|書籍|小説|comic|manga|book|novel", heading, re.IGNORECASE):
+            categories.add("book")
+        elif re.search(r"商品|模型|玩具|グッズ|model|toy|goods", heading, re.IGNORECASE):
+            categories.add("product")
+        elif re.search(r"映像|アニメ|TV|テレビ|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
+            categories.add("series")
+        elif re.search(r"その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio", heading, re.IGNORECASE):
+            categories.add("other")
+    if not categories:
+        return True
+    return bool(categories & requested) and categories <= requested
+
+
 def clean_grounded_list_candidate(raw: str) -> str:
     item = str(raw or "").strip()
     if not item:
@@ -3823,6 +3877,8 @@ def clean_grounded_list_candidate(raw: str) -> str:
     markdown_link_match = re.fullmatch(r"\[([^\]]+)\]\((?:https?://|/)[^)]+\)", item)
     if markdown_link_match:
         item = markdown_link_match.group(1).strip()
+    item = re.sub(r"^(?:\*\*|__)(.+?)(?:\*\*|__)$", r"\1", item).strip()
+    item = re.sub(r"^[●○◯]\s*", "", item)
     item = re.sub(r"^(?:Webページ本文|YouTube動画|動画タイトル|Title)\s*[:：]\s*", "", item).strip()
     item = item.strip(" -・•*`　。、")
     item = re.sub(r"\s+", " ", item)
@@ -3847,9 +3903,15 @@ def clean_grounded_list_candidate(raw: str) -> str:
         return ""
     if re.fullmatch(r"\d{4}(?:年)?(?:[-/]\d{1,2}(?:[-/]\d{1,2})?)?", item):
         return ""
+    if re.fullmatch(r"(?:19|20)\d{2}年代(?:順|目次)?", item):
+        return ""
     if re.fullmatch(r"(?:全|第)?\d+(?:話|本|巻|冊|回|期)", item):
         return ""
     if re.match(r"^(?:監督|会社|制作|製作|放送局|配給|公開日|発売日|ナビゲーション)\s*(?:[:：]|$)", item):
+        return ""
+    if re.search(r"youtube|チャンネル|channel", item, re.IGNORECASE):
+        return ""
+    if re.search(r"^(?:取得メタデータ|メタデータ|metadata|content)\s*[:：]", item, re.IGNORECASE):
         return ""
     if re.search(r"\.(?:jpe?g|png|gif|webp|svg)(?:\?.*)?$", item, re.IGNORECASE):
         return ""
@@ -3877,12 +3939,27 @@ def grounded_list_candidate_category(item: str) -> str:
     return "未分類"
 
 
-def extract_grounded_list_candidates_from_results(results: list[dict[str, str]], limit: int | None = None) -> list[str]:
+def extract_grounded_list_candidates_from_results(
+    results: list[dict[str, str]], query: str = "", limit: int | None = None
+) -> list[str]:
     candidates: list[str] = []
     seen: set[str] = set()
     for result in results:
         snippet = str(result.get("snippet") or "")
+        headings: list[str] = []
         for line in snippet.splitlines():
+            heading_match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line.strip())
+            if heading_match:
+                level = len(heading_match.group(1))
+                heading = heading_match.group(2).strip()
+                if level == 1:
+                    headings = []
+                elif level == 2:
+                    headings = [heading]
+                elif level == 3:
+                    headings = headings[:1] + [heading]
+            if not complete_list_section_allowed(query, headings):
+                continue
             cells = structured_candidate_cells(line)
             for cell in cells:
                 item = clean_grounded_list_candidate(cell)
@@ -3958,6 +4035,10 @@ def structured_candidate_cells(line: str) -> list[str]:
     if re.match(r"^(?:[*\-・•]|\d+[.)．、])\s+", stripped):
         return [stripped]
     if re.match(r"^#{1,6}\s+\[[^\]]+\]\((?:https?://|/)[^)]+\)$", stripped):
+        return [stripped]
+    if re.fullmatch(r"\[(?!\!)[^\]]+\]\((?:https?://|/)[^)]+\)", stripped):
+        return [stripped]
+    if re.fullmatch(r"(?:\*\*|__).*?(?:\*\*|__)", stripped):
         return [stripped]
     if "|" in stripped and not re.fullmatch(r"[|:\-\s]+", stripped):
         cells = [cell.strip() for cell in stripped.split("|") if cell.strip()]
