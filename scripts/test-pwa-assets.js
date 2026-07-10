@@ -7,10 +7,10 @@ assert.match(index, /rel="manifest" href="\/manifest\.webmanifest"/);
 assert.match(index, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"/);
 assert.match(index, /name="theme-color"/);
 assert.match(index, /apple-mobile-web-app-capable/);
-assert.match(index, /src="\/pwa\.js\?v=0\.8\.209-tomos53"/);
+assert.match(index, /src="\/pwa\.js\?v=0\.8\.211-listground1"/);
 assert.match(index, /src="\/person-name-fortune\.js\?v=0\.8\.209-tomos53"/);
 assert.match(index, /src="\/person-relationship\.js\?v=0\.8\.209-tomos53"/);
-assert.match(index, /src="\/app\.js\?v=0\.8\.209-tomos53"/);
+assert.match(index, /src="\/app\.js\?v=0\.8\.211-listground1"/);
 assert.match(appJs, /localStorage\.getItem\("gemma4\.theme"\) \|\| "light"/);
 assert.match(appJs, /function openInitialManagementPanelFromUrl/);
 assert.match(appJs, /function isWorkspaceCountRequest/);
@@ -54,12 +54,12 @@ const sw = fs.readFileSync("web/sw.js", "utf8");
 assert.match(sw, /offline\.html/);
 assert.match(sw, /mobile\.html/);
 assert.match(sw, /manifest\.webmanifest/);
-assert.match(sw, /gemma4-pwa-0\.8\.209-tomos53/);
+assert.match(sw, /gemma4-pwa-0\.8\.211-listground1/);
 assert.match(sw, /\/person-name-fortune\.js\?v=0\.8\.209-tomos53/);
 assert.match(sw, /\/person-relationship\.js\?v=0\.8\.209-tomos53/);
 assert.match(sw, /cache\.put\(event\.request/);
 const pwaJs = fs.readFileSync("web/pwa.js", "utf8");
-assert.match(pwaJs, /\/sw\.js\?v=0\.8\.209-tomos53/);
+assert.match(pwaJs, /\/sw\.js\?v=0\.8\.211-listground1/);
 
 const mobileHtml = fs.readFileSync("web/mobile.html", "utf8");
 assert.match(mobileHtml, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"/);
@@ -70,7 +70,7 @@ assert.match(mobileHtml, /id="mobile-desktop-notice"/);
 assert.match(mobileHtml, /PC版のスマホ接続を開く/);
 assert.match(mobileHtml, /\/pc-mobile-connect/);
 assert.match(mobileHtml, /id="mobile-app-version"/);
-assert.match(mobileHtml, /アプリ版 0\.8\.209/);
+assert.match(mobileHtml, /アプリ版 0\.8\.210/);
 assert.match(mobileHtml, /id="mobile-ai-plan"/);
 assert.match(mobileHtml, /id="mobile-ai-mode"/);
 assert.match(mobileHtml, /id="mobile-ai-model"/);
@@ -244,12 +244,12 @@ assert.match(mobileSyncScript, /--mobile-sync-only/);
   "Gemma4_12B_All_Start.bat",
 ].forEach((path) => {
   const launcher = fs.readFileSync(path, "utf8");
-  assert.match(launcher, /0\.8\.209/, `${path} should use the current app version`);
+  assert.match(launcher, /0\.8\.211/, `${path} should use the current app version`);
   assert.doesNotMatch(launcher, /0\.8\.196/, `${path} should not pin the old app version`);
 });
 
 const resetCacheHtml = fs.readFileSync("web/reset-cache.html", "utf8");
-assert.match(resetCacheHtml, /\/\?v=0\.8\.209-tomos53&reset=1/);
+assert.match(resetCacheHtml, /\/\?v=0\.8\.210-ytdiag1&reset=1/);
 assert.doesNotMatch(resetCacheHtml, /tomos1/);
 
 console.log("pwa asset tests passed");

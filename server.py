@@ -89,7 +89,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.210")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.211")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
