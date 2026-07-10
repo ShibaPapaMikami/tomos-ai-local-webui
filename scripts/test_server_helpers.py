@@ -1211,6 +1211,77 @@ def complete_list_page(url: str, items: list[str]) -> dict[str, str]:
     }
 
 
+def complete_list_test_evidence(items: list[str]) -> server.CompleteListEvidence:
+    source = complete_list_page("https://official.example/works", items)
+    return server.CompleteListEvidence(
+        query="全シリーズを箇条書きして",
+        source_domain="official.example",
+        source_results=(source,),
+        candidates=tuple(items),
+        status="source-backed" if len(items) >= 3 else "partial",
+        warnings=(),
+    )
+
+
+def test_render_complete_list_ignores_model_items_and_keeps_all_evidence() -> None:
+    evidence = complete_list_test_evidence(["星の旅人", "星の旅人Z", "星の旅人ZZ"])
+    content = server.render_complete_list_answer("星の旅人Xもあるよ。\n- 架空作品", evidence)
+    assert "架空作品" not in content
+    assert "星の旅人X" not in content
+    assert "## 確認できた項目（3件）" in content
+    assert content.count("\n- 星の旅人") == 3
+
+
+def test_public_complete_list_sources_include_only_grounding_pages() -> None:
+    evidence = complete_list_test_evidence(["星の旅人", "星の旅人Z", "星の旅人ZZ"])
+    public = server.public_search_results_for_answer([{"url": "https://noise.example"}], evidence)
+    assert public == list(evidence.source_results)
+
+
+def test_render_complete_list_marks_partial_and_unavailable() -> None:
+    partial = server.render_complete_list_answer("確認したよ。", complete_list_test_evidence(["星の旅人"]))
+    unavailable = server.render_complete_list_answer(
+        "確認したよ。",
+        server.CompleteListEvidence("全シリーズ", "", (), (), "unavailable", ()),
+    )
+    assert "完全な一覧としては確認できませんでした。" in partial
+    assert "## 確認できていない点" in unavailable
+    assert "一覧項目を抽出できませんでした。" in unavailable
+
+
+def test_complete_list_sources_deduplicate_urls() -> None:
+    source = complete_list_page("https://official.example/works", ["星の旅人", "星の旅人Z", "星の旅人ZZ"])
+    evidence = server.build_complete_list_evidence("全シリーズ", [source, dict(source)])
+    assert [result["url"] for result in evidence.source_results] == ["https://official.example/works"]
+
+
+def test_render_complete_list_exposes_over_100_warning() -> None:
+    evidence = server.CompleteListEvidence(
+        "全作品",
+        "official.example",
+        (complete_list_page("https://official.example/works", []),),
+        tuple(f"作品{index:03d}" for index in range(1, 101)),
+        "source-backed",
+        ("候補が100件を超えたため、100件まで表示します。",),
+    )
+    content = server.render_complete_list_answer("確認したよ。", evidence)
+    assert "候補が100件を超えたため、100件まで表示します。" in content
+
+
+def test_complete_list_diagnostic_reports_deterministic_mode() -> None:
+    diagnostic = server.complete_list_diagnostic(complete_list_test_evidence(["星の旅人"]))
+    assert diagnostic == {
+        "type": "complete-list-grounding",
+        "status": "warning",
+        "label": "一覧根拠",
+        "message": "単一の根拠ドメインから1件を確認しました。",
+        "sourceDomain": "official.example",
+        "sourceCount": 1,
+        "candidateCount": 1,
+        "mode": "deterministic-complete-list",
+    }
+
+
 def test_complete_list_evidence_prefers_more_complete_trusted_source() -> None:
     official = complete_list_page("https://official.example/works", ["星の旅人", "星の旅人Z", "星の旅人ZZ"])
     encyclopedia = complete_list_page("https://ja.wikipedia.org/wiki/星の旅人", [f"星の旅人{i}" for i in range(12)])
@@ -1920,6 +1991,12 @@ if __name__ == "__main__":
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail()
+    test_render_complete_list_ignores_model_items_and_keeps_all_evidence()
+    test_public_complete_list_sources_include_only_grounding_pages()
+    test_render_complete_list_marks_partial_and_unavailable()
+    test_complete_list_sources_deduplicate_urls()
+    test_render_complete_list_exposes_over_100_warning()
+    test_complete_list_diagnostic_reports_deterministic_mode()
     test_complete_list_evidence_prefers_more_complete_trusted_source()
     test_complete_list_evidence_rejects_navigation_pages()
     test_complete_list_evidence_keeps_101_candidates_before_display_cap_and_warns()

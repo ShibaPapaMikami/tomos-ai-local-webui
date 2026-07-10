@@ -3908,6 +3908,55 @@ def build_complete_list_evidence(query: str, results: list[dict[str, str]]) -> C
     return CompleteListEvidence(query, domain, unique_sources, tuple(candidates[:100]), status, warnings)
 
 
+def safe_complete_list_intro(content: str, evidence: CompleteListEvidence) -> str:
+    intro = next((part.strip() for part in re.split(r"\n\s*\n", content or "") if part.strip()), "")
+    if not intro or len(intro) > 120 or len(intro.splitlines()) > 2:
+        return ""
+    if re.search(r"^\s*(?:#|[*\-・•]|\d+[.)．、])|\d", intro, re.M):
+        return ""
+    if any(normalized_fact_text(item) in normalized_fact_text(intro) for item in evidence.candidates):
+        return ""
+    return intro
+
+
+def render_complete_list_answer(character_intro: str, evidence: CompleteListEvidence) -> str:
+    intro = safe_complete_list_intro(character_intro, evidence) or "確認できた内容をまとめたよ。"
+    if evidence.status == "unavailable":
+        return f"{intro}\n\n## 確認できていない点\n- 一覧項目を抽出できませんでした。対象ページのURLを指定して再度お試しください。"
+    lines = [intro, "", f"## 確認できた項目（{len(evidence.candidates)}件）"]
+    lines.extend(f"- {item}" for item in evidence.candidates)
+    note = "完全な一覧としては確認できませんでした。" if evidence.status == "partial" else "取得した根拠ページで確認できた項目だけを掲載しています。"
+    lines.extend(["", "## 確認できていない点", f"- {note}"])
+    lines.extend(f"- {warning}" for warning in evidence.warnings)
+    return "\n".join(lines)
+
+
+def public_search_results_for_answer(results, evidence):
+    return list(evidence.source_results) if evidence else results
+
+
+def complete_list_diagnostic(evidence: CompleteListEvidence) -> dict[str, object]:
+    status = "success" if evidence.status == "source-backed" else "warning" if evidence.status == "partial" else "error"
+    return {
+        "type": "complete-list-grounding",
+        "status": status,
+        "label": "一覧根拠",
+        "message": f"単一の根拠ドメインから{len(evidence.candidates)}件を確認しました。",
+        "sourceDomain": evidence.source_domain,
+        "sourceCount": len(evidence.source_results),
+        "candidateCount": len(evidence.candidates),
+        "mode": "deterministic-complete-list",
+    }
+
+
+def finalize_complete_list_answer(character_intro, results, evidence):
+    return (
+        render_complete_list_answer(character_intro, evidence),
+        public_search_results_for_answer(results, evidence),
+        complete_list_diagnostic(evidence),
+    )
+
+
 def categorize_grounded_list_candidates(candidates: list[str]) -> dict[str, list[str]]:
     grouped: dict[str, list[str]] = {}
     for item in candidates:
