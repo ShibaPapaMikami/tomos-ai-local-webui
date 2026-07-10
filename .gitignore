@@ -35,6 +35,7 @@ models/
 .codegraph/
 .gemma4-data/
 .worktrees/
+.superpowers/sdd/
 
 # Local private user/company content. Never commit these.
 private-content/
