@@ -3570,16 +3570,20 @@ def should_read_search_result_pages(query: str) -> bool:
     normalized = str(query or "").strip()
     if not normalized:
         return False
+    left_boundary = r"(?:^|[\s、。,.，．・:：;；!?！？/／「」『』（）()\[\]【】]|の)"
     if re.search(
-        r"全(?:て|部|件|シリーズ|作品)|すべて|一覧|箇条書き|網羅|complete list|all (?:series|works|items)",
+        rf"{left_boundary}(?:全て|全部|全件|全シリーズ|全作品)|すべて|一覧|箇条書き|網羅|complete list|all (?:series|works|items)",
         normalized,
         re.IGNORECASE,
     ):
         return True
-    if re.search(r"(?<![ァ-ヶー])リスト", normalized):
+    if re.search(
+        r"(?<![ァ-ヶー])リスト(?=$|アップ|[\s、。,.，．・:：;；!?！？/／「」『』（）()\[\]【】]|(?:は|が|を|に|へ|で|と|の|も|や|か|から|まで|より|だけ|しか|でも|って))",
+        normalized,
+    ):
         return True
     all_request = re.search(
-        r"全([A-Za-z0-9ぁ-んァ-ヶ一-龯々ー]{1,24}?)(?:を|は)(?:教えて|出して|書いて|見せて|一覧にして|箇条書きして|リストにして|網羅して)",
+        rf"{left_boundary}全([A-Za-z0-9ぁ-んァ-ヶ一-龯々ー]{{1,24}}?)(?:を|は)(?:教えて|出して|書いて|見せて|一覧にして|箇条書きして|リストにして|網羅して)",
         normalized,
     )
     return bool(
