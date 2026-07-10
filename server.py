@@ -3849,13 +3849,13 @@ def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
     for heading in normalized:
         if re.search(r"ゲーム|game", heading, re.IGNORECASE):
             categories.add("game")
-        elif re.search(r"漫画|マンガ|書籍|小説|comic|manga|book|novel", heading, re.IGNORECASE):
+        if re.search(r"漫画|マンガ|書籍|小説|comic|manga|book|novel", heading, re.IGNORECASE):
             categories.add("book")
-        elif re.search(r"商品|模型|玩具|グッズ|model|toy|goods", heading, re.IGNORECASE):
+        if re.search(r"商品|模型|玩具|グッズ|model|toy|goods", heading, re.IGNORECASE):
             categories.add("product")
-        elif re.search(r"その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio", heading, re.IGNORECASE):
+        if re.search(r"その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio", heading, re.IGNORECASE):
             categories.add("other")
-        elif re.search(r"映像|アニメ|TV|テレビ|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
+        if re.search(r"映像|アニメ|TV|テレビ|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
             categories.add("series")
     if not categories:
         return True

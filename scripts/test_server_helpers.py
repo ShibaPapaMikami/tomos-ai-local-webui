@@ -1329,6 +1329,17 @@ def test_extract_complete_list_excludes_navigation_labels_from_standalone_bold()
     ) == ["星の旅人", "星の旅人Z"]
 
 
+def test_extract_complete_list_excludes_mixed_game_book_sections_for_game_request() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## ゲーム作品", "- 星の旅人バトル",
+        "## ゲーム関連書籍", "- 星の旅人設定資料集",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="ゲームシリーズを一覧にして"
+    ) == ["星の旅人バトル"]
+
+
 def complete_list_test_evidence(items: list[str]) -> server.CompleteListEvidence:
     source = complete_list_page("https://official.example/works", items)
     return server.CompleteListEvidence(
