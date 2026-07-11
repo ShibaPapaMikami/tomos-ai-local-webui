@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import json
+from queue import Empty, Full, Queue
 import subprocess
+from threading import Event, Thread
 import time
 from typing import Callable
 
@@ -9,6 +11,7 @@ DOCTOR_CACHE_SECONDS = 300
 COMMAND_TIMEOUT_SECONDS = 20
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_EXA_RESULTS = 10
+READ_CHUNK_BYTES = 64 * 1024
 _AVAILABLE_STATUSES = {"ok", "ready", "available"}
 _ALLOWED_BACKENDS = {
     "web": {"Jina Reader": "jina"},
@@ -28,6 +31,14 @@ class RouteDecision:
 
 
 class RouteExecutionError(RuntimeError):
+    pass
+
+
+class _OutputLimitExceeded(Exception):
+    pass
+
+
+class _CommandTimedOut(Exception):
     pass
 
 
@@ -90,8 +101,8 @@ def select_route(
 
 
 def execute_allowed(
-    command: list[str], runner: Callable[..., object] = subprocess.run
-) -> object:
+    command: list[str], popen_factory: Callable[..., object] = subprocess.Popen
+) -> tuple[bytes, bytes]:
     if (
         len(command) != 3
         or command[:2] != ["mcporter", "call"]
@@ -100,44 +111,49 @@ def execute_allowed(
         raise RouteExecutionError("許可されていない実行コマンドです")
 
     try:
-        result = runner(
+        process = popen_factory(
             command,
-            check=False,
-            capture_output=True,
-            timeout=COMMAND_TIMEOUT_SECONDS,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-    except subprocess.TimeoutExpired as error:
-        raise RouteExecutionError("Exa検索の実行が20秒でタイムアウトしました") from error
     except OSError as error:
         raise RouteExecutionError("Exa検索の実行に失敗しました") from error
 
-    stdout = _as_bytes(getattr(result, "stdout", b""))
-    stderr = _as_bytes(getattr(result, "stderr", b""))
-    if len(stdout) + len(stderr) > MAX_OUTPUT_BYTES:
+    try:
+        stdout, stderr = _read_process_output(process)
+    except _OutputLimitExceeded as error:
+        _stop_process(process)
         raise RouteExecutionError("Exa検索の出力上限を超えました")
-    if getattr(result, "returncode", 1) != 0:
+    except _CommandTimedOut as error:
+        _stop_process(process)
+        raise RouteExecutionError("Exa検索の実行が20秒でタイムアウトしました") from error
+
+    if getattr(process, "returncode", 1) != 0:
         raise RouteExecutionError("Exa検索の実行に失敗しました")
-    return result
+    return stdout, stderr
 
 
 def run_exa_search(
-    query: str, limit: int, runner: Callable[..., object] = subprocess.run
+    query: str, limit: int, popen_factory: Callable[..., object] = subprocess.Popen
 ) -> list[dict[str, str]]:
     capped_limit = max(1, min(limit, MAX_EXA_RESULTS))
     call = (
         f"exa.web_search_exa(query: {json.dumps(query, ensure_ascii=False)}, "
         f"numResults: {capped_limit})"
     )
-    result = execute_allowed(["mcporter", "call", call], runner=runner)
-    output = _as_bytes(getattr(result, "stdout", b""))
+    output, _ = execute_allowed(["mcporter", "call", call], popen_factory=popen_factory)
 
     try:
         payload = json.loads(output.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise RouteExecutionError("Exa検索結果の読み込みに失敗しました") from error
 
-    raw_results = payload.get("results", []) if isinstance(payload, dict) else []
-    if not isinstance(raw_results, list):
+    if not isinstance(payload, dict) or "results" not in payload:
+        raise RouteExecutionError("Exa検索結果の形式が不正です")
+    raw_results = payload["results"]
+    if not isinstance(raw_results, list) or any(
+        not isinstance(item, dict) for item in raw_results
+    ):
         raise RouteExecutionError("Exa検索結果の形式が不正です")
 
     return [
@@ -154,12 +170,79 @@ def run_exa_search(
     ]
 
 
-def _as_bytes(value: object) -> bytes:
-    if isinstance(value, bytes):
-        return value
-    if isinstance(value, str):
-        return value.encode()
-    return b""
+def _read_process_output(process: object) -> tuple[bytes, bytes]:
+    events: Queue[tuple[bool, bytes | None]] = Queue(maxsize=4)
+    stopped = Event()
+    threads = [
+        Thread(target=_read_stream, args=(stream, is_stderr, events, stopped), daemon=True)
+        for is_stderr, stream in ((False, getattr(process, "stdout", None)), (True, getattr(process, "stderr", None)))
+    ]
+    for thread in threads:
+        thread.start()
+
+    deadline = time.monotonic() + COMMAND_TIMEOUT_SECONDS
+    output = [bytearray(), bytearray()]
+    total = 0
+    complete = 0
+    try:
+        while complete < len(threads):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _CommandTimedOut()
+            try:
+                is_stderr, chunk = events.get(timeout=min(remaining, 0.1))
+            except Empty:
+                continue
+            if chunk is None:
+                complete += 1
+                continue
+            total += len(chunk)
+            if total > MAX_OUTPUT_BYTES:
+                raise _OutputLimitExceeded()
+            output[is_stderr].extend(chunk)
+
+        try:
+            process.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired as error:
+            raise _CommandTimedOut() from error
+        return bytes(output[0]), bytes(output[1])
+    finally:
+        stopped.set()
+
+
+def _read_stream(stream, is_stderr: bool, events: Queue, stopped: Event) -> None:
+    if stream is None:
+        _put_event(events, (is_stderr, None), stopped)
+        return
+    while not stopped.is_set():
+        chunk = stream.read(READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        _put_event(events, (is_stderr, chunk), stopped)
+    _put_event(events, (is_stderr, None), stopped)
+
+
+def _put_event(events: Queue, event: tuple[bool, bytes | None], stopped: Event) -> None:
+    while not stopped.is_set():
+        try:
+            events.put(event, timeout=0.1)
+            return
+        except Full:
+            continue
+
+
+def _stop_process(process: object) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
 
 
 def _as_text(value: object) -> str:
