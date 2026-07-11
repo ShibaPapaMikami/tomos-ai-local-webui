@@ -117,54 +117,57 @@
           <section class="pc-diagnostics-panel" id="pc-diagnostics" aria-label="PC診断"></section>
           <section class="search-capabilities-panel" id="search-capabilities" aria-label="フォルダー検索" data-i18n-aria-label="settings.workspaceSearch"></section>
           <section class="model-installer" id="model-installer" aria-label="モデルをダウンロード" data-i18n-aria-label="settings.modelDownload"></section>
-          <section class="external-llm-panel" id="external-llm-settings" aria-label="外部LLMサーバー接続" data-i18n-aria-label="settings.externalLlmTitle">
+          <section class="external-llm-panel" id="external-llm-settings" aria-label="別のローカルAIを使う" data-i18n-aria-label="settings.externalLlmTitle">
             <div class="model-installer-title">
-              <strong data-i18n="settings.externalLlmTitle">外部LLMサーバー接続</strong>
-              <span data-i18n="settings.externalLlmHelp">llama.cpp server など、このPC上で動く別のOllama互換サーバーへ接続します。</span>
+              <strong data-i18n="settings.externalLlmTitle">別のローカルAIを使う</strong>
+              <span data-i18n="settings.externalLlmHelp">通常は設定不要です。このPCで別に起動しているOllamaやllama.cppをTOMOSで使う場合だけ設定します。</span>
             </div>
-            <label class="setting-field setting-wide">
-              <span data-i18n="settings.externalLlmUrl">接続先URL</span>
-              <input id="external-llm-url" type="url" placeholder="http://127.0.0.1:8080" />
-              <small data-i18n="settings.externalLlmUrlHelp">安全のため localhost / 127.0.0.1 のみ使えます。空欄なら通常のOllamaを使います。</small>
-            </label>
-            <div class="external-llm-actions">
-              <button class="ghost-button" id="external-llm-check" type="button" data-i18n="settings.externalLlmCheck">接続を確認</button>
-              <button class="ghost-button" id="external-llm-clear" type="button" data-i18n="settings.externalLlmClear">接続設定を削除</button>
-              <small id="external-llm-status" data-i18n="settings.externalLlmIdle">未確認</small>
-            </div>
-            <div class="external-llm-guide">
-              <div>
-                <strong data-i18n="settings.externalLlmOllamaTitle">Ollama</strong>
-                <span data-i18n="settings.externalLlmOllamaHelp">通常は自動で使います。別ポートのOllamaを使う時だけURLを入れます。</span>
-                <code>http://127.0.0.1:11434</code>
-              </div>
-              <div>
-                <strong data-i18n="settings.externalLlmLlamaTitle">llama.cpp server</strong>
-                <span data-i18n="settings.externalLlmLlamaHelp">GGUFモデルを別サーバーで起動して、このUIから接続します。</span>
-                <code>http://127.0.0.1:8080</code>
-              </div>
-              <div>
-                <strong data-i18n="settings.externalLlmOpenAiTitle">OpenAI互換URL</strong>
-                <span data-i18n="settings.externalLlmOpenAiHelp">今後対応予定です。現時点ではOllama互換の /api/chat を使うサーバーが対象です。</span>
-                <code data-i18n="settings.externalLlmOpenAiPending">未対応</code>
-              </div>
-            </div>
-            <div class="external-llm-model-card">
-              <div>
-                <strong data-i18n="settings.externalLlmQwenTitle">Qwen3.6 27B MTP TurboQuant</strong>
-                <span class="plugin-kind-badge" data-i18n="settings.externalLlmExperimental">上級・実験</span>
-              </div>
-              <p data-i18n="settings.externalLlmQwenHelp">高性能チャット・コード・推論向け候補です。標準の学生PCでは重い可能性があります。</p>
-              <ul>
-                <li data-i18n="settings.externalLlmQwenSize">容量: 約13.4GB（画像対応は追加約0.9GB）</li>
-                <li data-i18n="settings.externalLlmQwenRuntime">注意: TQ3_4S / MTP対応runtimeが必要です。通常のllama.cppでは動かない場合があります。</li>
-              </ul>
+            <p class="external-llm-current" id="external-llm-status" data-i18n="settings.externalLlmStandard">TOMOS標準のローカルAIを使用中</p>
+            <details class="external-llm-details">
+              <summary data-i18n="settings.externalLlmDetails">詳細設定</summary>
+              <label class="setting-field setting-wide">
+                <span data-i18n="settings.externalLlmUrl">このPC内の接続先</span>
+                <input id="external-llm-url" type="url" placeholder="http://127.0.0.1:8080" />
+                <small data-i18n="settings.externalLlmUrlHelp">このPC内のlocalhostだけを使えます。空欄ならTOMOS標準のローカルAIを使います。</small>
+              </label>
               <div class="external-llm-actions">
-                <a class="plugin-source-link" href="https://huggingface.co/YTan2000/Qwen3.6-27B-MTP-TQ3_4S" target="_blank" rel="noopener" data-i18n="settings.externalLlmOpenModel">モデルページを開く ↗</a>
-                <button class="ghost-button" id="external-llm-copy-model" type="button" data-i18n="settings.externalLlmCopyModel">モデル名をコピー</button>
+                <button class="ghost-button" id="external-llm-check" type="button" data-i18n="settings.externalLlmCheck">接続を確認</button>
+                <button class="ghost-button" id="external-llm-clear" type="button" data-i18n="settings.externalLlmClear">標準に戻す</button>
               </div>
-            </div>
-            <p class="management-note" data-i18n="settings.externalLlmDeleteHelp">この削除はアプリに保存した接続先だけを消します。ダウンロード済みモデル本体は、Ollama・llama.cpp・Hugging Face cacheなど導入元で削除してください。</p>
+              <div class="external-llm-guide">
+                <div>
+                  <strong data-i18n="settings.externalLlmOllamaTitle">Ollama</strong>
+                  <span data-i18n="settings.externalLlmOllamaHelp">通常は自動で使います。別ポートのOllamaを使う時だけURLを入れます。</span>
+                  <code>http://127.0.0.1:11434</code>
+                </div>
+                <div>
+                  <strong data-i18n="settings.externalLlmLlamaTitle">llama.cpp server</strong>
+                  <span data-i18n="settings.externalLlmLlamaHelp">GGUFモデルを別サーバーで起動して、このUIから接続します。</span>
+                  <code>http://127.0.0.1:8080</code>
+                </div>
+                <div>
+                  <strong data-i18n="settings.externalLlmOpenAiTitle">OpenAI互換URL</strong>
+                  <span data-i18n="settings.externalLlmOpenAiHelp">今後対応予定です。現時点ではOllama互換の /api/chat を使うサーバーが対象です。</span>
+                  <code data-i18n="settings.externalLlmOpenAiPending">未対応</code>
+                </div>
+              </div>
+              <div class="external-llm-model-card">
+                <div>
+                  <strong data-i18n="settings.externalLlmQwenTitle">Qwen3.6 27B MTP TurboQuant</strong>
+                  <span class="plugin-kind-badge" data-i18n="settings.externalLlmExperimental">上級・実験</span>
+                </div>
+                <p data-i18n="settings.externalLlmQwenHelp">高性能チャット・コード・推論向け候補です。標準の学生PCでは重い可能性があります。</p>
+                <ul>
+                  <li data-i18n="settings.externalLlmQwenSize">容量: 約13.4GB（画像対応は追加約0.9GB）</li>
+                  <li data-i18n="settings.externalLlmQwenRuntime">注意: TQ3_4S / MTP対応runtimeが必要です。通常のllama.cppでは動かない場合があります。</li>
+                </ul>
+                <div class="external-llm-actions">
+                  <a class="plugin-source-link" href="https://huggingface.co/YTan2000/Qwen3.6-27B-MTP-TQ3_4S" target="_blank" rel="noopener" data-i18n="settings.externalLlmOpenModel">モデルページを開く ↗</a>
+                  <button class="ghost-button" id="external-llm-copy-model" type="button" data-i18n="settings.externalLlmCopyModel">モデル名をコピー</button>
+                </div>
+              </div>
+              <p class="management-note" data-i18n="settings.externalLlmDeleteHelp">この削除はアプリに保存した接続先だけを消します。ダウンロード済みモデル本体は、Ollama・llama.cpp・Hugging Face cacheなど導入元で削除してください。</p>
+            </details>
           </section>
           <label class="setting-field setting-wide">
             <span data-i18n="settings.systemPrompt">全体ルール</span>
@@ -499,7 +502,7 @@
             <input class="language-model-tab-input" id="language-model-tab-external" name="language-model-tab" type="radio" />
             <div class="language-model-tabs" role="tablist" aria-label="言語モデル設定">
               <label for="language-model-tab-download" data-i18n="settings.modelDownload">モデルをダウンロード</label>
-              <label for="language-model-tab-external" data-i18n="settings.externalLlmTitle">外部LLMサーバー接続</label>
+              <label for="language-model-tab-external" data-i18n="settings.externalLlmTitle">別のローカルAIを使う</label>
             </div>
             <section class="language-model-view language-model-view-download" id="language-model-download-view">
               <div class="settings-grid" id="language-model-settings-grid"></div>

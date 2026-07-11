@@ -2833,6 +2833,25 @@ h1 {
   line-height: 1.45;
 }
 
+.external-llm-current {
+  margin: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.external-llm-details {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.external-llm-details summary {
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .external-llm-guide {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
