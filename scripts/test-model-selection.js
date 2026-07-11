@@ -209,6 +209,7 @@ const serverSource = fs.readFileSync("server.py", "utf8");
 const indexSource = fs.readFileSync("web/index.html", "utf8");
 const serviceWorkerSource = fs.readFileSync("web/sw.js", "utf8");
 const stylesSource = fs.readFileSync("web/styles.css", "utf8");
+const appSource = fs.readFileSync("web/app.js", "utf8");
 const codingCandidatesBlock = serverSource.match(/CODING_MODEL_CANDIDATES = \[[\s\S]*?\]\n/)?.[0] || "";
 assert.match(serverSource, /gemma-4-12B-agentic-fable5-composer2\.5-v2-3\.5x-tau2-GGUF:Q4_K_M/);
 assert.match(serverSource, /GEMMA_MLX_MODEL = "gemma4:12b-mlx"/);
@@ -230,19 +231,19 @@ assert.match(serverSource, /"safetyLevel": "low"/);
 assert.match(serverSource, /"external-send-check"/);
 assert.doesNotMatch(codingCandidatesBlock, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
 assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
-assert.match(indexSource, /\/i18n\.js\?v=0\.8\.211-listground1/);
+assert.match(indexSource, /\/i18n\.js\?v=0\.8\.212-local-ai-status/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/models\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/settings\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.211-listground1/);
-assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.211-listground1/);
-assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.209-tomos53/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.212-local-ai-status/);
+assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.212-local-ai-status/);
+assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.212-local-ai-status/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.211-listground1/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.212-local-ai-status/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
@@ -263,7 +264,14 @@ assert.match(indexHtml, /<details class="external-llm-details">/);
 assert.match(indexHtml, /TOMOS標準のローカルAIを使用中/);
 assert.match(i18nSource, /"settings\.externalLlmTitle": "別のローカルAIを使う"/);
 assert.match(i18nSource, /"settings\.externalLlmClear": "標準に戻す"/);
-assert.doesNotMatch(indexHtml, />外部LLMサーバー接続</);
+assert.match(i18nSource, /"settings\.externalLlmPending": "保存済みです。接続を確認してください。"/);
+assert.match(
+  appSource,
+  /state\.externalLlmUrl \? t\("settings\.externalLlmPending"\) : t\("settings\.externalLlmIdle"\)/,
+);
+assert.match(indexHtml, /<details class="external-llm-details">[\s\S]*external-llm-guide/);
+assert.doesNotMatch(indexHtml, /外部LLM接続/);
+assert.doesNotMatch(i18nSource, /外部LLM接続/);
 
 const experimentalPullable = [
   { model: "gemma4:12b", label: "Gemma 4 12B", purpose: "標準チャット・画像理解", family: "Gemma系" },

@@ -2089,7 +2089,9 @@ function renderSettingsMeta() {
 function renderExternalLlmSettings(message = "") {
   if (els.externalLlmUrl) els.externalLlmUrl.value = state.externalLlmUrl || "";
   if (els.externalLlmStatus) {
-    els.externalLlmStatus.textContent = message || state.externalLlmStatus || t("settings.externalLlmIdle");
+    els.externalLlmStatus.textContent = message
+      || state.externalLlmStatus
+      || (state.externalLlmUrl ? t("settings.externalLlmPending") : t("settings.externalLlmIdle"));
   }
 }
 
