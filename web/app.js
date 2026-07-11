@@ -77,6 +77,7 @@ const state = {
   composerModel: localStorage.getItem("gemma4.composerModel") || "",
   composerModelVisibleModels: loadComposerModelVisibleModels(),
   externalLlmUrl: localStorage.getItem("gemma4.externalLlmUrl") || "",
+  externalLlmCheckId: 0,
   externalLlmStatus: "",
   externalLlmStatusKey: "",
   externalLlmStatusParams: {},
@@ -2105,14 +2106,26 @@ function setExternalLlmStatus(key, params = {}) {
   state.externalLlmStatusParams = params;
 }
 
+function isCurrentExternalLlmCheck(requestId, requestUrl, currentRequestId, currentUrl) {
+  return requestId === currentRequestId && requestUrl === currentUrl;
+}
+
+function invalidateExternalLlmCheck() {
+  state.externalLlmCheckId += 1;
+  if (els.externalLlmCheck) els.externalLlmCheck.disabled = false;
+}
+
 function setExternalLlmUrl(value) {
-  state.externalLlmUrl = String(value || "").trim();
+  const nextUrl = String(value || "").trim();
+  if (state.externalLlmUrl !== nextUrl) invalidateExternalLlmCheck();
+  state.externalLlmUrl = nextUrl;
   localStorage.setItem("gemma4.externalLlmUrl", state.externalLlmUrl);
   setExternalLlmStatus(state.externalLlmUrl ? "settings.externalLlmSaved" : "settings.externalLlmStandard");
   renderExternalLlmSettings();
 }
 
 function clearExternalLlmSettings() {
+  invalidateExternalLlmCheck();
   state.externalLlmUrl = "";
   localStorage.removeItem("gemma4.externalLlmUrl");
   setExternalLlmStatus("settings.externalLlmStandard");
@@ -2137,6 +2150,9 @@ function copyExternalLlmModelName() {
 async function checkExternalLlmServer() {
   if (!els.externalLlmCheck) return;
   setExternalLlmUrl(els.externalLlmUrl?.value || "");
+  const requestId = state.externalLlmCheckId + 1;
+  const requestUrl = state.externalLlmUrl;
+  state.externalLlmCheckId = requestId;
   els.externalLlmCheck.disabled = true;
   setExternalLlmStatus("settings.externalLlmChecking");
   renderExternalLlmSettings();
@@ -2148,14 +2164,17 @@ async function checkExternalLlmServer() {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) throw new Error(data.error || t("settings.externalLlmError"));
+    if (!isCurrentExternalLlmCheck(requestId, requestUrl, state.externalLlmCheckId, state.externalLlmUrl)) return;
     const modelCount = Array.isArray(data.models) ? data.models.length : 0;
     setExternalLlmStatus("settings.externalLlmReady", {
       version: data.version || "-",
       count: String(modelCount),
     });
   } catch {
+    if (!isCurrentExternalLlmCheck(requestId, requestUrl, state.externalLlmCheckId, state.externalLlmUrl)) return;
     setExternalLlmStatus("settings.externalLlmError");
   } finally {
+    if (!isCurrentExternalLlmCheck(requestId, requestUrl, state.externalLlmCheckId, state.externalLlmUrl)) return;
     els.externalLlmCheck.disabled = false;
     renderExternalLlmSettings();
   }
@@ -7733,6 +7752,7 @@ els.composerModelVisibility?.addEventListener("change", (event) => {
     .filter(Boolean);
   setComposerModelVisibleModels(checkedModels);
 });
+els.externalLlmUrl?.addEventListener("input", invalidateExternalLlmCheck);
 els.externalLlmUrl?.addEventListener("change", () => setExternalLlmUrl(els.externalLlmUrl.value));
 els.externalLlmCheck?.addEventListener("click", checkExternalLlmServer);
 els.externalLlmClear?.addEventListener("click", clearExternalLlmSettings);

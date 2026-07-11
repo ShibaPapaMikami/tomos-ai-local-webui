@@ -210,6 +210,17 @@ const indexSource = fs.readFileSync("web/index.html", "utf8");
 const serviceWorkerSource = fs.readFileSync("web/sw.js", "utf8");
 const stylesSource = fs.readFileSync("web/styles.css", "utf8");
 const appSource = fs.readFileSync("web/app.js", "utf8");
+const externalLlmCheckHelperSource = appSource.match(
+  /function isCurrentExternalLlmCheck\(requestId, requestUrl, currentRequestId, currentUrl\) \{[\s\S]*?\n\}/,
+)?.[0];
+assert.ok(externalLlmCheckHelperSource, "接続確認の最新性判定関数が必要です");
+const externalLlmCheckContext = {};
+vm.createContext(externalLlmCheckContext);
+vm.runInContext(externalLlmCheckHelperSource, externalLlmCheckContext, { filename: "web/app.js" });
+const { isCurrentExternalLlmCheck } = externalLlmCheckContext;
+assert.equal(isCurrentExternalLlmCheck(3, "http://127.0.0.1:11434", 3, "http://127.0.0.1:11434"), true);
+assert.equal(isCurrentExternalLlmCheck(3, "http://127.0.0.1:11434", 4, "http://127.0.0.1:11434"), false);
+assert.equal(isCurrentExternalLlmCheck(3, "http://127.0.0.1:11434", 3, "http://127.0.0.1:8080"), false);
 const codingCandidatesBlock = serverSource.match(/CODING_MODEL_CANDIDATES = \[[\s\S]*?\]\n/)?.[0] || "";
 assert.match(serverSource, /gemma-4-12B-agentic-fable5-composer2\.5-v2-3\.5x-tau2-GGUF:Q4_K_M/);
 assert.match(serverSource, /GEMMA_MLX_MODEL = "gemma4:12b-mlx"/);
