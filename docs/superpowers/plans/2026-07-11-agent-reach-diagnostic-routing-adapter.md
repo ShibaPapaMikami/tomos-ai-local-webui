@@ -139,18 +139,18 @@ git commit -m "Agent-Reach経路選択を追加する"
 - Modify: `scripts/test_agent_reach_adapter.py`
 
 **Interfaces:**
-- Consumes: `run_exa_search(query: str, limit: int, runner=subprocess.run) -> list[dict[str, str]]`
+- Consumes: `run_exa_search(query: str, limit: int, popen_factory=subprocess.Popen) -> list[dict[str, str]]`
 - Produces: TOMOS共通結果`title`、`url`、`snippet`、`source`、`backend`、`routeReason`
 
 - [ ] **Step 1: Exaコマンドと正規化の失敗テストを書く**
 
 ```python
 def test_run_exa_search_uses_allowlisted_mcporter_command():
-    def runner(command, **kwargs):
+    def popen_factory(command, **kwargs):
         assert command[:2] == ["mcporter", "call"]
         assert "exa.web_search_exa" in command[2]
-        return FakeResult(0, b'{"results":[{"title":"公式資料","url":"https://example.com/a","text":"本文"}]}', b"")
-    results = adapter.run_exa_search("公式資料", 3, runner=runner)
+        return FakePopen(stdout=b'{"results":[{"title":"公式資料","url":"https://example.com/a","text":"本文"}]}')
+    results = adapter.run_exa_search("公式資料", 3, popen_factory=popen_factory)
     assert results == [{
         "title": "公式資料", "url": "https://example.com/a", "snippet": "本文",
         "source": "agent-reach:web", "backend": "exa", "routeReason": "doctorで利用可能と確認",
@@ -165,7 +165,7 @@ Expected: `AttributeError: module 'agent_reach_adapter' has no attribute 'run_ex
 
 - [ ] **Step 3: 実行器を実装する**
 
-`mcporter`以外を受け取らず、タイムアウト20秒、出力2MB、結果最大10件とする。`subprocess.run`へ`check=False`、`capture_output=True`、`timeout=20`を渡し、戻り値が非0なら日本語の`RouteExecutionError`を送出する。
+`mcporter`以外を受け取らず、タイムアウト20秒、出力2MB、結果最大10件とする。`subprocess.Popen`の出力を制限付きキューで段階的に読み、合計2MBを超えた時点でプロセスを停止する。読取終了は有界時間だけ待ち、解除不能な読取があっても呼出元を無期限停止させない。タイムアウト、非0終了、不正JSON、不正スキーマは日本語の`RouteExecutionError`へ変換する。
 
 - [ ] **Step 4: 不正コマンド拒否テストを追加する**
 
