@@ -237,6 +237,13 @@ const mobileSyncScript = fs.readFileSync("scripts/start-mobile-sync.sh", "utf8")
 assert.match(mobileSyncScript, /--host 0\.0\.0\.0/);
 assert.match(mobileSyncScript, /--mobile-sync-only/);
 
+const serverSource = fs.readFileSync("server.py", "utf8");
+const currentVersionMatch = serverSource.match(
+  /APP_VERSION = os\.environ\.get\("GEMMA_APP_VERSION", "([^"]+)"\)/,
+);
+assert.ok(currentVersionMatch, "server.py should define the default app version");
+const currentAppVersion = currentVersionMatch[1];
+
 [
   "Gemma4_12B_Web.command",
   "Gemma4_12B_全部起動.command",
@@ -244,8 +251,15 @@ assert.match(mobileSyncScript, /--mobile-sync-only/);
   "Gemma4_12B_All_Start.bat",
 ].forEach((path) => {
   const launcher = fs.readFileSync(path, "utf8");
-  assert.match(launcher, /0\.8\.214/, `${path} should use the current app version`);
-  assert.doesNotMatch(launcher, /0\.8\.196/, `${path} should not pin the old app version`);
+  const launcherVersionMatch = launcher.match(
+    /(?:APP_VERSION="|set GEMMA_APP_VERSION=)([0-9]+\.[0-9]+\.[0-9]+)/,
+  );
+  assert.ok(launcherVersionMatch, `${path} should define the app version`);
+  assert.equal(
+    launcherVersionMatch[1],
+    currentAppVersion,
+    `${path} should match server.py app version`,
+  );
 });
 
 const resetCacheHtml = fs.readFileSync("web/reset-cache.html", "utf8");
