@@ -4521,12 +4521,13 @@ def direct_external_research_answer(query: str, results: list[dict[str, str]], e
     title = str(primary.get("title") or "Web調査結果").strip()
     url = str(primary.get("url") or "").strip()
     snippet = str(primary.get("snippet") or "").strip()
+    is_youtube_result = str(primary.get("source") or "") == "agent-reach:youtube" or bool(extract_youtube_urls(query, limit=1))
     transcript_match = re.search(r"字幕抜粋:\s*(.+)", snippet, re.S)
     has_transcript_excerpt = bool(transcript_match and transcript_match.group(1).strip())
-    if has_transcript_excerpt:
+    if is_youtube_result and has_transcript_excerpt:
         return ""
     unconfirmed_points: list[str] = []
-    if not has_transcript_excerpt:
+    if is_youtube_result and not has_transcript_excerpt:
         unconfirmed_points.append("- 字幕本文を取得できていないため、動画内の具体的な発言内容は未確認です。")
     if error:
         unconfirmed_points.append(f"- 取得時の制限: {error}")
@@ -4545,13 +4546,19 @@ def direct_external_research_answer(query: str, results: list[dict[str, str]], e
                 break
     elif snippet:
         lines.append(f"- 抜粋: {snippet[:240]}")
-    lines.extend([
-        "",
-        "## 分析",
-        "- 取得できた情報だけを見る限り、この動画は上記タイトルに関する話題を扱っています。",
-        "- タイトルや検索結果から主題は推測できますが、動画内で実際に話された詳細、根拠、時系列、結論までは断定できません。",
-        "- そのため、内容の深い要約や発言単位の分析には字幕または本文取得が必要です。",
-    ])
+    lines.extend(["", "## 分析"])
+    if is_youtube_result:
+        lines.extend([
+            "- 取得できた情報だけを見る限り、この動画は上記タイトルに関する話題を扱っています。",
+            "- タイトルや検索結果から主題は推測できますが、動画内で実際に話された詳細、根拠、時系列、結論までは断定できません。",
+            "- そのため、内容の深い要約や発言単位の分析には字幕または本文取得が必要です。",
+        ])
+    else:
+        lines.extend([
+            "- 取得できた出典本文または検索結果の範囲で確認しています。",
+            "- 上記のタイトル、URL、抜粋に含まれる情報だけを根拠にしてください。",
+            "- 出典本文にない詳細、数値、結論はここでは断定できません。",
+        ])
     if unconfirmed_points:
         lines.extend(["", "## 確認できていない点", *unconfirmed_points])
     return "\n".join(lines)
@@ -5264,7 +5271,7 @@ def normalize_agent_reach_channel_status(value: object) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in {"ok", "ready", "available", "enabled", "pass", "passed", "true"}:
         return "ready"
-    if normalized in {"missing", "not-installed", "unavailable", "disabled", "fail", "failed", "false"}:
+    if normalized in {"missing", "not-installed", "unavailable", "disabled", "off", "fail", "failed", "false"}:
         return "missing"
     return "checking"
 
@@ -5272,17 +5279,20 @@ def normalize_agent_reach_channel_status(value: object) -> str:
 def agent_reach_doctor_channels(doctor: dict[str, object]) -> dict[str, dict[str, object]]:
     raw_channels = doctor.get("channels") if isinstance(doctor.get("channels"), dict) else {}
     channels: dict[str, dict[str, object]] = {}
-    for channel in ["web", "github", "youtube", "rss", "v2ex", "bilibili", "sns"]:
+    for channel in ["web", "exa_search", "github", "youtube", "rss", "v2ex", "bilibili", "sns"]:
         raw_value = raw_channels.get(channel) if isinstance(raw_channels, dict) and channel in raw_channels else doctor.get(channel)
         if raw_value is None:
             raw_value = "permission-required" if channel == "sns" else "checking"
         status = "permission-required" if channel == "sns" and raw_value in {None, ""} else normalize_agent_reach_channel_status(raw_value)
         if channel == "sns" and status == "checking":
             status = "permission-required"
-        channels[channel] = {
+        channel_payload = {
             "status": status,
             "requiresPermission": channel == "sns",
         }
+        if isinstance(raw_value, dict) and isinstance(raw_value.get("active_backend"), str):
+            channel_payload["active_backend"] = raw_value["active_backend"]
+        channels[channel] = channel_payload
     return channels
 
 
@@ -5361,7 +5371,8 @@ def agent_reach_doctor_snapshot() -> dict[str, object]:
     doctor = payload.get("doctor")
     if not payload.get("ok") or not payload.get("installed") or not isinstance(doctor, dict):
         return {"installed": False}
-    return {**doctor, "installed": True}
+    channels = payload.get("channels") if isinstance(payload.get("channels"), dict) else agent_reach_doctor_channels(doctor)
+    return {**doctor, "channels": channels, "installed": True}
 
 
 AGENT_REACH_DOCTOR_CACHE = DoctorCache(agent_reach_doctor_snapshot)

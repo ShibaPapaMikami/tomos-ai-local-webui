@@ -952,16 +952,48 @@ def test_parse_agent_reach_doctor_output_reads_text_status() -> None:
 
 def test_agent_reach_doctor_channels_normalize_partial_status() -> None:
     channels = server.agent_reach_doctor_channels({
-        "web": True,
+        "web": {"status": "ok", "active_backend": "Jina Reader"},
+        "exa_search": {"status": "off", "active_backend": None},
         "github": False,
         "youtube": {"status": "ready"},
         "rss": "missing",
     })
     assert channels["web"]["status"] == "ready"
+    assert channels["web"]["active_backend"] == "Jina Reader"
+    assert channels["exa_search"]["status"] == "missing"
     assert channels["github"]["status"] == "missing"
     assert channels["youtube"]["status"] == "ready"
     assert channels["rss"]["status"] == "missing"
     assert channels["sns"]["status"] == "permission-required"
+
+
+def test_agent_reach_doctor_snapshot_keeps_route_channels() -> None:
+    previous = server.agent_reach_doctor_payload
+
+    def fake_payload():
+        return {
+            "ok": True,
+            "installed": True,
+            "doctor": {
+                "web": {"status": "ok", "active_backend": "Jina Reader"},
+                "github": {"status": "ok", "active_backend": "gh CLI"},
+            },
+            "channels": {
+                "web": {"status": "ready", "requiresPermission": False, "active_backend": "Jina Reader"},
+                "github": {"status": "ready", "requiresPermission": False, "active_backend": "gh CLI"},
+            },
+        }
+
+    try:
+        server.agent_reach_doctor_payload = fake_payload
+        snapshot = server.agent_reach_doctor_snapshot()
+    finally:
+        server.agent_reach_doctor_payload = previous
+
+    assert snapshot["installed"] is True
+    assert snapshot["channels"]["web"]["active_backend"] == "Jina Reader"
+    assert server.select_route("web", snapshot).backend == "jina"
+    assert server.select_route("github", snapshot).backend == "github"
 
 
 def test_normalize_internet_layer_channels_allows_known_channels_only() -> None:
@@ -2986,6 +3018,22 @@ def test_direct_external_research_answer_uses_available_source() -> None:
     assert "Web調査をON" not in answer
 
 
+def test_direct_external_research_answer_uses_generic_copy_for_web_page() -> None:
+    answer = server.direct_external_research_answer(
+        "https://example.com/ を確認して",
+        [{
+            "title": "Webページ本文: Example Domain",
+            "url": "https://example.com/",
+            "snippet": "This domain is for use in documentation examples.",
+            "source": "agent-reach:web",
+        }],
+    )
+    assert "この動画" not in answer
+    assert "動画内" not in answer
+    assert "字幕本文" not in answer
+    assert "取得できた出典本文または検索結果" in answer
+
+
 def test_direct_external_research_answer_defers_to_model_when_transcript_exists() -> None:
     answer = server.direct_external_research_answer(
         "https://www.youtube.com/watch?v=vid123 この動画を分析して",
@@ -3096,6 +3144,7 @@ if __name__ == "__main__":
     test_parse_agent_reach_doctor_output_reads_json_last_line()
     test_parse_agent_reach_doctor_output_reads_text_status()
     test_agent_reach_doctor_channels_normalize_partial_status()
+    test_agent_reach_doctor_snapshot_keeps_route_channels()
     test_normalize_internet_layer_channels_allows_known_channels_only()
     test_internet_layer_setup_status_shape()
     test_agent_reach_doctor_payload_reads_runner_output()
@@ -3190,6 +3239,7 @@ if __name__ == "__main__":
     test_auto_internet_layer_channels_for_query_uses_ready_channels()
     test_external_research_answer_instruction_avoids_web_search_prompt()
     test_direct_external_research_answer_uses_available_source()
+    test_direct_external_research_answer_uses_generic_copy_for_web_page()
     test_direct_external_research_answer_defers_to_model_when_transcript_exists()
     test_external_research_diagnostics_reports_youtube_transcript_status()
     test_validate_model_remove_rejects_unknown_model()
