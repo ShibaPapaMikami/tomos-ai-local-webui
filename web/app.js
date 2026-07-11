@@ -78,6 +78,8 @@ const state = {
   composerModelVisibleModels: loadComposerModelVisibleModels(),
   externalLlmUrl: localStorage.getItem("gemma4.externalLlmUrl") || "",
   externalLlmStatus: "",
+  externalLlmStatusKey: "",
+  externalLlmStatusParams: {},
   activeTrainingSetId: localStorage.getItem("gemma4.activeTrainingSetId") || "",
   serverModels: {
     chat: "gemma4:12b-mlx",
@@ -2088,24 +2090,32 @@ function renderSettingsMeta() {
 
 function renderExternalLlmSettings(message = "") {
   if (els.externalLlmUrl) els.externalLlmUrl.value = state.externalLlmUrl || "";
-  if (els.externalLlmStatus) {
-    els.externalLlmStatus.textContent = message
-      || state.externalLlmStatus
-      || (state.externalLlmUrl ? t("settings.externalLlmPending") : t("settings.externalLlmIdle"));
-  }
+  if (!els.externalLlmStatus) return;
+  const savedStatus = state.externalLlmStatusKey
+    ? t(state.externalLlmStatusKey, state.externalLlmStatusParams)
+    : state.externalLlmStatus;
+  els.externalLlmStatus.textContent = message
+    || savedStatus
+    || (state.externalLlmUrl ? t("settings.externalLlmSaved") : t("settings.externalLlmStandard"));
+}
+
+function setExternalLlmStatus(key, params = {}) {
+  state.externalLlmStatus = "";
+  state.externalLlmStatusKey = key;
+  state.externalLlmStatusParams = params;
 }
 
 function setExternalLlmUrl(value) {
   state.externalLlmUrl = String(value || "").trim();
   localStorage.setItem("gemma4.externalLlmUrl", state.externalLlmUrl);
-  state.externalLlmStatus = state.externalLlmUrl ? t("settings.externalLlmSaved") : t("settings.externalLlmIdle");
+  setExternalLlmStatus(state.externalLlmUrl ? "settings.externalLlmSaved" : "settings.externalLlmStandard");
   renderExternalLlmSettings();
 }
 
 function clearExternalLlmSettings() {
   state.externalLlmUrl = "";
   localStorage.removeItem("gemma4.externalLlmUrl");
-  state.externalLlmStatus = t("settings.externalLlmCleared");
+  setExternalLlmStatus("settings.externalLlmStandard");
   renderExternalLlmSettings();
 }
 
@@ -2113,11 +2123,13 @@ function copyExternalLlmModelName() {
   const modelName = "YTan2000/Qwen3.6-27B-MTP-TQ3_4S";
   navigator.clipboard?.writeText(modelName)
     .then(() => {
-      state.externalLlmStatus = t("settings.externalLlmModelCopied");
+      setExternalLlmStatus("settings.externalLlmModelCopied");
       renderExternalLlmSettings();
     })
     .catch(() => {
       state.externalLlmStatus = modelName;
+      state.externalLlmStatusKey = "";
+      state.externalLlmStatusParams = {};
       renderExternalLlmSettings();
     });
 }
@@ -2126,7 +2138,7 @@ async function checkExternalLlmServer() {
   if (!els.externalLlmCheck) return;
   setExternalLlmUrl(els.externalLlmUrl?.value || "");
   els.externalLlmCheck.disabled = true;
-  state.externalLlmStatus = t("settings.externalLlmChecking");
+  setExternalLlmStatus("settings.externalLlmChecking");
   renderExternalLlmSettings();
   try {
     const response = await fetch("/api/llm/check", {
@@ -2137,12 +2149,12 @@ async function checkExternalLlmServer() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) throw new Error(data.error || t("settings.externalLlmError"));
     const modelCount = Array.isArray(data.models) ? data.models.length : 0;
-    state.externalLlmStatus = t("settings.externalLlmReady", {
+    setExternalLlmStatus("settings.externalLlmReady", {
       version: data.version || "-",
       count: String(modelCount),
     });
-  } catch (error) {
-    state.externalLlmStatus = `${t("error.prefix")}: ${error.message || t("settings.externalLlmError")}`;
+  } catch {
+    setExternalLlmStatus("settings.externalLlmError");
   } finally {
     els.externalLlmCheck.disabled = false;
     renderExternalLlmSettings();

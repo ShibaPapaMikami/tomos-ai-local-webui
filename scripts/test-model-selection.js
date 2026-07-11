@@ -264,11 +264,17 @@ assert.match(indexHtml, /<details class="external-llm-details">/);
 assert.match(indexHtml, /TOMOS標準のローカルAIを使用中/);
 assert.match(i18nSource, /"settings\.externalLlmTitle": "別のローカルAIを使う"/);
 assert.match(i18nSource, /"settings\.externalLlmClear": "標準に戻す"/);
-assert.match(i18nSource, /"settings\.externalLlmPending": "保存済みです。接続を確認してください。"/);
+assert.match(i18nSource, /"settings\.externalLlmStandard": "TOMOS標準のローカルAIを使用中"/);
+assert.match(i18nSource, /"settings\.externalLlmSaved": "設定を保存しました。接続を確認してください。"/);
+assert.match(i18nSource, /"settings\.externalLlmError": "接続できませんでした。別のローカルAIがこのPCで起動しているか確認してください。"/);
+assert.match(i18nSource, /"settings\.externalLlmSaved": "Saved the setting\. Check the connection before using it\."/);
+assert.match(i18nSource, /"settings\.externalLlmError": "Could not connect\. Check whether another local AI is running on this computer\."/);
 assert.match(
   appSource,
-  /state\.externalLlmUrl \? t\("settings\.externalLlmPending"\) : t\("settings\.externalLlmIdle"\)/,
+  /state\.externalLlmUrl \? t\("settings\.externalLlmSaved"\) : t\("settings\.externalLlmStandard"\)/,
 );
+assert.match(appSource, /state\.externalLlmStatusKey\s*\? t\(state\.externalLlmStatusKey, state\.externalLlmStatusParams\)/);
+assert.match(appSource, /function clearExternalLlmSettings\(\) \{[\s\S]*?setExternalLlmStatus\("settings\.externalLlmStandard"\)/);
 assert.match(indexHtml, /<details class="external-llm-details">[\s\S]*external-llm-guide/);
 assert.doesNotMatch(indexHtml, /外部LLM接続/);
 assert.doesNotMatch(i18nSource, /外部LLM接続/);
