@@ -19,6 +19,7 @@ import re
 import shutil
 import shlex
 import socket
+from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import random
@@ -90,7 +91,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.216")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.217")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
@@ -3450,6 +3451,7 @@ YOUTUBE_URL_RE = re.compile(
 WEB_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 WEB_READER_TIMEOUT_SECONDS = 15
 WEB_READER_MAX_CHARS = 80000
+WEB_ORIGIN_MAX_BYTES = 2 * 1024 * 1024
 COMPLETE_LIST_PROMPT_MAX_CHARS = 6000
 GITHUB_REPO_RE = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", re.IGNORECASE)
 GITHUB_TIMEOUT_SECONDS = 20
@@ -4555,7 +4557,134 @@ def clean_reader_text(text: str, max_chars: int = WEB_READER_MAX_CHARS) -> str:
     return cleaned[:max_chars].strip()
 
 
-def web_reader_result(url: str, opener=urllib.request.urlopen) -> dict[str, str] | None:
+class EmbeddedTitleHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.lines: list[str] = []
+        self.capture_tag = ""
+        self.capture_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        normalized = tag.lower()
+        if normalized == "strong" or re.fullmatch(r"h[1-6]", normalized):
+            self.capture_tag = normalized
+            self.capture_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.capture_tag:
+            self.capture_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = tag.lower()
+        if normalized != self.capture_tag:
+            return
+        text = re.sub(r"\s+", " ", "".join(self.capture_parts)).strip()
+        if text:
+            if normalized == "strong":
+                self.lines.append(f"**{text}**")
+            else:
+                self.lines.append(f"{'#' * int(normalized[1])} {text}")
+        self.capture_tag = ""
+        self.capture_parts = []
+
+
+def extract_next_f_embedded_html(raw_html: str, max_chars: int = WEB_READER_MAX_CHARS) -> str:
+    embedded_strings: list[str] = []
+
+    def collect_strings(value) -> None:
+        if isinstance(value, str):
+            if "<" in value and ">" in value:
+                embedded_strings.append(value)
+            return
+        if isinstance(value, list):
+            for item in value:
+                collect_strings(item)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                collect_strings(item)
+
+    prefix = "self.__next_f.push("
+    for script in SCRIPT_RE.findall(str(raw_html or "")):
+        source = script.strip()
+        if not source.startswith(prefix) or not source.endswith(")"):
+            continue
+        try:
+            collect_strings(json.loads(source[len(prefix):-1]))
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    for fragment in embedded_strings:
+        parser = EmbeddedTitleHTMLParser()
+        try:
+            parser.feed(fragment)
+            parser.close()
+        except Exception:
+            continue
+        for line in parser.lines:
+            key = normalized_fact_text(line)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            lines.append(line)
+            if sum(len(item) + 1 for item in lines) >= max_chars:
+                return "\n".join(lines)[:max_chars].strip()
+    return "\n".join(lines)[:max_chars].strip()
+
+
+def is_safe_public_web_url(url: str, resolver=socket.getaddrinfo) -> bool:
+    parsed = urllib.parse.urlparse(str(url or ""))
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        return False
+    if parsed.port not in (None, 443):
+        return False
+    try:
+        addresses = resolver(parsed.hostname, 443, type=socket.SOCK_STREAM)
+    except (OSError, socket.gaierror):
+        return False
+    resolved = []
+    for address in addresses:
+        try:
+            resolved.append(ipaddress.ip_address(address[4][0]))
+        except (IndexError, ValueError):
+            return False
+    return bool(resolved) and all(address.is_global for address in resolved)
+
+
+class NoWebRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+def read_public_origin_html(url: str) -> str:
+    if not is_safe_public_web_url(url):
+        return ""
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 TOMOS-AI/1.0"},
+    )
+    opener = urllib.request.build_opener(NoWebRedirectHandler())
+    with opener.open(request, timeout=WEB_READER_TIMEOUT_SECONDS) as response:
+        content_type = str(response.headers.get("Content-Type") or "").lower()
+        if "text/html" not in content_type:
+            return ""
+        raw = response.read(WEB_ORIGIN_MAX_BYTES + 1)
+    if len(raw) > WEB_ORIGIN_MAX_BYTES:
+        return ""
+    return raw.decode("utf-8", errors="replace")
+
+
+def reader_text_may_hide_embedded_titles(text: str) -> bool:
+    return len(re.findall(r"!\[[^\]]*\]\([^)]*\)", str(text or ""))) >= 2
+
+
+def web_reader_result(
+    url: str,
+    opener=urllib.request.urlopen,
+    origin_reader=None,
+) -> dict[str, str] | None:
     reader_url = f"https://r.jina.ai/{url}"
     request = urllib.request.Request(
         reader_url,
@@ -4566,6 +4695,14 @@ def web_reader_result(url: str, opener=urllib.request.urlopen) -> dict[str, str]
     cleaned = clean_reader_text(text)
     if not cleaned:
         return None
+    if reader_text_may_hide_embedded_titles(cleaned) and complete_list_authority_band(url) == 0:
+        try:
+            raw_html = (origin_reader or read_public_origin_html)(url)
+            embedded = extract_next_f_embedded_html(raw_html)
+            if embedded:
+                cleaned = clean_reader_text(f"{embedded}\n\n{cleaned}")
+        except Exception:
+            pass
     title = url
     for line in cleaned.splitlines()[:8]:
         if line.lower().startswith("title:"):

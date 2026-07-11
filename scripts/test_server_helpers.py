@@ -3,6 +3,7 @@ from pathlib import Path
 import base64
 import contextlib
 import json
+import socket
 import tempfile
 import threading
 import urllib.request
@@ -1866,6 +1867,91 @@ def test_web_reader_keeps_titles_after_legacy_24k_boundary() -> None:
     assert late_title in result["snippet"]
 
 
+def test_extract_next_f_embedded_html_keeps_legacy_title_cards() -> None:
+    flight_html = "".join([
+        "<html><body>",
+        '<script>self.__next_f.push([1,"',
+        r'1a:T491,\u003cdiv class=\"row\"\u003e',
+        r'\u003ca href=\"https://official.example/z\"\u003e',
+        r'\u003cstrong\u003e機動戦士Ζガンダム\u003c/strong\u003e',
+        r'\u003c/a\u003e\u003cbr\u003e【TV】全50話',
+        r'\u003ca href=\"https://official.example/zz\"\u003e',
+        r'\u003cstrong\u003e機動戦士ガンダムΖΖ\u003c/strong\u003e',
+        r'\u003c/a\u003e\u003c/div\u003e',
+        '"])</script>',
+        "</body></html>",
+    ])
+
+    extracted = server.extract_next_f_embedded_html(flight_html)
+
+    assert "**機動戦士Ζガンダム**" in extracted
+    assert "**機動戦士ガンダムΖΖ**" in extracted
+
+
+def test_web_reader_enriches_missing_titles_from_next_f_html() -> None:
+    reader_body = "\n".join([
+        "Title: 公式作品一覧",
+        "![Image 1](https://official.example/z_thum.jpg)",
+        "![Image 2](https://official.example/zz_thum.jpg)",
+    ])
+    flight_html = "".join([
+        "<html><body>",
+        '<script>self.__next_f.push([1,"',
+        r'\u003cstrong\u003e機動戦士Ζガンダム\u003c/strong\u003e',
+        r'\u003cstrong\u003e機動戦士ガンダムΖΖ\u003c/strong\u003e',
+        '"])</script>',
+        "</body></html>",
+    ])
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return reader_body.encode("utf-8")
+
+    result = server.web_reader_result(
+        "https://works-official.example/catalog",
+        opener=lambda request, timeout=0: FakeResponse(),
+        origin_reader=lambda url: flight_html,
+    )
+
+    assert result is not None
+    assert "**機動戦士Ζガンダム**" in result["snippet"]
+    assert "**機動戦士ガンダムΖΖ**" in result["snippet"]
+    assert result["snippet"].index("**機動戦士Ζガンダム**") < result["snippet"].index("![Image 1]")
+
+
+def test_web_reader_does_not_read_origin_for_untrusted_domain() -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"Title: Example\n![Image 1](https://example.com/1.jpg)\n![Image 2](https://example.com/2.jpg)"
+
+    origin_calls = []
+    result = server.web_reader_result(
+        "https://example.com/catalog",
+        opener=lambda request, timeout=0: FakeResponse(),
+        origin_reader=lambda url: origin_calls.append(url) or "",
+    )
+
+    assert result is not None
+    assert origin_calls == []
+
+
+def test_safe_public_web_url_rejects_local_address() -> None:
+    resolver = lambda host, port, type=0: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+    assert not server.is_safe_public_web_url("https://localhost/catalog", resolver=resolver)
+
+
 def test_select_complete_list_grounding_results_prefers_one_authoritative_domain() -> None:
     official_results = [
         {
@@ -2561,6 +2647,10 @@ if __name__ == "__main__":
     test_extract_list_followup_links_rejects_image_assets()
     test_extract_list_followup_links_rejects_other_numeric_detail_paths()
     test_web_reader_keeps_titles_after_legacy_24k_boundary()
+    test_extract_next_f_embedded_html_keeps_legacy_title_cards()
+    test_web_reader_enriches_missing_titles_from_next_f_html()
+    test_web_reader_does_not_read_origin_for_untrusted_domain()
+    test_safe_public_web_url_rejects_local_address()
     test_select_complete_list_grounding_results_prefers_one_authoritative_domain()
     test_complete_list_search_context_excludes_other_domain_categories()
     test_extract_grounded_list_candidates_rejects_fragments_and_categories()
