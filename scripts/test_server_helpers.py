@@ -922,7 +922,7 @@ def test_internet_layer_diagnostics_payload_shape() -> None:
     assert payload["tool"] == "Agent-Reach"
     assert payload["status"] in {"ready", "not-installed"}
     assert payload["memoryAutoSave"] is False
-    assert payload["contract"]["doctorCommand"][-1] == "doctor"
+    assert payload["contract"]["doctorCommand"][-2:] == ["doctor", "--json"]
     assert payload["contract"]["schemaVersion"] == "tomos-internet-layer-result-v0.1"
     assert payload["contract"]["executionPolicy"]["autoInstall"] is False
     assert payload["contract"]["executionPolicy"]["autoSaveToMemory"] is False
@@ -985,7 +985,7 @@ def test_agent_reach_doctor_payload_reads_runner_output() -> None:
         stderr = b""
 
     def fake_runner(*args, **kwargs):
-        assert args[0][-1] == "doctor"
+        assert args[0][-2:] == ["doctor", "--json"]
         return FakeRunResult()
 
     try:
@@ -998,6 +998,207 @@ def test_agent_reach_doctor_payload_reads_runner_output() -> None:
     assert payload["doctor"]["web"] is True
     assert payload["channels"]["web"]["status"] == "ready"
     assert payload["contract"]["executionPolicy"]["autoInstall"] is False
+
+
+def test_web_search_uses_exa_then_tomos_once_on_failure() -> None:
+    calls = []
+
+    def failing_exa(query, limit):
+        calls.append("exa")
+        raise RuntimeError("exa unavailable")
+
+    def tomos_search(query, limit):
+        calls.append("tomos")
+        return [{"title": "結果", "url": "https://example.com", "snippet": "本文"}]
+
+    results, diagnostic = server.routed_web_search("質問", 4, failing_exa, tomos_search)
+
+    assert calls == ["exa", "tomos"]
+    assert diagnostic["fallback"] is True
+    assert results[0]["title"] == "結果"
+
+
+def test_internet_layer_context_passes_active_backend_to_route_selector() -> None:
+    calls = []
+
+    class FakeDoctorCache:
+        def get(self):
+            return {
+                "installed": True,
+                "channels": {
+                    "youtube": {"status": "ok", "active_backend": "yt-dlp"},
+                },
+            }
+
+    def route_selector(channel, doctor, intent="read"):
+        calls.append((channel, doctor, intent))
+        return type("Decision", (), {
+            "channel": channel,
+            "backend": "youtube",
+            "fallback": "tomos",
+            "reason": "doctorで利用可能と確認",
+        })()
+
+    results, error = server.internet_layer_context_results(
+        "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
+        ["youtube"],
+        doctor_cache=FakeDoctorCache(),
+        route_selector=route_selector,
+        youtube_reader=lambda url, runner=None: {
+            "title": "YouTube動画: テスト",
+            "url": url,
+            "snippet": "字幕抜粋",
+        },
+    )
+
+    assert error == ""
+    assert results[0]["url"] == "https://www.youtube.com/watch?v=zfN4QApep6s"
+    assert calls == [("youtube", {
+        "installed": True,
+        "channels": {"youtube": {"status": "ok", "active_backend": "yt-dlp"}},
+    }, "read")]
+
+
+def test_internet_layer_context_resolves_current_youtube_reader_at_call_time() -> None:
+    calls = []
+    previous_reader = server.youtube_transcript_result
+    previous_command = server.agent_reach_venv_ytdlp_command
+
+    class FakeDoctorCache:
+        def get(self):
+            return {"installed": False}
+
+    try:
+        server.youtube_transcript_result = lambda url, runner=None: calls.append(url) or {
+            "title": "YouTube動画: 差替え",
+            "url": url,
+            "snippet": "字幕抜粋",
+        }
+        server.agent_reach_venv_ytdlp_command = lambda: []
+        results, error = server.internet_layer_context_results(
+            "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
+            ["youtube"],
+            doctor_cache=FakeDoctorCache(),
+        )
+    finally:
+        server.youtube_transcript_result = previous_reader
+        server.agent_reach_venv_ytdlp_command = previous_command
+
+    assert error == ""
+    assert calls == ["https://www.youtube.com/watch?v=zfN4QApep6s"]
+    assert results[0]["title"] == "YouTube動画: 差替え"
+
+
+def test_internet_layer_context_does_not_retry_same_youtube_reader() -> None:
+    calls = []
+
+    class FakeDoctorCache:
+        def get(self):
+            return {
+                "installed": True,
+                "channels": {
+                    "youtube": {"status": "ok", "active_backend": "yt-dlp"},
+                },
+            }
+
+    def failing_reader(url, runner=None):
+        calls.append(url)
+        raise RuntimeError("字幕取得失敗")
+
+    results, error = server.internet_layer_context_results(
+        "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
+        ["youtube"],
+        doctor_cache=FakeDoctorCache(),
+        youtube_reader=failing_reader,
+    )
+
+    assert results == []
+    assert calls == ["https://www.youtube.com/watch?v=zfN4QApep6s"]
+    assert error == "YouTube字幕を取得できませんでした。"
+
+
+def test_internet_layer_context_reports_safe_diagnostic_when_youtube_reader_fails() -> None:
+    diagnostics = []
+
+    class FakeDoctorCache:
+        def get(self):
+            return {
+                "installed": True,
+                "channels": {
+                    "youtube": {"status": "ok", "active_backend": "yt-dlp"},
+                },
+            }
+
+    def failing_reader(url, runner=None):
+        raise RuntimeError("token=/Users/test/.config/stderr")
+
+    results, error = server.internet_layer_context_results(
+        "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
+        ["youtube"],
+        doctor_cache=FakeDoctorCache(),
+        youtube_reader=failing_reader,
+        diagnostics_out=diagnostics,
+    )
+
+    assert results == []
+    assert error == "YouTube字幕を取得できませんでした。"
+    assert diagnostics == [{
+        "channel": "youtube",
+        "backend": "youtube",
+        "fallback": False,
+        "reason": "YouTube字幕を取得できませんでした。",
+        "errorCode": "route-failed",
+    }]
+    assert "/Users/" not in json.dumps(diagnostics, ensure_ascii=False)
+    assert "token" not in json.dumps(diagnostics, ensure_ascii=False)
+
+
+def test_internet_layer_context_normalizes_reader_errors_for_all_channels() -> None:
+    class FakeDoctorCache:
+        def get(self):
+            return {"installed": False}
+
+    def failing_reader(*args, **kwargs):
+        raise RuntimeError("stderr token=/Users/test/.config/secret")
+
+    cases = [
+        (
+            "web",
+            "https://example.com/article を読んで",
+            {"web_reader": failing_reader},
+            "Web本文を取得できませんでした。",
+        ),
+        (
+            "youtube",
+            "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
+            {"youtube_reader": failing_reader},
+            "YouTube字幕を取得できませんでした。",
+        ),
+        (
+            "github",
+            "https://github.com/openai/codex を調べて",
+            {"github_reader": failing_reader},
+            "GitHub情報を取得できませんでした。",
+        ),
+        (
+            "rss",
+            "https://example.com/feed.xml のRSSを読んで",
+            {"rss_reader": failing_reader},
+            "RSSフィードを取得できませんでした。",
+        ),
+    ]
+    for channel, query, readers, expected_error in cases:
+        results, error = server.internet_layer_context_results(
+            query,
+            [channel],
+            doctor_cache=FakeDoctorCache(),
+            **readers,
+        )
+        assert results == []
+        assert error == expected_error
+        assert "/Users/" not in error
+        assert "token" not in error
+        assert "stderr" not in error
 
 
 def test_extract_youtube_urls_detects_watch_and_short_urls() -> None:
@@ -1596,15 +1797,30 @@ def test_complete_list_stream_excludes_specialized_channels_and_sources() -> Non
 
 @contextlib.contextmanager
 def local_chat_handler() -> object:
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    previous_cache = server.AGENT_REACH_DOCTOR_CACHE
+    httpd = None
+    thread = None
+    server.AGENT_REACH_DOCTOR_CACHE = server.DoctorCache(lambda: {"installed": False})
     try:
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
         yield f"http://127.0.0.1:{httpd.server_port}/api/chat"
     finally:
-        httpd.shutdown()
-        thread.join(timeout=3)
-        httpd.server_close()
+        if httpd is not None:
+            httpd.shutdown()
+        if thread is not None:
+            thread.join(timeout=3)
+        if httpd is not None:
+            httpd.server_close()
+        server.AGENT_REACH_DOCTOR_CACHE = previous_cache
+
+
+def test_local_chat_handler_scopes_doctor_cache() -> None:
+    previous_cache = server.AGENT_REACH_DOCTOR_CACHE
+    with local_chat_handler():
+        assert server.AGENT_REACH_DOCTOR_CACHE is not previous_cache
+    assert server.AGENT_REACH_DOCTOR_CACHE is previous_cache
 
 
 def post_local_chat(url: str, payload: dict) -> tuple[str, str]:
@@ -1616,6 +1832,47 @@ def post_local_chat(url: str, payload: dict) -> tuple[str, str]:
     )
     with urllib.request.urlopen(request, timeout=5) as response:
         return response.headers.get_content_type(), response.read().decode("utf-8")
+
+
+def test_chat_handler_collects_failed_exa_fallback_diagnostic() -> None:
+    calls = []
+
+    def failing_exa(query, limit):
+        calls.append("exa")
+        raise RuntimeError("token=/Users/test/.config/exa")
+
+    def failing_tomos(query, limit):
+        calls.append("tomos")
+        raise RuntimeError("stderr=/Users/test/.config/tomos")
+
+    decision = server.RouteDecision("web", "exa", "tomos", "doctorで利用可能と確認")
+    with patch.object(server, "agent_reach_route_decision", lambda *args, **kwargs: decision), patch.object(
+        server, "run_exa_search", failing_exa
+    ), patch.object(server, "search_web", failing_tomos), patch.object(
+        server, "ollama_json", lambda *args, **kwargs: {
+            "message": {"role": "assistant", "content": "取得できませんでした。"},
+            "done": True,
+        }
+    ), local_chat_handler() as url:
+        _, body = post_local_chat(url, {
+            "messages": [{"role": "user", "content": "調べて"}],
+            "web_search": True,
+            "internet_layer_channels": [],
+            "stream": False,
+        })
+
+    response = json.loads(body)
+    assert calls == ["exa", "tomos"]
+    assert response["search"]["diagnostics"] == [{
+        "channel": "web",
+        "backend": "tomos",
+        "fallback": True,
+        "reason": "Web検索結果を取得できませんでした。",
+        "errorCode": "fallback-failed",
+    }]
+    assert response["search"]["error"] == "Web検索結果を取得できませんでした。"
+    assert "/Users/" not in json.dumps(response["search"]["diagnostics"], ensure_ascii=False)
+    assert "token" not in json.dumps(response["search"]["diagnostics"], ensure_ascii=False)
 
 
 def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
@@ -1664,7 +1921,7 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
         assert payload["messages"][-1]["content"] == "公式サイトの紹介作品を全て一覧"
         return {"message": {"role": "assistant", "content": "調べたよ。"}, "done": True}
 
-    def fake_internet_results(query, channels):
+    def fake_internet_results(query, channels, **kwargs):
         results = {
             "youtube": [youtube_result],
             "github": [github_result],
@@ -2420,6 +2677,11 @@ def test_youtube_transcript_result_uses_runner_output(monkeypatch=None) -> None:
 
 def test_internet_layer_context_results_prefers_youtube_channel(monkeypatch=None) -> None:
     previous = server.youtube_transcript_result
+
+    class FakeDoctorCache:
+        def get(self):
+            return {"installed": False}
+
     try:
         server.youtube_transcript_result = lambda url, runner=None: {
             "title": "YouTube動画: テスト",
@@ -2429,6 +2691,7 @@ def test_internet_layer_context_results_prefers_youtube_channel(monkeypatch=None
         results, error = server.internet_layer_context_results(
             "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
             ["youtube"],
+            doctor_cache=FakeDoctorCache(),
         )
     finally:
         server.youtube_transcript_result = previous
@@ -2523,10 +2786,14 @@ def test_external_research_diagnostics_reports_youtube_transcript_status() -> No
         "https://www.youtube.com/watch?v=vid123 この動画を分析して",
         ["youtube"],
         [],
-        "YouTube字幕取得: unavailable",
+        "stderr token=/Users/test/.config/secret",
     )
     assert failed[0]["status"] == "error"
     assert "時間をおいて" in failed[0]["howToSucceed"]
+    assert failed[0]["error"] == "YouTube字幕を取得できませんでした。"
+    assert "/Users/" not in json.dumps(failed, ensure_ascii=False)
+    assert "token" not in json.dumps(failed, ensure_ascii=False)
+    assert "stderr" not in json.dumps(failed, ensure_ascii=False)
 
 
 def test_validate_model_remove_rejects_unknown_model() -> None:
@@ -2600,6 +2867,12 @@ if __name__ == "__main__":
     test_normalize_internet_layer_channels_allows_known_channels_only()
     test_internet_layer_setup_status_shape()
     test_agent_reach_doctor_payload_reads_runner_output()
+    test_web_search_uses_exa_then_tomos_once_on_failure()
+    test_internet_layer_context_passes_active_backend_to_route_selector()
+    test_internet_layer_context_resolves_current_youtube_reader_at_call_time()
+    test_internet_layer_context_does_not_retry_same_youtube_reader()
+    test_internet_layer_context_reports_safe_diagnostic_when_youtube_reader_fails()
+    test_internet_layer_context_normalizes_reader_errors_for_all_channels()
     test_extract_youtube_urls_detects_watch_and_short_urls()
     test_clean_youtube_vtt_text_removes_timestamps_and_duplicates()
     test_youtube_transcript_from_metadata_uses_automatic_caption_url()
@@ -2635,6 +2908,8 @@ if __name__ == "__main__":
     test_normal_web_stream_still_emits_model_chunks()
     test_complete_list_finalizer_returns_same_content_for_both_api_modes()
     test_complete_list_stream_excludes_specialized_channels_and_sources()
+    test_local_chat_handler_scopes_doctor_cache()
+    test_chat_handler_collects_failed_exa_fallback_diagnostic()
     test_chat_http_complete_list_events_and_youtube_stream_regression()
     test_complete_list_evidence_prefers_authority_before_candidate_count()
     test_complete_list_evidence_uses_only_requested_official_sections()

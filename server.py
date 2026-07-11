@@ -38,6 +38,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from search_tools import build_search_context, search_web
+from agent_reach_adapter import DoctorCache, RouteDecision, run_exa_search, select_route
 from pdf_reader import (
     clamp_pdf_page_number,
     extract_image_ocr_text,
@@ -3493,7 +3494,7 @@ def agent_reach_command_contract(executable: str = "") -> dict[str, object]:
         "tool": "Agent-Reach",
         "schemaVersion": INTERNET_LAYER_RESULT_SCHEMA_VERSION,
         "installGuideUrl": AGENT_REACH_INSTALL_GUIDE_URL,
-        "doctorCommand": [command, "doctor"],
+        "doctorCommand": [command, "doctor", "--json"],
         "executionMode": "upstream-tools",
         "executionPolicy": {
             "autoInstall": False,
@@ -4447,7 +4448,7 @@ def external_research_diagnostics(query: str, channels: list[str], results: list
         "label": "YouTube字幕取得",
         "message": "失敗。字幕本文を取得できませんでした。",
         "howToSucceed": "Web調査診断でYouTube字幕が利用可能か確認し、時間をおいて再送信してください。YouTube側のbot判定や字幕未公開で失敗することがあります。",
-        "error": error,
+        "error": "YouTube字幕を取得できませんでした。",
     })
     return diagnostics
 
@@ -4948,32 +4949,139 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
     }
 
 
-def internet_layer_context_results(query: str, channels: list[str], runner=subprocess.run) -> tuple[list[dict[str, str]], str]:
+ROUTE_FAILURE_REASONS = {
+    "web": "Web本文を取得できませんでした。",
+    "youtube": "YouTube字幕を取得できませんでした。",
+    "github": "GitHub情報を取得できませんでした。",
+    "rss": "RSSフィードを取得できませんでした。",
+}
+
+
+class RoutedWebSearchError(RuntimeError):
+    def __init__(self, diagnostic: dict[str, object]) -> None:
+        self.diagnostic = diagnostic
+        super().__init__(str(diagnostic["reason"]))
+
+
+class RoutedReaderError(RuntimeError):
+    def __init__(self, channel: str) -> None:
+        self.reason = ROUTE_FAILURE_REASONS[channel]
+        super().__init__(self.reason)
+
+
+def _route_diagnostic(
+    decision: RouteDecision,
+    fallback: bool = False,
+    error_code: str = "",
+    reason: str = "",
+) -> dict[str, object]:
+    return {
+        "channel": decision.channel,
+        "backend": "tomos" if fallback else decision.backend,
+        "fallback": fallback,
+        "reason": reason or decision.reason,
+        "errorCode": error_code,
+    }
+
+
+def routed_web_search(query: str, limit: int, exa_search, tomos_search) -> tuple[list[dict[str, str]], dict[str, object]]:
+    try:
+        return exa_search(query, limit), {
+            "channel": "web",
+            "backend": "exa",
+            "fallback": False,
+            "reason": "doctorで利用可能と確認",
+            "errorCode": "",
+        }
+    except Exception:
+        try:
+            results = tomos_search(query, limit)
+        except Exception as exc:
+            diagnostic = {
+                "channel": "web",
+                "backend": "tomos",
+                "fallback": True,
+                "reason": "Web検索結果を取得できませんでした。",
+                "errorCode": "fallback-failed",
+            }
+            raise RoutedWebSearchError(diagnostic) from exc
+        return results, {
+            "channel": "web",
+            "backend": "tomos",
+            "fallback": True,
+            "reason": "Exa検索に失敗したため現行TOMOS検索へ切り替えました。",
+            "errorCode": "priority-failed",
+        }
+
+
+def internet_layer_context_results(
+    query: str,
+    channels: list[str],
+    runner=subprocess.run,
+    diagnostics_out: list[dict[str, object]] | None = None,
+    doctor_cache=None,
+    route_selector=select_route,
+    web_reader=None,
+    youtube_reader=None,
+    github_reader=None,
+    rss_reader=None,
+) -> tuple[list[dict[str, str]], str]:
     results: list[dict[str, str]] = []
     errors: list[str] = []
+    web_reader = web_reader or web_reader_result
+    youtube_reader = youtube_reader or youtube_transcript_result
+    github_reader = github_reader or github_repo_result
+    rss_reader = rss_reader or rss_feed_result
+
+    def routed_result(channel: str, reader, *args, **kwargs):
+        decision = agent_reach_route_decision(
+            channel,
+            doctor_cache=doctor_cache,
+            route_selector=route_selector,
+        )
+        try:
+            result = reader(*args, **kwargs)
+        except Exception:
+            if diagnostics_out is not None:
+                diagnostics_out.append(_route_diagnostic(
+                    decision,
+                    error_code="route-failed",
+                    reason=ROUTE_FAILURE_REASONS[channel],
+                ))
+            raise RoutedReaderError(channel) from None
+        if diagnostics_out is not None:
+            diagnostics_out.append(_route_diagnostic(decision))
+        return result
+
     if "youtube" in channels:
         for url in extract_youtube_urls(query):
             try:
-                result = youtube_transcript_result(url, runner=runner)
+                result = routed_result("youtube", youtube_reader, url, runner=runner)
                 if result:
                     results.append(result)
+            except RoutedReaderError as exc:
+                errors.append(exc.reason)
             except Exception as exc:
                 errors.append(f"YouTube字幕取得: {exc}")
     if "web" in channels:
         for url in extract_web_urls(query):
             try:
-                result = web_reader_result(url)
+                result = routed_result("web", web_reader, url)
                 if result:
                     results.append(result)
+            except RoutedReaderError as exc:
+                errors.append(exc.reason)
             except Exception as exc:
                 errors.append(f"Web本文取得: {exc}")
     if "github" in channels:
         repos = extract_github_repos(query)
         for repo in repos:
             try:
-                result = github_repo_result(repo, runner=runner)
+                result = routed_result("github", github_reader, repo, runner=runner)
                 if result:
                     results.append(result)
+            except RoutedReaderError as exc:
+                errors.append(exc.reason)
             except Exception as exc:
                 errors.append(f"GitHub取得: {exc}")
         if not repos and re.search(r"\bgithub\b|リポジトリ|repository|repo", query, re.IGNORECASE):
@@ -4984,9 +5092,11 @@ def internet_layer_context_results(query: str, channels: list[str], runner=subpr
     if "rss" in channels and re.search(r"\brss\b|atom|フィード|feed", query, re.IGNORECASE):
         for url in extract_web_urls(query):
             try:
-                result = rss_feed_result(url)
+                result = routed_result("rss", rss_reader, url)
                 if result:
                     results.append(result)
+            except RoutedReaderError as exc:
+                errors.append(exc.reason)
             except Exception as exc:
                 errors.append(f"RSS取得: {exc}")
     if "v2ex" in channels and re.search(r"\bv2ex\b", query, re.IGNORECASE):
@@ -5117,7 +5227,7 @@ def agent_reach_doctor_payload(runner=subprocess.run) -> dict[str, object]:
             "contract": diagnostics.get("contract") or agent_reach_command_contract(),
             "doctor": {},
         }
-    command = [executable, "doctor"]
+    command = [executable, "doctor", "--json"]
     try:
         result = runner(
             command,
@@ -5161,6 +5271,38 @@ def agent_reach_doctor_payload(runner=subprocess.run) -> dict[str, object]:
         "stdout": stdout[-4000:],
         "stderr": stderr[-2000:],
     }
+
+
+def agent_reach_doctor_snapshot() -> dict[str, object]:
+    payload = agent_reach_doctor_payload()
+    doctor = payload.get("doctor")
+    if not payload.get("ok") or not payload.get("installed") or not isinstance(doctor, dict):
+        return {"installed": False}
+    return {**doctor, "installed": True}
+
+
+AGENT_REACH_DOCTOR_CACHE = DoctorCache(agent_reach_doctor_snapshot)
+
+
+def agent_reach_route_decision(
+    channel: str,
+    intent: str = "read",
+    doctor_cache=None,
+    route_selector=select_route,
+) -> RouteDecision:
+    cache = doctor_cache or AGENT_REACH_DOCTOR_CACHE
+    try:
+        doctor = cache.get()
+        if not isinstance(doctor, dict):
+            raise ValueError("診断結果が不正です")
+        return route_selector(channel, doctor, intent=intent)
+    except Exception:
+        return RouteDecision(
+            channel=channel,
+            backend="tomos",
+            fallback="",
+            reason="doctorで利用不可のため現行TOMOS経路を使用",
+        )
 
 
 def internet_layer_setup_status() -> dict[str, object]:
@@ -5945,8 +6087,13 @@ class Handler(BaseHTTPRequestHandler):
             if use_web_search and auto_external_research and not internet_layer_channels:
                 internet_layer_channels = auto_internet_layer_channels_for_query(query)
             if use_web_search:
+                route_diagnostics: list[dict[str, object]] = []
                 try:
-                    internet_results, internet_error = internet_layer_context_results(query, internet_layer_channels)
+                    internet_results, internet_error = internet_layer_context_results(
+                        query,
+                        internet_layer_channels,
+                        diagnostics_out=route_diagnostics,
+                    )
                     search_results.extend(internet_results)
                     if internet_error:
                         search_error = internet_error
@@ -5955,7 +6102,17 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     max_results = max(0, int(body.get("search_results", 4)) - len(search_results))
                     if max_results > 0:
-                        search_results.extend(search_web(query, max_results))
+                        web_search_decision = agent_reach_route_decision("web", intent="search")
+                        if web_search_decision.backend == "exa":
+                            web_results, diagnostic = routed_web_search(query, max_results, run_exa_search, search_web)
+                        else:
+                            web_results = search_web(query, max_results)
+                            diagnostic = _route_diagnostic(web_search_decision)
+                        search_results.extend(web_results)
+                        route_diagnostics.append(diagnostic)
+                except RoutedWebSearchError as exc:
+                    route_diagnostics.append(exc.diagnostic)
+                    search_error = f"{search_error} / {exc}" if search_error else str(exc)
                 except Exception as exc:
                     search_error = f"{search_error} / {exc}" if search_error else str(exc)
                 if search_results:
@@ -5971,6 +6128,8 @@ class Handler(BaseHTTPRequestHandler):
             if complete_list_answer:
                 recent_messages = sanitize_chat_messages(messages[-1:])
             search_diagnostics = external_research_diagnostics(query, internet_layer_channels, search_results, search_error) if use_web_search else []
+            if use_web_search:
+                search_diagnostics.extend(route_diagnostics)
             complete_list_evidence = build_complete_list_evidence(query, search_results) if complete_list_answer else None
             answer_search_results = public_search_results_for_answer(search_results, complete_list_evidence)
             if complete_list_evidence:
