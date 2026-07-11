@@ -1,4 +1,6 @@
 (() => {
+const SAFE_YOUTUBE_TRANSCRIPT_ERROR = "YouTube字幕を取得できませんでした。";
+
 function normalizeSearchResults(results) {
   if (!Array.isArray(results)) return [];
   return results
@@ -13,15 +15,64 @@ function normalizeSearchResults(results) {
 function normalizeSearchDiagnostics(diagnostics) {
   if (!Array.isArray(diagnostics)) return [];
   return diagnostics
-    .map((item) => ({
-      type: String(item?.type || "").trim(),
-      status: String(item?.status || "").trim(),
-      label: String(item?.label || "").trim(),
-      message: String(item?.message || "").trim(),
-      howToSucceed: String(item?.howToSucceed || "").trim(),
-      error: String(item?.error || "").trim(),
-    }))
+    .map((item) => {
+      const diagnostic = {
+        type: String(item?.type || "").trim(),
+        status: String(item?.status || "").trim(),
+        label: String(item?.label || "").trim(),
+        message: String(item?.message || "").trim(),
+        howToSucceed: String(item?.howToSucceed || "").trim(),
+      };
+      if (diagnostic.type !== "route") {
+        return diagnostic.type === "youtube-transcript" && item?.error === SAFE_YOUTUBE_TRANSCRIPT_ERROR
+          ? { ...diagnostic, error: SAFE_YOUTUBE_TRANSCRIPT_ERROR }
+          : diagnostic;
+      }
+      const backend = String(item?.backend || "").trim();
+      const channel = String(item?.channel || "").trim();
+      const errorCode = String(item?.errorCode || "").trim();
+      return {
+        ...diagnostic,
+        backend: ["Jina", "Exa", "YouTube字幕", "GitHub", "RSS", "TOMOS標準検索"].includes(backend) ? backend : "",
+        fallback: Boolean(item?.fallback),
+        errorCode: ["", "priority-failed", "route-failed", "fallback-failed"].includes(errorCode) ? errorCode : "",
+        channel: ["web", "youtube", "github", "rss"].includes(channel) ? channel : "",
+      };
+    })
     .filter((item) => item.label || item.message);
+}
+
+function formatSearchDiagnosticsForDisplay(diagnostics, translate) {
+  if (!Array.isArray(diagnostics)) return [];
+  const supportedBackends = new Set(["Jina", "Exa", "YouTube字幕", "GitHub", "RSS", "TOMOS標準検索"]);
+  const t = typeof translate === "function" ? translate : (key) => key;
+  return diagnostics.map((item) => {
+    if (item?.type !== "route") return item;
+    const hasKnownBackend = supportedBackends.has(item.backend);
+    const backend = hasKnownBackend ? item.backend : "TOMOS標準検索";
+    const fallbackFailed = item.errorCode === "fallback-failed";
+    const routeFailed = item.errorCode === "route-failed";
+    const fallback = hasKnownBackend && Boolean(item.fallback);
+    const message = fallbackFailed
+      ? t("chat.searchRouteFailed", { backend })
+      : routeFailed
+        ? t("chat.searchRouteRouteFailed", { backend })
+        : fallback
+          ? t("chat.searchRouteFallback", { backend })
+          : t("chat.searchRouteUsed", { backend });
+    const howToSucceed = fallbackFailed || routeFailed
+      ? t("chat.searchRouteRetryHelp")
+      : fallback
+        ? t("chat.searchRouteFallbackHelp")
+        : t("chat.searchRouteUsedHelp");
+    return {
+      ...item,
+      label: t("chat.searchRouteLabel"),
+      message,
+      howToSucceed,
+      error: "",
+    };
+  });
 }
 
 function searchEnabledForChat({ codingMode, webSearch }) {
@@ -106,6 +157,7 @@ function searchDiagnosticsFromResponse(data) {
 window.GEMMA_SEARCH = {
   normalizeSearchResults,
   normalizeSearchDiagnostics,
+  formatSearchDiagnosticsForDisplay,
   applySearchBudget,
   availableInternetLayerChannels,
   renderWebSearchToggle,

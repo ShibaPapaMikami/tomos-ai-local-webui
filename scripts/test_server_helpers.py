@@ -1018,6 +1018,32 @@ def test_web_search_uses_exa_then_tomos_once_on_failure() -> None:
     assert results[0]["title"] == "結果"
 
 
+def test_route_diagnostic_hides_raw_stderr() -> None:
+    diagnostic = server.route_diagnostic(
+        "web",
+        "exa",
+        True,
+        "stderr=/Users/name/.config/cookie token=secret",
+    )
+
+    assert diagnostic["label"] == "使用経路"
+    assert diagnostic["message"] == "ExaからTOMOS標準検索へ切り替えました。"
+    assert diagnostic["howToSucceed"] == "優先経路が使えなかったため、TOMOS標準検索で確認しています。"
+    public_text = json.dumps(diagnostic, ensure_ascii=False)
+    assert "/Users/" not in public_text
+    assert "cookie" not in public_text
+    assert "token" not in public_text
+    assert "stderr" not in public_text
+
+
+def test_route_diagnostic_uses_japanese_backend_labels() -> None:
+    assert server.route_diagnostic("web", "jina")["message"] == "Jinaを使用しました。"
+    assert server.route_diagnostic("youtube", "youtube")["message"] == "YouTube字幕を使用しました。"
+    assert server.route_diagnostic("github", "github")["message"] == "GitHubを使用しました。"
+    assert server.route_diagnostic("rss", "rss")["message"] == "RSSを使用しました。"
+    assert server.route_diagnostic("web", "tomos")["message"] == "TOMOS標準検索を使用しました。"
+
+
 def test_internet_layer_context_passes_active_backend_to_route_selector() -> None:
     calls = []
 
@@ -1143,10 +1169,14 @@ def test_internet_layer_context_reports_safe_diagnostic_when_youtube_reader_fail
     assert results == []
     assert error == "YouTube字幕を取得できませんでした。"
     assert diagnostics == [{
+        "type": "route",
+        "status": "error",
+        "label": "使用経路",
+        "message": "YouTube字幕で確認できませんでした。",
+        "howToSucceed": "時間をおいて再送信してください。",
         "channel": "youtube",
-        "backend": "youtube",
+        "backend": "YouTube字幕",
         "fallback": False,
-        "reason": "YouTube字幕を取得できませんでした。",
         "errorCode": "route-failed",
     }]
     assert "/Users/" not in json.dumps(diagnostics, ensure_ascii=False)
@@ -1864,13 +1894,17 @@ def test_chat_handler_collects_failed_exa_fallback_diagnostic() -> None:
     response = json.loads(body)
     assert calls == ["exa", "tomos"]
     assert response["search"]["diagnostics"] == [{
+        "type": "route",
+        "status": "error",
+        "label": "使用経路",
+        "message": "ExaとTOMOS標準検索で結果を取得できませんでした。",
+        "howToSucceed": "時間をおいて再送信してください。",
         "channel": "web",
-        "backend": "tomos",
+        "backend": "Exa",
         "fallback": True,
-        "reason": "Web検索結果を取得できませんでした。",
         "errorCode": "fallback-failed",
     }]
-    assert response["search"]["error"] == "Web検索結果を取得できませんでした。"
+    assert response["search"]["error"] == "ExaとTOMOS標準検索で結果を取得できませんでした。"
     assert "/Users/" not in json.dumps(response["search"]["diagnostics"], ensure_ascii=False)
     assert "token" not in json.dumps(response["search"]["diagnostics"], ensure_ascii=False)
 
@@ -2868,6 +2902,8 @@ if __name__ == "__main__":
     test_internet_layer_setup_status_shape()
     test_agent_reach_doctor_payload_reads_runner_output()
     test_web_search_uses_exa_then_tomos_once_on_failure()
+    test_route_diagnostic_hides_raw_stderr()
+    test_route_diagnostic_uses_japanese_backend_labels()
     test_internet_layer_context_passes_active_backend_to_route_selector()
     test_internet_layer_context_resolves_current_youtube_reader_at_call_time()
     test_internet_layer_context_does_not_retry_same_youtube_reader()

@@ -4117,6 +4117,7 @@ const {
 
 const {
   applySearchBudget,
+  formatSearchDiagnosticsForDisplay,
   normalizeSearchResults,
   renderWebSearchToggle,
   searchDiagnosticsFromEvent,
@@ -5716,7 +5717,7 @@ async function sendMessage(text) {
       assistantMessage.sources = requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(normalizeSearchResults?.(streamSearchResults) || streamSearchResults)];
-      assistantMessage.searchDiagnostics = streamSearchDiagnostics;
+      assistantMessage.searchDiagnostics = formatSearchDiagnosticsForDisplay(streamSearchDiagnostics, t);
       assistantMessage.durationSeconds = durationSeconds;
       assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel, runMetaOverrides);
       delete assistantMessage.streaming;
@@ -5754,7 +5755,7 @@ async function sendMessage(text) {
       sources: requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(searchResultsFromResponse?.(data) || [])],
-      searchDiagnostics: searchDiagnosticsFromResponse?.(data) || [],
+      searchDiagnostics: formatSearchDiagnosticsForDisplay(searchDiagnosticsFromResponse?.(data) || [], t),
       durationSeconds,
       runMeta: messageRunMeta(requestOptions, data.model || requestModel, runMetaOverrides),
     });

@@ -4453,6 +4453,67 @@ def external_research_diagnostics(query: str, channels: list[str], results: list
     return diagnostics
 
 
+ROUTE_BACKEND_LABELS = {
+    "jina": "Jina",
+    "exa": "Exa",
+    "youtube": "YouTube字幕",
+    "github": "GitHub",
+    "rss": "RSS",
+    "tomos": "TOMOS標準検索",
+}
+ROUTE_BACKEND_ALIASES = {
+    "jina reader": "jina",
+    "yt-dlp": "youtube",
+    "gh cli": "github",
+    "feedparser": "rss",
+}
+ROUTE_ERROR_CODES = {"priority-failed", "fallback-failed", "route-failed"}
+
+
+def route_diagnostic(
+    channel: str,
+    backend: str,
+    fallback: bool = False,
+    route_reason: str = "",
+    error_code: str = "",
+) -> dict[str, object]:
+    backend_key = str(backend or "tomos").strip().lower()
+    backend_key = ROUTE_BACKEND_ALIASES.get(backend_key, backend_key)
+    if backend_key not in ROUTE_BACKEND_LABELS:
+        backend_key = "tomos"
+    backend_label = ROUTE_BACKEND_LABELS[backend_key]
+    safe_error_code = error_code if error_code in ROUTE_ERROR_CODES else ""
+
+    if safe_error_code == "fallback-failed":
+        status = "error"
+        message = f"{backend_label}とTOMOS標準検索で結果を取得できませんでした。"
+        how_to_succeed = "時間をおいて再送信してください。"
+    elif fallback:
+        status = "warning"
+        message = f"{backend_label}からTOMOS標準検索へ切り替えました。"
+        how_to_succeed = "優先経路が使えなかったため、TOMOS標準検索で確認しています。"
+    elif safe_error_code == "route-failed":
+        status = "error"
+        message = f"{backend_label}で確認できませんでした。"
+        how_to_succeed = "時間をおいて再送信してください。"
+    else:
+        status = "success"
+        message = f"{backend_label}を使用しました。"
+        how_to_succeed = "利用可能な経路で確認しています。"
+
+    return {
+        "type": "route",
+        "status": status,
+        "label": "使用経路",
+        "message": message,
+        "howToSucceed": how_to_succeed,
+        "channel": str(channel or ""),
+        "backend": backend_label,
+        "fallback": bool(fallback),
+        "errorCode": safe_error_code,
+    }
+
+
 def direct_external_research_answer(query: str, results: list[dict[str, str]], error: str = "") -> str:
     if not should_auto_use_external_research(query) or not results:
         return ""
@@ -4960,7 +5021,7 @@ ROUTE_FAILURE_REASONS = {
 class RoutedWebSearchError(RuntimeError):
     def __init__(self, diagnostic: dict[str, object]) -> None:
         self.diagnostic = diagnostic
-        super().__init__(str(diagnostic["reason"]))
+        super().__init__(str(diagnostic.get("message") or "Web検索結果を取得できませんでした。"))
 
 
 class RoutedReaderError(RuntimeError):
@@ -4975,43 +5036,25 @@ def _route_diagnostic(
     error_code: str = "",
     reason: str = "",
 ) -> dict[str, object]:
-    return {
-        "channel": decision.channel,
-        "backend": "tomos" if fallback else decision.backend,
-        "fallback": fallback,
-        "reason": reason or decision.reason,
-        "errorCode": error_code,
-    }
+    return route_diagnostic(
+        decision.channel,
+        decision.backend,
+        fallback=fallback,
+        route_reason=reason or decision.reason,
+        error_code=error_code,
+    )
 
 
 def routed_web_search(query: str, limit: int, exa_search, tomos_search) -> tuple[list[dict[str, str]], dict[str, object]]:
     try:
-        return exa_search(query, limit), {
-            "channel": "web",
-            "backend": "exa",
-            "fallback": False,
-            "reason": "doctorで利用可能と確認",
-            "errorCode": "",
-        }
+        return exa_search(query, limit), route_diagnostic("web", "exa")
     except Exception:
         try:
             results = tomos_search(query, limit)
         except Exception as exc:
-            diagnostic = {
-                "channel": "web",
-                "backend": "tomos",
-                "fallback": True,
-                "reason": "Web検索結果を取得できませんでした。",
-                "errorCode": "fallback-failed",
-            }
+            diagnostic = route_diagnostic("web", "exa", fallback=True, error_code="fallback-failed")
             raise RoutedWebSearchError(diagnostic) from exc
-        return results, {
-            "channel": "web",
-            "backend": "tomos",
-            "fallback": True,
-            "reason": "Exa検索に失敗したため現行TOMOS検索へ切り替えました。",
-            "errorCode": "priority-failed",
-        }
+        return results, route_diagnostic("web", "exa", fallback=True, error_code="priority-failed")
 
 
 def internet_layer_context_results(
