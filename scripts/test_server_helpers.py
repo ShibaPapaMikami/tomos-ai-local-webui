@@ -1416,6 +1416,37 @@ def test_extract_complete_list_ignores_category_words_in_link_heading_urls() -> 
     ) == ["星の旅人", "星の旅人Z"]
 
 
+def test_extract_complete_list_linked_titles_inherit_parent_category() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## 映像作品",
+        "### [ゲームの星](https://works-official.example/titles/game-star)",
+        "### [漫画の空](https://works-official.example/titles/manga-sky)",
+        "### [商品戦線](https://works-official.example/titles/product-front)",
+        "## ゲーム作品", "- 星の旅人バトル",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="アニメ作品を一覧にして"
+    ) == ["ゲームの星", "漫画の空", "商品戦線"]
+
+
+def test_extract_complete_list_excludes_category_alias_headings() -> None:
+    result = complete_list_page("https://works-official.example/catalog", [])
+    result["snippet"] = "\n".join([
+        "## [アニメシリーズ](https://works-official.example/anime)", "- 星の旅人",
+        "## [Anime](https://works-official.example/anime-en)", "- Star Voyager",
+        "## [ゲームシリーズ](https://works-official.example/games)", "- 星の旅人バトル",
+        "## [Comics](https://works-official.example/comics)", "- Star Voyager Comic",
+        "## [Products](https://works-official.example/products)", "- Star Voyager Figure",
+    ])
+    assert server.extract_grounded_list_candidates_from_results(
+        [result], query="アニメ、ゲーム、漫画、商品を一覧にして"
+    ) == [
+        "星の旅人", "Star Voyager", "星の旅人バトル",
+        "Star Voyager Comic", "Star Voyager Figure",
+    ]
+
+
 def complete_list_test_evidence(items: list[str]) -> server.CompleteListEvidence:
     source = complete_list_page("https://official.example/works", items)
     return server.CompleteListEvidence(
@@ -2500,6 +2531,8 @@ if __name__ == "__main__":
     test_extract_complete_list_uses_linked_category_heading_without_candidate()
     test_extract_complete_list_series_word_falls_back_to_series_category()
     test_extract_complete_list_ignores_category_words_in_link_heading_urls()
+    test_extract_complete_list_linked_titles_inherit_parent_category()
+    test_extract_complete_list_excludes_category_alias_headings()
     test_augment_search_results_with_page_text_reads_first_result()
     test_augment_search_results_with_page_text_reads_multiple_prioritized_results()
     test_augment_search_results_with_page_text_stops_after_three_attempts_when_reads_fail()

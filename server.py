@@ -3832,32 +3832,59 @@ def complete_list_heading_label(heading: str) -> str:
     return re.sub(r"^(?:\*\*|__)(.+?)(?:\*\*|__)$", r"\1", text).strip()
 
 
-def complete_list_is_category_heading(heading: str) -> bool:
+def complete_list_heading_categories(heading: str) -> frozenset[str]:
     label = re.sub(r"\s+", "", complete_list_heading_label(heading)).lower()
-    return label in {
-        "シリーズ", "映像作品", "アニメ", "アニメ作品", "tv", "tv作品", "テレビ", "テレビ作品",
-        "ova", "ova作品", "劇場", "劇場作品", "劇場版", "映画", "映画作品", "配信", "配信作品",
-        "ゲーム", "ゲーム作品", "テレビゲーム", "tvゲーム",
-        "漫画", "漫画作品", "マンガ", "マンガ作品", "書籍", "書籍作品", "小説", "小説作品", "ゲーム関連書籍",
-        "商品", "商品作品", "模型", "玩具", "グッズ",
-        "その他", "その他の作品", "その他の映像作品", "音楽", "実写", "舞台", "ラジオ",
+    if label == "ゲーム関連書籍":
+        return frozenset({"game", "book"})
+    if label == "その他の映像作品":
+        return frozenset({"series", "other"})
+
+    aliases = {
+        "series": {
+            "シリーズ", "映像", "映像作品", "映像シリーズ", "アニメ", "アニメ作品", "アニメシリーズ",
+            "tv", "tv作品", "tvシリーズ", "テレビ", "テレビ作品", "テレビシリーズ",
+            "ova", "ova作品", "ovaシリーズ", "劇場", "劇場作品", "劇場シリーズ", "劇場版",
+            "映画", "映画作品", "映画シリーズ", "配信", "配信作品", "配信シリーズ",
+            "series", "anime", "animeworks", "animeseries", "video", "videos", "videoworks", "videoseries",
+            "tvworks", "tvseries", "ovaworks", "ovaseries", "movie", "movies", "movieworks", "movieseries",
+            "film", "films", "filmworks", "filmseries", "streaming", "streamingworks", "streamingseries",
+        },
+        "game": {
+            "ゲーム", "ゲーム作品", "ゲームシリーズ", "テレビゲーム", "tvゲーム",
+            "game", "games", "gameworks", "gameseries", "videogame", "videogames", "videogameworks", "videogameseries",
+        },
+        "book": {
+            "漫画", "漫画作品", "漫画シリーズ", "マンガ", "マンガ作品", "マンガシリーズ",
+            "書籍", "書籍作品", "書籍シリーズ", "小説", "小説作品", "小説シリーズ",
+            "comic", "comics", "comicworks", "comicseries", "manga", "mangaworks", "mangaseries",
+            "book", "books", "bookworks", "bookseries", "novel", "novels", "novelworks", "novelseries",
+        },
+        "product": {
+            "商品", "商品作品", "商品シリーズ", "模型", "模型作品", "模型シリーズ",
+            "玩具", "玩具作品", "玩具シリーズ", "グッズ", "グッズ作品", "グッズシリーズ",
+            "product", "products", "productworks", "productseries", "model", "models", "modelworks", "modelseries",
+            "toy", "toys", "toyworks", "toyseries", "goods", "merchandise",
+        },
+        "other": {"その他", "その他の作品", "音楽", "実写", "舞台", "ラジオ", "other", "music", "liveaction", "stage", "radio"},
     }
+    return frozenset(category for category, values in aliases.items() if label in values)
+
+
+def complete_list_is_category_heading(heading: str) -> bool:
+    return bool(complete_list_heading_categories(heading))
+
+
+def complete_list_is_excluded_heading(heading: str) -> bool:
+    label = re.sub(r"\s+", "", complete_list_heading_label(heading)).lower()
+    return bool(re.search(
+        r"脚注|注釈|出典|参考文献|関連項目|外部リンク|ログイン|アカウント作成|footnotes?|references?|externallinks?|relateditems?|login|sign[-_]?in|sign[-_]?up",
+        label,
+        re.IGNORECASE,
+    ))
 
 
 def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
-    normalized = []
-    for heading in headings or []:
-        text = complete_list_heading_label(heading)
-        text = re.sub(r"\s+", "", text).lower()
-        normalized.append(text)
-    if any(
-        re.search(
-            r"脚注|注釈|出典|参考文献|関連項目|外部リンク|ログイン|アカウント作成|footnotes?|references?|external\s*links?|related\s*items?|login|sign[-_]?in|sign[-_]?up",
-            heading,
-            re.IGNORECASE,
-        )
-        for heading in normalized
-    ):
+    if any(complete_list_is_excluded_heading(heading) for heading in headings or []):
         return False
 
     intents = complete_list_intents(query)
@@ -3866,17 +3893,8 @@ def complete_list_section_allowed(query: str, headings: list[str]) -> bool:
         return True
 
     categories = set()
-    for heading in normalized:
-        if re.search(r"ゲーム|game", heading, re.IGNORECASE):
-            categories.add("game")
-        if re.search(r"漫画|マンガ|書籍|小説|comic|manga|book|novel", heading, re.IGNORECASE):
-            categories.add("book")
-        if re.search(r"商品|模型|玩具|グッズ|model|toy|goods", heading, re.IGNORECASE):
-            categories.add("product")
-        if re.search(r"その他|音楽|実写|舞台|ラジオ|other|music|live\s*action|stage|radio", heading, re.IGNORECASE):
-            categories.add("other")
-        if re.search(r"映像|アニメ|(?:TV|テレビ)(?!ゲーム)|OVA|劇場|映画|配信|series|anime|movie|film|video", heading, re.IGNORECASE):
-            categories.add("series")
+    for heading in headings or []:
+        categories.update(complete_list_heading_categories(heading))
     if not categories:
         return True
     return bool(categories & requested) and categories <= requested
@@ -3975,14 +3993,18 @@ def extract_grounded_list_candidates_from_results(
         headings: list[str] = []
         for line in snippet.splitlines():
             heading_match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line.strip())
+            heading_categories: frozenset[str] = frozenset()
             if heading_match:
                 level = len(heading_match.group(1))
                 heading = heading_match.group(2).strip()
+                heading_categories = complete_list_heading_categories(heading)
+                linked_heading = bool(re.fullmatch(r"\[[^\]]+\]\((?:https?://|/)[^)]+\)", heading))
+                update_state = not linked_heading or bool(heading_categories) or complete_list_is_excluded_heading(heading)
                 if level == 1:
                     headings = []
-                elif level == 2:
+                elif level == 2 and update_state:
                     headings = [heading]
-                elif level == 3:
+                elif level == 3 and update_state:
                     headings = headings[:1] + [heading]
             if not complete_list_section_allowed(query, headings):
                 continue
