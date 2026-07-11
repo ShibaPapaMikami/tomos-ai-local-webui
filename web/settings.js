@@ -566,19 +566,25 @@ function renderComposerModelVisibility({
     els.composerModelVisibility.innerHTML = "";
     return;
   }
-  const selected = new Set(Array.isArray(state.composerModelVisibleModels) ? state.composerModelVisibleModels.filter(Boolean) : uniqueModels);
+  const savedVisibleModels = Array.isArray(state.composerModelVisibleModels)
+    ? state.composerModelVisibleModels.filter(Boolean)
+    : [];
+  const selected = new Set(savedVisibleModels.length > 0 ? savedVisibleModels : uniqueModels);
   els.composerModelVisibility.innerHTML = `
     <div class="composer-model-visibility-title">
       <strong>${language === "en" ? "Models shown in chat" : "チャット欄に表示するAIモデル"}</strong>
       <span>${language === "en" ? "Auto is always shown. Choose which downloaded models appear in the chat model menu." : "自動は常に表示されます。チャット欄のモデルメニューに出すダウンロード済みAIモデルを選べます。"}</span>
     </div>
     <div class="composer-model-visibility-list">
-      ${uniqueModels.map((model) => `
-        <label>
-          <input type="checkbox" data-composer-model-visible="${model}" ${selected.has(model) ? "checked" : ""} />
+      ${uniqueModels.map((model) => {
+        const isSelected = selected.has(model);
+        return `
+        <label class="${isSelected ? "is-selected" : ""}">
+          <input type="checkbox" data-composer-model-visible="${model}" ${isSelected ? "checked" : ""} />
           <span>${composerModelLabel(model)}</span>
         </label>
-      `).join("")}
+      `;
+      }).join("")}
     </div>
   `;
 }

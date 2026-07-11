@@ -166,6 +166,19 @@ assert.match(composerVisibilityEl.innerHTML, /チャット欄に表示するAI�
 assert.match(composerVisibilityEl.innerHTML, /Qwen/);
 assert.match(composerVisibilityEl.innerHTML, /data-composer-model-visible="qwen2.5:3b"/);
 assert.match(composerVisibilityEl.innerHTML, /checked/);
+const checkedVisibilityHtml = composerVisibilityEl.innerHTML;
+assert.match(checkedVisibilityHtml, /data-composer-model-visible="qwen2\.5:3b" checked/);
+assert.doesNotMatch(checkedVisibilityHtml, new RegExp(`data-composer-model-visible="${agenticCoder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" checked`));
+assert.match(checkedVisibilityHtml, /class="is-selected"/);
+
+const defaultVisibilityEl = new FakeElement("section");
+renderComposerModelVisibility({
+  composerModelLabel: (model) => model,
+  els: { composerModelVisibility: defaultVisibilityEl },
+  models: ["qwen2.5:3b", agenticCoder],
+  state: { language: "ja", composerModelVisibleModels: [] },
+});
+assert.equal((defaultVisibilityEl.innerHTML.match(/ checked/g) || []).length, 2);
 
 const pcDiagnosticsEl = new FakeElement("section");
 renderPcDiagnosticsPanel({

@@ -3295,6 +3295,14 @@ h1 {
   font-weight: 800;
 }
 
+.composer-model-visibility-list label.is-selected {
+  color: var(--text);
+}
+
+.composer-model-visibility-list label.is-selected span {
+  font-weight: 800;
+}
+
 .composer-model-visibility-list input {
   width: 14px;
   height: 14px;
