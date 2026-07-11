@@ -66,13 +66,16 @@ Expected: Agent-Reach本体の変更禁止を維持しつつ、TOMOS側アダプ
 ```python
 def test_doctor_cache_reuses_result_for_five_minutes():
     calls = []
-    cache = adapter.DoctorCache(lambda: calls.append(True) or {"channels": {"web": {"status": "ready", "backend": "jina"}}})
-    assert cache.get(now=100)["channels"]["web"]["backend"] == "jina"
-    assert cache.get(now=399)["channels"]["web"]["backend"] == "jina"
+    cache = adapter.DoctorCache(lambda: calls.append(True) or {"channels": {"web": {"status": "ok", "active_backend": "Jina Reader"}}})
+    assert cache.get(now=100)["channels"]["web"]["active_backend"] == "Jina Reader"
+    assert cache.get(now=399)["channels"]["web"]["active_backend"] == "Jina Reader"
     assert len(calls) == 1
 
 def test_select_route_uses_exa_only_for_search():
-    doctor = {"channels": {"web": {"status": "ready", "backends": ["jina", "exa"]}}}
+    doctor = {"channels": {
+        "web": {"status": "ok", "active_backend": "Jina Reader"},
+        "exa_search": {"status": "ok", "active_backend": "Exa via mcporter"},
+    }}
     assert adapter.select_route("web", doctor, intent="search").backend == "exa"
     assert adapter.select_route("web", doctor, intent="read").backend == "jina"
 ```
@@ -112,7 +115,7 @@ class DoctorCache:
         return self.value
 ```
 
-`select_route`はWeb検索だけ`exa`、Web本文は`jina`、YouTubeは`yt-dlp`、GitHubは`gh`、RSSは`feedparser`を選び、利用不可時は`tomos`を返す。
+`select_route`はWeb検索で`exa_search.active_backend`、Web本文で`web.active_backend`を参照する。YouTubeは`youtube`、GitHubは`github`、RSSは`rss`の`active_backend`を参照し、利用不可時は`tomos`を返す。
 
 - [ ] **Step 4: テストを通す**
 
@@ -199,6 +202,8 @@ git commit -m "Exa検索結果をTOMOS形式へ変換する"
 **Interfaces:**
 - Consumes: `DoctorCache`、`select_route`、`run_exa_search`
 - Produces: `internet_layer_context_results(..., diagnostics_out=None)`の既存結果と経路診断
+
+診断取得は`[executable, "doctor", "--json"]`を使用し、JSON内の`active_backend`を経路選択へ渡す。
 
 - [ ] **Step 1: 経路選択と一回フォールバックの失敗テストを書く**
 
