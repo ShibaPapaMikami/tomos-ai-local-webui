@@ -1002,6 +1002,12 @@ def test_agent_reach_doctor_payload_reads_runner_output() -> None:
 
 def test_web_search_uses_exa_then_tomos_once_on_failure() -> None:
     calls = []
+    original = [{
+        "title": "結果",
+        "url": "https://example.com",
+        "snippet": "本文",
+        "source": "agent-reach:web",
+    }]
 
     def failing_exa(query, limit):
         calls.append("exa")
@@ -1009,13 +1015,101 @@ def test_web_search_uses_exa_then_tomos_once_on_failure() -> None:
 
     def tomos_search(query, limit):
         calls.append("tomos")
-        return [{"title": "結果", "url": "https://example.com", "snippet": "本文"}]
+        return original
 
     results, diagnostic = server.routed_web_search("質問", 4, failing_exa, tomos_search)
 
     assert calls == ["exa", "tomos"]
     assert diagnostic["fallback"] is True
-    assert results[0]["title"] == "結果"
+    assert original == [{
+        "title": "結果",
+        "url": "https://example.com",
+        "snippet": "本文",
+        "source": "agent-reach:web",
+    }]
+    assert results == [{
+        **original[0],
+        "backend": "tomos",
+        "routeReason": "ExaからTOMOS標準検索へ切り替えました。",
+    }]
+    assert results[0] is not original[0]
+
+
+def test_web_search_results_for_decision_uses_tomos_once_when_unavailable() -> None:
+    calls = []
+    original = [{
+        "title": "結果",
+        "url": "https://example.com",
+        "snippet": "本文",
+        "source": "agent-reach:web",
+    }]
+    decision = server.RouteDecision(
+        "web", "tomos", "", "doctorで利用不可のため現行TOMOS経路を使用"
+    )
+
+    def exa_search(*_args):
+        raise AssertionError("利用不可時にExaを呼び出してはいけません")
+
+    def tomos_search(query, limit):
+        calls.append((query, limit))
+        return original
+
+    results, diagnostic = server.web_search_results_for_decision(
+        decision, "質問", 4, exa_search, tomos_search
+    )
+
+    assert calls == [("質問", 4)]
+    assert original == [{
+        "title": "結果",
+        "url": "https://example.com",
+        "snippet": "本文",
+        "source": "agent-reach:web",
+    }]
+    assert results == [{
+        **original[0],
+        "backend": "tomos",
+        "routeReason": "doctorで利用不可のため現行TOMOS経路を使用",
+    }]
+    assert results[0] is not original[0]
+    assert diagnostic == server.route_diagnostic("web", "tomos")
+
+
+def test_web_search_results_for_decision_uses_exa_then_tomos_once_on_failure() -> None:
+    calls = []
+    original = [{
+        "title": "結果",
+        "url": "https://example.com",
+        "snippet": "本文",
+        "source": "agent-reach:web",
+    }]
+    decision = server.RouteDecision("web", "exa", "tomos", "doctorで利用可能と確認")
+
+    def failing_exa(query, limit):
+        calls.append(("exa", query, limit))
+        raise RuntimeError("exa unavailable")
+
+    def tomos_search(query, limit):
+        calls.append(("tomos", query, limit))
+        return original
+
+    results, diagnostic = server.web_search_results_for_decision(
+        decision, "質問", 4, failing_exa, tomos_search
+    )
+
+    assert calls == [("exa", "質問", 4), ("tomos", "質問", 4)]
+    assert original == [{
+        "title": "結果",
+        "url": "https://example.com",
+        "snippet": "本文",
+        "source": "agent-reach:web",
+    }]
+    assert results == [{
+        **original[0],
+        "backend": "tomos",
+        "routeReason": "ExaからTOMOS標準検索へ切り替えました。",
+    }]
+    assert results[0] is not original[0]
+    assert diagnostic["fallback"] is True
 
 
 def test_route_diagnostic_hides_raw_stderr() -> None:
@@ -1083,6 +1177,69 @@ def test_internet_layer_context_passes_active_backend_to_route_selector() -> Non
         "installed": True,
         "channels": {"youtube": {"status": "ok", "active_backend": "yt-dlp"}},
     }, "read")]
+
+
+def test_internet_layer_context_copies_results_and_attaches_route_metadata_for_all_channels() -> None:
+    class FakeDoctorCache:
+        def get(self):
+            return {
+                "installed": True,
+                "channels": {
+                    "web": {"status": "ok", "active_backend": "Jina Reader"},
+                    "youtube": {"status": "ok", "active_backend": "yt-dlp"},
+                    "github": {"status": "ok", "active_backend": "gh CLI"},
+                    "rss": {"status": "ok", "active_backend": "feedparser"},
+                },
+            }
+
+    cases = [
+        (
+            "web",
+            "https://example.com/article を読んで",
+            {"title": "Webページ本文: テスト", "url": "https://example.com/article", "snippet": "本文", "source": "agent-reach:web"},
+            "web_reader",
+            "jina",
+        ),
+        (
+            "youtube",
+            "https://www.youtube.com/watch?v=zfN4QApep6s を分析して",
+            {"title": "YouTube動画: テスト", "url": "https://www.youtube.com/watch?v=zfN4QApep6s", "snippet": "字幕", "source": "agent-reach:youtube"},
+            "youtube_reader",
+            "youtube",
+        ),
+        (
+            "github",
+            "https://github.com/openai/codex を調べて",
+            {"title": "GitHubリポジトリ: openai/codex", "url": "https://github.com/openai/codex", "snippet": "本文", "source": "agent-reach:github"},
+            "github_reader",
+            "github",
+        ),
+        (
+            "rss",
+            "https://example.com/feed.xml のRSSを読んで",
+            {"title": "RSSフィード: テスト", "url": "https://example.com/feed.xml", "snippet": "本文", "source": "agent-reach:rss"},
+            "rss_reader",
+            "rss",
+        ),
+    ]
+    for channel, query, result_from_reader, reader_name, backend in cases:
+        readers = {reader_name: lambda *_args, result=result_from_reader, **_kwargs: result}
+        results, error = server.internet_layer_context_results(
+            query,
+            [channel],
+            doctor_cache=FakeDoctorCache(),
+            **readers,
+        )
+        assert error == ""
+        assert result_from_reader == {
+            key: value for key, value in result_from_reader.items()
+            if key not in {"backend", "routeReason"}
+        }
+        assert results == [{
+            **result_from_reader,
+            "backend": backend,
+            "routeReason": "doctorで利用可能と確認",
+        }]
 
 
 def test_internet_layer_context_resolves_current_youtube_reader_at_call_time() -> None:
@@ -1909,6 +2066,39 @@ def test_chat_handler_collects_failed_exa_fallback_diagnostic() -> None:
     assert "token" not in json.dumps(response["search"]["diagnostics"], ensure_ascii=False)
 
 
+def test_chat_handler_uses_web_search_results_for_decision() -> None:
+    calls = []
+    decision = server.RouteDecision("web", "tomos", "", "doctorで利用不可のため現行TOMOS経路を使用")
+
+    def route_helper(received_decision, query, limit, exa_search, tomos_search):
+        calls.append((received_decision, query, limit, exa_search, tomos_search))
+        return ([{
+            "title": "結果",
+            "url": "https://example.com/result",
+            "snippet": "本文",
+            "source": "agent-reach:web",
+        }], server.route_diagnostic("web", "tomos"))
+
+    with patch.object(server, "agent_reach_route_decision", lambda *args, **kwargs: decision), patch.object(
+        server, "web_search_results_for_decision", route_helper
+    ), patch.object(server, "ollama_json", lambda *args, **kwargs: {
+        "message": {"role": "assistant", "content": "確認しました。"},
+        "done": True,
+    }), local_chat_handler() as url:
+        _, body = post_local_chat(url, {
+            "messages": [{"role": "user", "content": "調べて"}],
+            "web_search": True,
+            "internet_layer_channels": [],
+            "stream": False,
+        })
+
+    response = json.loads(body)
+    assert len(calls) == 1
+    assert calls[0][0] is decision
+    assert calls[0][1:3] == ("調べて", 4)
+    assert response["search"]["diagnostics"][-1] == server.route_diagnostic("web", "tomos")
+
+
 def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
     general_web_result = complete_list_page(
         "https://official.example/works",
@@ -1978,6 +2168,12 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
     def fake_search_web(query, limit):
         return [general_web_result] if query == "公式サイトの紹介作品を全て一覧" else []
 
+    expected_general_web_results = [{
+        **general_web_result,
+        "backend": "tomos",
+        "routeReason": "doctorで利用不可のため現行TOMOS経路を使用",
+    }]
+
     with patch.object(server, "search_web", fake_search_web), patch.object(
         server, "augment_search_results_with_page_text", lambda query, results: (results, "")
     ), patch.object(server, "internet_layer_context_results", fake_internet_results), patch.object(
@@ -1986,11 +2182,13 @@ def test_chat_http_complete_list_events_and_youtube_stream_regression() -> None:
         stream_events = post_events(url, "公式サイトの紹介作品を全て一覧", ["web"], True)
         assert [event["type"] for event in stream_events] == ["start", "chunk", "done"]
         stream_done = stream_events[-1]
-        assert stream_events[0]["search"]["results"] == [general_web_result]
+        assert general_web_result.get("backend") is None
+        assert general_web_result.get("routeReason") is None
+        assert stream_events[0]["search"]["results"] == expected_general_web_results
         response = post_events(url, "公式サイトの紹介作品を全て一覧", ["web"], False)[0]
         assert response["message"]["content"] == stream_done["message"]["content"] == stream_events[1]["content"]
         assert stream_done["message"]["content"].startswith("まさふみ、ぼくが確認できた内容をまとめたよ。")
-        assert response["search"]["results"] == stream_done["search"]["results"] == [general_web_result]
+        assert response["search"]["results"] == stream_done["search"]["results"] == expected_general_web_results
         assert response["search"]["diagnostics"] == stream_done["search"]["diagnostics"]
         assert stream_done["search"]["diagnostics"][-1]["mode"] == "deterministic-complete-list"
 
@@ -2902,9 +3100,12 @@ if __name__ == "__main__":
     test_internet_layer_setup_status_shape()
     test_agent_reach_doctor_payload_reads_runner_output()
     test_web_search_uses_exa_then_tomos_once_on_failure()
+    test_web_search_results_for_decision_uses_tomos_once_when_unavailable()
+    test_web_search_results_for_decision_uses_exa_then_tomos_once_on_failure()
     test_route_diagnostic_hides_raw_stderr()
     test_route_diagnostic_uses_japanese_backend_labels()
     test_internet_layer_context_passes_active_backend_to_route_selector()
+    test_internet_layer_context_copies_results_and_attaches_route_metadata_for_all_channels()
     test_internet_layer_context_resolves_current_youtube_reader_at_call_time()
     test_internet_layer_context_does_not_retry_same_youtube_reader()
     test_internet_layer_context_reports_safe_diagnostic_when_youtube_reader_fails()
@@ -2946,6 +3147,7 @@ if __name__ == "__main__":
     test_complete_list_stream_excludes_specialized_channels_and_sources()
     test_local_chat_handler_scopes_doctor_cache()
     test_chat_handler_collects_failed_exa_fallback_diagnostic()
+    test_chat_handler_uses_web_search_results_for_decision()
     test_chat_http_complete_list_events_and_youtube_stream_regression()
     test_complete_list_evidence_prefers_authority_before_candidate_count()
     test_complete_list_evidence_uses_only_requested_official_sections()

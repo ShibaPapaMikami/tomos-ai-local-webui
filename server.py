@@ -92,7 +92,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.217")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.218")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
@@ -5047,14 +5047,48 @@ def _route_diagnostic(
 
 def routed_web_search(query: str, limit: int, exa_search, tomos_search) -> tuple[list[dict[str, str]], dict[str, object]]:
     try:
-        return exa_search(query, limit), route_diagnostic("web", "exa")
+        results = exa_search(query, limit)
+        return copy_web_search_results_with_route(
+            results, "exa", "doctorで利用可能と確認"
+        ), route_diagnostic("web", "exa")
     except Exception:
         try:
             results = tomos_search(query, limit)
         except Exception as exc:
             diagnostic = route_diagnostic("web", "exa", fallback=True, error_code="fallback-failed")
             raise RoutedWebSearchError(diagnostic) from exc
-        return results, route_diagnostic("web", "exa", fallback=True, error_code="priority-failed")
+        diagnostic = route_diagnostic("web", "exa", fallback=True, error_code="priority-failed")
+        return copy_web_search_results_with_route(
+            results, "tomos", str(diagnostic["message"])
+        ), diagnostic
+
+
+def copy_web_search_results_with_route(
+    results: list[dict[str, str]], backend: str, route_reason: str
+) -> list[dict[str, str]]:
+    return [
+        {
+            **result,
+            "backend": backend,
+            "routeReason": route_reason,
+        }
+        for result in results
+    ]
+
+
+def web_search_results_for_decision(
+    decision: RouteDecision,
+    query: str,
+    limit: int,
+    exa_search,
+    tomos_search,
+) -> tuple[list[dict[str, str]], dict[str, object]]:
+    if decision.backend == "exa":
+        return routed_web_search(query, limit, exa_search, tomos_search)
+    results = tomos_search(query, limit)
+    return copy_web_search_results_with_route(
+        results, decision.backend, decision.reason
+    ), _route_diagnostic(decision)
 
 
 def internet_layer_context_results(
@@ -5092,6 +5126,12 @@ def internet_layer_context_results(
                     reason=ROUTE_FAILURE_REASONS[channel],
                 ))
             raise RoutedReaderError(channel) from None
+        if isinstance(result, dict):
+            result = {
+                **result,
+                "backend": decision.backend,
+                "routeReason": decision.reason,
+            }
         if diagnostics_out is not None:
             diagnostics_out.append(_route_diagnostic(decision))
         return result
@@ -6146,11 +6186,13 @@ class Handler(BaseHTTPRequestHandler):
                     max_results = max(0, int(body.get("search_results", 4)) - len(search_results))
                     if max_results > 0:
                         web_search_decision = agent_reach_route_decision("web", intent="search")
-                        if web_search_decision.backend == "exa":
-                            web_results, diagnostic = routed_web_search(query, max_results, run_exa_search, search_web)
-                        else:
-                            web_results = search_web(query, max_results)
-                            diagnostic = _route_diagnostic(web_search_decision)
+                        web_results, diagnostic = web_search_results_for_decision(
+                            web_search_decision,
+                            query,
+                            max_results,
+                            run_exa_search,
+                            search_web,
+                        )
                         search_results.extend(web_results)
                         route_diagnostics.append(diagnostic)
                 except RoutedWebSearchError as exc:
