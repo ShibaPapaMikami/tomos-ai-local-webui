@@ -1,9 +1,17 @@
 from dataclasses import dataclass
 import time
+from typing import Callable
 
 
 DOCTOR_CACHE_SECONDS = 300
 _AVAILABLE_STATUSES = {"ok", "ready", "available"}
+_ALLOWED_BACKENDS = {
+    "web": {"Jina Reader": "jina"},
+    "exa_search": {"Exa via mcporter": "exa"},
+    "youtube": {"yt-dlp": "youtube"},
+    "github": {"gh CLI": "github"},
+    "rss": {"feedparser": "rss"},
+}
 
 
 @dataclass(frozen=True)
@@ -15,12 +23,12 @@ class RouteDecision:
 
 
 class DoctorCache:
-    def __init__(self, loader):
-        self.loader = loader
-        self.value = None
+    def __init__(self, loader: Callable[[], dict[str, object]]) -> None:
+        self.loader: Callable[[], dict[str, object]] = loader
+        self.value: dict[str, object] | None = None
         self.loaded_at = 0.0
 
-    def get(self, now=None):
+    def get(self, now: float | None = None) -> dict[str, object]:
         current = time.monotonic() if now is None else now
         if self.value is None or current - self.loaded_at >= DOCTOR_CACHE_SECONDS:
             self.value = self.loader()
@@ -28,33 +36,35 @@ class DoctorCache:
         return self.value
 
 
-def _channel_is_available(doctor, channel):
+def _normalized_backend(
+    doctor: dict[str, object], channel: str
+) -> str | None:
     if doctor.get("installed") is False:
-        return False
+        return None
     channels = doctor.get("channels", {})
+    if not isinstance(channels, dict):
+        return None
     status = channels.get(channel, {})
     if not isinstance(status, dict):
-        return False
-    return (
-        status.get("status") in _AVAILABLE_STATUSES
-        and bool(status.get("active_backend"))
-    )
+        return None
+    if status.get("status") not in _AVAILABLE_STATUSES:
+        return None
+    active_backend = status.get("active_backend")
+    if not isinstance(active_backend, str):
+        return None
+    return _ALLOWED_BACKENDS.get(channel, {}).get(active_backend)
 
 
-def select_route(channel, doctor, intent="read"):
+def select_route(
+    channel: str, doctor: dict[str, object], intent: str = "read"
+) -> RouteDecision:
     if channel == "web" and intent == "search":
         doctor_channel = "exa_search"
-        backend = "exa"
     else:
         doctor_channel = channel
-        backend = {
-            "web": "jina",
-            "youtube": "youtube",
-            "github": "github",
-            "rss": "rss",
-        }.get(channel)
 
-    if backend is not None and _channel_is_available(doctor, doctor_channel):
+    backend = _normalized_backend(doctor, doctor_channel)
+    if backend is not None:
         return RouteDecision(
             channel=channel,
             backend=backend,

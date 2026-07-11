@@ -33,7 +33,7 @@ def test_select_route_uses_channel_backend_for_non_web_channels():
     doctor = {
         "channels": {
             "youtube": {"status": "ok", "active_backend": "yt-dlp"},
-            "github": {"status": "ok", "active_backend": "gh"},
+            "github": {"status": "ok", "active_backend": "gh CLI"},
             "rss": {"status": "ok", "active_backend": "feedparser"},
         }
     }
@@ -46,6 +46,15 @@ def test_select_route_falls_back_to_tomos_when_channel_is_unavailable():
     decision = adapter.select_route("web", {"installed": False}, intent="search")
     assert decision.backend == "tomos"
     assert decision.fallback == ""
+
+
+def test_select_route_rejects_unsupported_active_backend():
+    doctor = {
+        "channels": {
+            "web": {"status": "ok", "active_backend": "unsupported"},
+        }
+    }
+    assert adapter.select_route("web", doctor).backend == "tomos"
 
 
 def test_doctor_cache_refreshes_at_five_minutes():
@@ -64,6 +73,7 @@ if __name__ == "__main__":
         test_select_route_uses_exa_only_for_search,
         test_select_route_uses_channel_backend_for_non_web_channels,
         test_select_route_falls_back_to_tomos_when_channel_is_unavailable,
+        test_select_route_rejects_unsupported_active_backend,
         test_doctor_cache_refreshes_at_five_minutes,
     ):
         test()
