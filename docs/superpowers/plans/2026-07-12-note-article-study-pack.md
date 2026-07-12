@@ -186,7 +186,7 @@ def test_context_size_error_is_friendly(self):
 
 - [ ] **Step 2: REDを確認する**
 
-Run: `python3 -m unittest scripts.test_server_helpers.ServerHelperTests.test_context_size_error_is_friendly`
+Run: `python3 scripts/test_server_helpers.py`
 Expected: FAIL with raw JSON message
 
 - [ ] **Step 3: 最小変換を実装する**
@@ -195,7 +195,7 @@ Expected: FAIL with raw JSON message
 
 - [ ] **Step 4: GREENと全体回帰を確認する**
 
-Run: `python3 -m unittest scripts.test_server_helpers && node scripts/test-management-helpers.js && node scripts/test-model-selection.js && node scripts/test-pwa-assets.js && node --check web/app.js && python3 -m py_compile server.py && git diff --check`
+Run: `python3 scripts/test_server_helpers.py && node scripts/test-management-helpers.js && node scripts/test-model-selection.js && node scripts/test-pwa-assets.js && node --check web/app.js && python3 -m py_compile server.py && git diff --check`
 Expected: all pass
 
 - [ ] **Step 5: エラー変換をコミットする**
@@ -224,10 +224,10 @@ git commit -m "長文コンテキストエラーを分かりやすくする"
 
 - [x] **Step 3: 全検証を再実行する**
 
-Run: `node scripts/test-management-helpers.js && node scripts/test-model-selection.js && node scripts/test-pwa-assets.js && python3 -m unittest scripts.test_server_helpers && node --check web/app.js && node --check web/management.js && python3 -m py_compile server.py && git diff --check`
+Run: `node scripts/test-management-helpers.js && node scripts/test-model-selection.js && node scripts/test-pwa-assets.js && python3 scripts/test_server_helpers.py && node --check web/app.js && node --check web/management.js && python3 -m py_compile server.py && git diff --check`
 Expected: all pass
 
-**実行結果（2026-07-12）:** Blender記事相当の5,367文字のローカル文字列（設定ファイル、Pythonコード、個人パス形式、会社名、秘密情報を含む）をVMの既存要求経路へ渡した。保存なしでは`codingMode: false`、`numCtx: 12288`、`historyTurns: 1`、教材適用あり、ワークスペース保存なしを確認した。4モードすべての実行時教材プロンプトに、ローカルパス、会社名、秘密情報を公開本文へ残さず一般化または非出力にする指示が含まれた。`test-management-helpers`、`test-model-selection`、`test-pwa-assets`、構文確認、Pythonコンパイル、`git diff --check`は成功した。`python3 -m unittest scripts.test_server_helpers`はpytest形式のため0件終了し、同一の162関数をローカル実行して162/162件成功した。
+**実行結果（2026-07-12）:** Blender記事相当の5,367文字のローカル文字列（設定ファイル、Pythonコード、個人パス形式、会社名、秘密情報を含む）をVMの既存要求経路へ渡した。保存なしでは`codingMode: false`、`numCtx: 12288`、`historyTurns: 1`、教材適用あり、ワークスペース保存なしを確認した。4モードすべてのインポート後の実行時教材プロンプトに、コード表示、番号付き手順、見出し、URL単独段落、個人パス一般化、会社名と秘密情報の非出力指示が含まれることを確認した。`test-management-helpers`、`test-model-selection`、`test-pwa-assets`、`python3 scripts/test_server_helpers.py`、構文確認、Pythonコンパイル、`git diff --check`は成功した。
 
 **確定仕様:** 翻訳要求はnote記事より翻訳経路を優先する。長文note記事の`numCtx`下限は12,288。明示的な保存要求があるnote記事だけをワークスペース生成へ送る。
 

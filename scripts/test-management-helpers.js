@@ -29,6 +29,7 @@ const {
   handleEscapeKey,
   importStudyPackFromFiles,
   compactStudyPackPrompt,
+  isNoteArticleWritingRequest,
   shouldApplyStudyPackForText,
   studyPackSelectionModel,
   studyPackMultiSelectionModel,
@@ -846,6 +847,17 @@ async function runImportTests() {
     "以下のnote記事を貼り付け用に編集して。設定ファイルとコード例があります。",
     { hasSelection: true },
   ), true);
+  for (const text of [
+    "note記事を整えて",
+    "noteの記事を編集して",
+    "note向けの記事に書き直す",
+    "この記事をnote向けに整えて",
+    "note記事の続きを作って",
+    "noteへ貼り付けできる形にこの記事を編集して",
+    "この記事をnote向けに公開前チェックして",
+  ]) {
+    assert.equal(isNoteArticleWritingRequest(text), true, `${text} はnote記事要求である`);
+  }
   assert.match(appJs, /返信文\|返信案\|返信メール\|メール返信/);
   assert.match(appJs, /function isReplyDraftRequest/);
   assert.match(appJs, /返信本文案:/);
@@ -892,6 +904,28 @@ for (const mode of notePack.modes) {
 }
 assert.ok(fs.existsSync("study-packs/note-article-writing-pack/examples/generic-technical-article.md"));
 
-runImportTests().then(() => {
+async function runNotePackImportTest() {
+  const files = ["pack.json", ...notePack.modes.map((mode) => mode.promptFile)].map((name) => ({
+    name: name.split("/").pop(),
+    webkitRelativePath: `note-article-writing-pack/${name}`,
+    async text() {
+      return fs.readFileSync(`study-packs/note-article-writing-pack/${name}`, "utf8");
+    },
+  }));
+  const result = await importStudyPackFromFiles({ state: { studyPacks: {} }, files, t });
+  assert.equal(result.ok, true);
+  assert.equal(result.definition.modes.length, 4);
+  for (const mode of result.definition.modes) {
+    assert.match(mode.prompt, /コードブロック/);
+    assert.match(mode.prompt, /番号付き/);
+    assert.match(mode.prompt, /見出し/);
+    assert.match(mode.prompt, /URL.*単独.*段落/);
+    assert.match(mode.prompt, /\/Users\/your-name/);
+    assert.match(mode.prompt, /会社名.*一般化.*非出力/);
+    assert.match(mode.prompt, /秘密情報.*非出力/);
+  }
+}
+
+Promise.all([runImportTests(), runNotePackImportTest()]).then(() => {
   console.log("management helper tests passed");
 });

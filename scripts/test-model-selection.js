@@ -210,7 +210,11 @@ const indexSource = fs.readFileSync("web/index.html", "utf8");
 const serviceWorkerSource = fs.readFileSync("web/sw.js", "utf8");
 const stylesSource = fs.readFileSync("web/styles.css", "utf8");
 const appSource = fs.readFileSync("web/app.js", "utf8");
+const managementSource = fs.readFileSync("web/management.js", "utf8");
+assert.match(managementSource, /function isNoteArticleWritingRequest\(text\)/);
+assert.match(managementSource, /isNoteArticleWritingRequest,/);
 assert.match(appSource, /function isNoteArticleWritingRequest\(text\)/);
+assert.match(appSource, /window\.GEMMA_MANAGEMENT\?\.isNoteArticleWritingRequest/);
 assert.match(appSource, /function shouldKeepNoteArticleInChat\(text\)/);
 assert.match(appSource, /function noteArticleRequestBudget\(text, baseContext\)/);
 assert.match(appSource, /isNoteArticleWritingRequest\(text\) && !explicitlyRequestsWorkspaceSave\(text\)/);
@@ -365,6 +369,37 @@ assert.deepEqual(
     isolateUserMessage: true,
   },
 );
+const sharedClassifierContext = {
+  window: {},
+  document: { querySelector: () => null },
+  localStorage: { getItem: () => null, setItem: () => {} },
+  console,
+};
+vm.createContext(sharedClassifierContext);
+vm.runInContext(managementSource, sharedClassifierContext, { filename: "web/management.js" });
+const realisticNoteText = [
+  "この記事をnote向けに整えてください。",
+  "設定ファイル: config.toml",
+  "コード: const root = '/Users/example/project';",
+  "対象ファイル: web/app.js",
+  "本文".repeat(3000),
+].join("\n");
+const realisticNoteOptionsContext = {
+  ...noteArticleOptionsContext,
+  isNoteArticleWritingRequest: sharedClassifierContext.window.GEMMA_MANAGEMENT.isNoteArticleWritingRequest,
+};
+vm.createContext(realisticNoteOptionsContext);
+vm.runInContext(
+  extractFunctionSource(appSource, "chatRequestOptions"),
+  realisticNoteOptionsContext,
+  { filename: "web/app.js" },
+);
+const realisticNoteOptions = realisticNoteOptionsContext.chatRequestOptions(realisticNoteText);
+assert.equal(realisticNoteOptions.codingMode, false);
+assert.equal(realisticNoteOptions.numCtx, 12288);
+assert.equal(realisticNoteOptions.numPredict, 2048);
+assert.equal(realisticNoteOptions.historyTurns, 1);
+assert.equal(realisticNoteOptions.isolateUserMessage, true);
 const savedNoteArticleOptionsContext = {
   ...noteArticleOptionsContext,
   state: { webSearch: false, workspaceRoot: "/tmp/tomos-note-test" },

@@ -4217,10 +4217,15 @@ function shouldKeepStudyPackReplyInChat(text) {
 }
 
 function isNoteArticleWritingRequest(text) {
+  const sharedClassifier = typeof window !== "undefined"
+    ? window.GEMMA_MANAGEMENT?.isNoteArticleWritingRequest
+    : null;
+  if (typeof sharedClassifier === "function") return sharedClassifier(text);
   const normalized = String(text || "").trim();
   if (!normalized) return false;
-  return /(note記事|ブログ記事|投稿記事)/i.test(normalized)
-    && /(整える|編集|書き直す|続き|貼り付け|公開前)/i.test(normalized);
+  return /note/i.test(normalized)
+    && /記事/.test(normalized)
+    && /(整え|編集|書き直|続き|貼り付け|公開前)/i.test(normalized);
 }
 
 function noteArticleRequestBudget(text, baseContext) {
