@@ -883,6 +883,8 @@ for (const mode of notePack.modes) {
   assert.match(prompt, /事実確認/);
   assert.match(prompt, /個人情報/);
   assert.match(prompt, /公開前チェック/);
+  assert.match(prompt, /会社名.*一般化.*非出力/);
+  assert.match(prompt, /秘密情報.*公開本文.*残さず.*一般化.*非出力/);
 }
 assert.ok(fs.existsSync("study-packs/note-article-writing-pack/examples/generic-technical-article.md"));
 
