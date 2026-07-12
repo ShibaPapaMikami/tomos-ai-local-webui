@@ -1,11 +1,11 @@
-const CACHE_NAME = "gemma4-pwa-0.8.220-note-article";
+const CACHE_NAME = "gemma4-pwa-0.8.221-note-pack-install";
 const APP_SHELL = [
   "/",
   "/mobile.html",
   "/offline.html",
   "/manifest.webmanifest",
-  "/styles.css?v=0.8.218-final-review",
-  "/i18n.js?v=0.8.218-final-review",
+  "/styles.css?v=0.8.221-note-pack-install",
+  "/i18n.js?v=0.8.221-note-pack-install",
   "/utils.js?v=0.8.209-tomos53",
   "/translation.js?v=0.8.209-tomos53",
   "/local-tools.js?v=0.8.209-tomos53",
@@ -25,7 +25,7 @@ const APP_SHELL = [
   "/messages.js?v=0.8.211-listground1",
   "/sidebar.js?v=0.8.219-searchfix",
   "/settings.js?v=0.8.219-searchfix",
-  "/management.js?v=0.8.220-note-article",
+  "/management.js?v=0.8.221-note-pack-install",
   "/router.js?v=0.8.209-tomos53",
   "/search.js?v=0.8.219-searchfix",
   "/pwa.js?v=0.8.220-note-article",

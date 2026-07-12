@@ -5047,6 +5047,38 @@ select:focus {
   margin-top: 8px;
 }
 
+.managed-study-pack-card small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.managed-study-pack-card[data-status="installed"] small {
+  color: var(--success, #217a4b);
+}
+
+.managed-study-pack-card[data-status="error"] small {
+  color: var(--danger, #b42318);
+}
+
+.study-pack-advanced-import {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.study-pack-advanced-import summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.study-pack-advanced-import .management-card {
+  margin-top: 8px;
+}
+
 .study-pack-mode-list span {
   border: 1px solid var(--line);
   border-radius: 999px;

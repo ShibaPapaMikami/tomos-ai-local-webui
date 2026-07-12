@@ -396,6 +396,97 @@ window.GEMMA_MANAGEMENT = (() => {
     Object.values(loadImportedStudyPackDefinitions()).forEach(registerImportedStudyPackTranslations);
   }
 
+  function managedStudyPackDefinition(definition) {
+    if (!definition || definition.id !== "note-article-writing") return null;
+    const packId = definition.id;
+    return {
+      ...definition,
+      nameKey: importedStudyPackNameKey(packId),
+      helpKey: importedStudyPackHelpKey(packId),
+      imported: true,
+      managed: true,
+      private: false,
+      modes: (definition.modes || []).map((mode) => ({
+        ...mode,
+        nameKey: importedStudyPackModeNameKey(packId, mode.id),
+        shortKey: importedStudyPackModeShortKey(packId, mode.id),
+      })),
+    };
+  }
+
+  function registerManagedStudyPack({ state, definition }) {
+    const normalized = managedStudyPackDefinition(definition);
+    if (!normalized) return;
+    const definitions = loadImportedStudyPackDefinitions();
+    definitions[normalized.id] = normalized;
+    saveImportedStudyPackDefinitions(definitions);
+    registerImportedStudyPackTranslations(normalized);
+    state.studyPacks = state.studyPacks || {};
+    state.studyPacks[normalized.id] = { installed: true, version: normalized.version };
+    saveStudyPacks(state.studyPacks);
+  }
+
+  function unregisterManagedStudyPack({ state }) {
+    const definitions = loadImportedStudyPackDefinitions();
+    delete definitions["note-article-writing"];
+    saveImportedStudyPackDefinitions(definitions);
+    if (state.studyPacks) delete state.studyPacks["note-article-writing"];
+    saveStudyPacks(state.studyPacks || {});
+  }
+
+  async function loadManagedStudyPackCatalog({ state, t }) {
+    try {
+      const response = await fetch("/api/study-packs/catalog", { cache: "no-store" });
+      if (!response.ok) throw new Error("catalog unavailable");
+      const payload = await response.json();
+      const pack = (payload.packs || []).find((item) => item.id === "note-article-writing");
+      if (!pack) throw new Error("pack unavailable");
+      state.managedStudyPack = pack;
+      if (pack.definition) registerManagedStudyPack({ state, definition: pack.definition });
+      else unregisterManagedStudyPack({ state });
+      renderStudyPacksPanel({ state, t });
+      return { ok: true, pack };
+    } catch {
+      state.managedStudyPack = { id: "note-article-writing", status: "error" };
+      renderStudyPacksPanel({ state, t });
+      return { ok: false, error: t("management.noteArticlePackApiMissing") };
+    }
+  }
+
+  async function installManagedStudyPack({ state, t }) {
+    if (!window.confirm(t("management.noteArticlePackInstallConfirm"))) return { ok: false, cancelled: true };
+    state.managedStudyPack = { ...(state.managedStudyPack || {}), status: "downloading" };
+    renderStudyPacksPanel({ state, t });
+    try {
+      const response = await fetch("/api/study-packs/note-article/install", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "download failed");
+      registerManagedStudyPack({ state, definition: payload.definition });
+      state.managedStudyPack = payload.pack;
+      renderStudyPacksPanel({ state, t });
+      return { ok: true, message: t("management.noteArticlePackInstallDone") };
+    } catch {
+      state.managedStudyPack = { ...(state.managedStudyPack || {}), status: "error" };
+      renderStudyPacksPanel({ state, t });
+      return { ok: false, error: t("management.noteArticlePackDownloadError") };
+    }
+  }
+
+  async function removeManagedStudyPack({ state, t }) {
+    if (!window.confirm(t("management.noteArticlePackDeleteConfirm"))) return { ok: false, cancelled: true };
+    try {
+      const response = await fetch("/api/study-packs/note-article/remove", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "remove failed");
+      unregisterManagedStudyPack({ state });
+      state.managedStudyPack = { id: "note-article-writing", status: "not-installed" };
+      renderStudyPacksPanel({ state, t });
+      return { ok: true, message: t("management.noteArticlePackRemoved") };
+    } catch {
+      return { ok: false, error: t("management.noteArticlePackApiMissing") };
+    }
+  }
+
   function validateImportedStudyPackManifest(manifest) {
     if (!manifest || typeof manifest !== "object") return "pack.json が正しくありません。";
     if (!String(manifest.id || "").trim()) return "pack.json に id が必要です。";
@@ -1212,7 +1303,7 @@ window.GEMMA_MANAGEMENT = (() => {
     });
     const list = document.querySelector("#imported-study-pack-list");
     if (!list) return;
-    const imported = Object.values(loadImportedStudyPackDefinitions());
+    const imported = Object.values(loadImportedStudyPackDefinitions()).filter((pack) => !pack.managed);
     list.innerHTML = "";
     imported.forEach((pack) => {
       const card = document.createElement("div");
@@ -1248,6 +1339,30 @@ window.GEMMA_MANAGEMENT = (() => {
       button.textContent = installed ? t("management.remove") : t("management.add");
       button.setAttribute("aria-pressed", String(installed));
     });
+    const managedCard = document.querySelector("#note-article-pack-card");
+    const managedStatus = document.querySelector("#note-article-pack-status");
+    const managedAction = document.querySelector("#note-article-pack-action");
+    if (managedCard && managedStatus && managedAction) {
+      const status = state.managedStudyPack?.status || "loading";
+      const statusKeys = {
+        loading: "management.noteArticlePackChecking",
+        "not-installed": "management.noteArticlePackNotInstalled",
+        installed: "management.noteArticlePackInstalled",
+        "update-available": "management.noteArticlePackUpdateAvailable",
+        downloading: "management.noteArticlePackDownloading",
+        error: "management.noteArticlePackDownloadError",
+      };
+      const actionKeys = {
+        "not-installed": "management.noteArticlePackInstall",
+        installed: "management.noteArticlePackDelete",
+        "update-available": "management.noteArticlePackUpdate",
+      };
+      managedCard.dataset.status = status;
+      managedStatus.textContent = t(statusKeys[status] || statusKeys.error);
+      managedAction.textContent = t(actionKeys[status] || statusKeys[status] || statusKeys.error);
+      managedAction.disabled = !actionKeys[status];
+      managedAction.dataset.action = status === "installed" ? "remove" : "install";
+    }
   }
 
   function toggleStudyPack({ state, t, packId }) {
@@ -1382,6 +1497,7 @@ window.GEMMA_MANAGEMENT = (() => {
     onPluginsChanged,
   }) {
     const afterMenuPanelOpen = () => onMenuPanelOpen?.();
+    loadManagedStudyPackCatalog({ state, t });
     els.settingsMenuToggle?.addEventListener("click", () => {
       setSidebarSettingsMode({ els, open: true });
     });
@@ -1465,6 +1581,7 @@ window.GEMMA_MANAGEMENT = (() => {
 
     els.studyPacksToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.studyPacksPanel });
+      loadManagedStudyPackCatalog({ state, t });
       afterMenuPanelOpen();
     });
     els.studyPacksClose?.addEventListener("click", () => {
@@ -1478,6 +1595,16 @@ window.GEMMA_MANAGEMENT = (() => {
       onPluginsChanged?.();
     });
     els.studyPackImportButton?.addEventListener("click", () => els.studyPackImportInput?.click());
+    document.querySelector("#note-article-pack-action")?.addEventListener("click", async (event) => {
+      const action = event.currentTarget.dataset.action;
+      const result = action === "remove"
+        ? await removeManagedStudyPack({ state, t })
+        : await installManagedStudyPack({ state, t });
+      if (!result.cancelled && els.studyPackImportStatus) {
+        els.studyPackImportStatus.textContent = result.ok ? result.message : result.error;
+      }
+      onPluginsChanged?.();
+    });
     els.studyPackImportInput?.addEventListener("change", async () => {
       const result = await importStudyPackFromFiles({ state, files: els.studyPackImportInput.files, t });
       if (els.studyPackImportStatus) {
@@ -1614,5 +1741,8 @@ window.GEMMA_MANAGEMENT = (() => {
     toggleCodegraphPlugin,
     togglePluginCandidate,
     bindManagementEvents,
+    loadManagedStudyPackCatalog,
+    installManagedStudyPack,
+    removeManagedStudyPack,
   };
 })();

@@ -22,7 +22,8 @@ const context = {
   console,
 };
 vm.createContext(context);
-vm.runInContext(fs.readFileSync("web/management.js", "utf8"), context, { filename: "web/management.js" });
+const managementJs = fs.readFileSync("web/management.js", "utf8");
+vm.runInContext(managementJs, context, { filename: "web/management.js" });
 
 const {
   formatPluginSearchCapabilities,
@@ -208,6 +209,13 @@ const indexHtml = fs.readFileSync("web/index.html", "utf8");
 const i18nJs = fs.readFileSync("web/i18n.js", "utf8");
 const stylesCss = fs.readFileSync("web/styles.css", "utf8");
 const appJs = fs.readFileSync("web/app.js", "utf8");
+assert.match(indexHtml, /id="note-article-pack-card"/);
+assert.match(indexHtml, /id="note-article-pack-action"/);
+assert.match(indexHtml, /note記事作成サポート/);
+assert.match(i18nJs, /management\.noteArticlePackInstallConfirm/);
+assert.match(managementJs, /loadManagedStudyPackCatalog/);
+assert.match(managementJs, /installManagedStudyPack/);
+assert.match(managementJs, /removeManagedStudyPack/);
 const personRelationshipJs = fs.readFileSync("web/person-relationship.js", "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -469,8 +477,8 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.218-final-review"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.218-final-review"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.221-note-pack-install"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.221-note-pack-install"/);
 assert.match(fs.readFileSync("web/management.js", "utf8"), /onMenuPanelOpen/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);

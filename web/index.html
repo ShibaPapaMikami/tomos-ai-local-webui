@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=0.8.218-final-review" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.221-note-pack-install" />
   </head>
   <body>
     <div class="app-shell">
@@ -830,17 +830,27 @@
             </div>
             <button class="ghost-button" type="button" data-study-pack-toggle="coding-assist-basic" data-i18n="management.add">追加</button>
           </div>
-          <div class="management-card study-pack-card">
+          <div class="management-card study-pack-card managed-study-pack-card" id="note-article-pack-card" data-status="loading">
             <div>
-              <strong data-i18n="management.importStudyPack">外部教材データをインポート</strong>
-              <span data-i18n="management.importStudyPackHelp">pack.json を含む教材パックフォルダーを、この端末だけに追加します。</span>
-              <small data-i18n="management.importStudyPackNote">private教材は公開一覧に出さず、修正例は学習セットに保存します。</small>
-              <input id="study-pack-import-input" type="file" webkitdirectory multiple hidden />
-              <div class="management-card-meta" id="study-pack-import-status" aria-live="polite"></div>
+              <strong data-i18n="management.noteArticlePack">note記事作成サポート</strong>
+              <span data-i18n="management.noteArticlePackHelp">note向けの記事構成、本文整理、公開前確認を支援します。</span>
+              <small id="note-article-pack-status" aria-live="polite" data-i18n="management.noteArticlePackChecking">導入状態を確認中</small>
             </div>
-            <button class="ghost-button" id="study-pack-import-button" type="button" data-i18n="management.import">インポート</button>
+            <button class="ghost-button" id="note-article-pack-action" type="button" disabled data-i18n="management.noteArticlePackChecking">確認中</button>
           </div>
           <div id="imported-study-pack-list"></div>
+          <details class="study-pack-advanced-import">
+            <summary data-i18n="management.customStudyPack">独自教材を追加</summary>
+            <div class="management-card study-pack-card">
+              <div>
+                <span data-i18n="management.importStudyPackHelp">pack.json を含む教材パックフォルダーを、この端末だけに追加します。</span>
+                <small data-i18n="management.importStudyPackNote">private教材は公開一覧に出さず、修正例は学習セットに保存します。</small>
+                <input id="study-pack-import-input" type="file" webkitdirectory multiple hidden />
+                <div class="management-card-meta" id="study-pack-import-status" aria-live="polite"></div>
+              </div>
+              <button class="ghost-button" id="study-pack-import-button" type="button" data-i18n="management.import">インポート</button>
+            </div>
+          </details>
           <p class="management-note" data-i18n="management.studyPacksNote">教材パックは配布教材を扱う場所です。あなたの修正例は「学習セット」に保存されます。</p>
         </section>
 
@@ -1326,7 +1336,7 @@
       </section>
     </div>
 
-  <script src="/i18n.js?v=0.8.218-final-review"></script>
+    <script src="/i18n.js?v=0.8.221-note-pack-install"></script>
   <script src="/utils.js?v=0.8.209-tomos53"></script>
   <script src="/translation.js?v=0.8.209-tomos53"></script>
   <script src="/local-tools.js?v=0.8.209-tomos53"></script>
@@ -1346,7 +1356,7 @@
   <script src="/messages.js?v=0.8.211-listground1"></script>
   <script src="/sidebar.js?v=0.8.219-searchfix"></script>
   <script src="/settings.js?v=0.8.219-searchfix"></script>
-  <script src="/management.js?v=0.8.220-note-article"></script>
+    <script src="/management.js?v=0.8.221-note-pack-install"></script>
   <script src="/router.js?v=0.8.209-tomos53"></script>
   <script src="/search.js?v=0.8.219-searchfix"></script>
   <script src="/pwa.js?v=0.8.220-note-article"></script>

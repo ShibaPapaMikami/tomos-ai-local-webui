@@ -73,6 +73,7 @@ from contract_ledger import (
     save_contract,
 )
 from sarashina_ocr_runner import sarashina_compare_page_payload, sarashina_ocr_status
+from study_pack_manager import build_catalog, install_pack, remove_pack
 
 try:
     import segno
@@ -86,6 +87,16 @@ KNOWLEDGE_DB_PATH = default_db_path(ROOT)
 CONTEXT_DB_PATH = context_db_path(ROOT)
 CONTRACT_DB_PATH = default_contract_db_path(ROOT)
 PERSON_PHOTO_DIR = ROOT / "data" / "person-photos"
+STUDY_PACK_INSTALL_ROOT = ROOT / ".gemma4-data" / "study-packs"
+NOTE_ARTICLE_PACK_VERSION = "0.1.0"
+NOTE_ARTICLE_PACK_RELEASE_URL = (
+    "https://github.com/ShibaPapaMikami/tomos-ai-local-webui/releases/download/"
+    "note-article-writing-v0.1.0/TOMOS-note-article-writing-v0.1.0.zip"
+)
+NOTE_ARTICLE_PACK_SHA256 = os.environ.get(
+    "TOMOS_NOTE_ARTICLE_PACK_SHA256",
+    "32c6318b79bda513aa9b1d339770fcbbb81d33f61958948553621b8f408920ec",
+)
 PERSON_PHOTO_MAX_BYTES = 2 * 1024 * 1024
 PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -113,6 +124,29 @@ MOBILE_PAIRING_TTL_SECONDS = 600
 MOBILE_PAIRING_STATE: dict[str, object] = {}
 MOBILE_PENDING_IMPORTS: list[dict[str, object]] = []
 MOBILE_IMPORT_LOCK = threading.Lock()
+
+
+def study_pack_catalog_payload() -> dict:
+    return {
+        "ok": True,
+        "packs": build_catalog(
+            install_root=STUDY_PACK_INSTALL_ROOT,
+            release_url=NOTE_ARTICLE_PACK_RELEASE_URL,
+            sha256=NOTE_ARTICLE_PACK_SHA256,
+            version=NOTE_ARTICLE_PACK_VERSION,
+        ),
+    }
+
+
+def install_note_article_pack_payload() -> dict:
+    entry = study_pack_catalog_payload()["packs"][0]
+    if not entry["sha256"]:
+        raise ValueError("配布ファイルはまだ公開されていません。")
+    return install_pack(entry, install_root=STUDY_PACK_INSTALL_ROOT)
+
+
+def remove_note_article_pack_payload() -> dict:
+    return remove_pack("note-article-writing", install_root=STUDY_PACK_INSTALL_ROOT)
 
 SUBPROCESS_OUTPUT_ENCODINGS = tuple(dict.fromkeys(
     encoding
@@ -5982,6 +6016,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/internet-layer/setup/status":
             json_response(self, 200, internet_layer_setup_status())
             return
+        if parsed.path == "/api/study-packs/catalog":
+            json_response(self, 200, study_pack_catalog_payload())
+            return
         if parsed.path == "/api/contracts/pdf-import/status":
             json_response(self, 200, contract_pdf_import_status_payload())
             return
@@ -6083,6 +6120,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/models/remove":
             self.handle_model_remove()
+            return
+        if self.path == "/api/study-packs/note-article/install":
+            try:
+                json_response(self, 200, install_note_article_pack_payload())
+            except (OSError, ValueError, urllib.error.URLError) as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/study-packs/note-article/remove":
+            try:
+                json_response(self, 200, remove_note_article_pack_payload())
+            except (OSError, ValueError) as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
             return
         if self.path == "/api/llm/check":
             self.handle_llm_check()
