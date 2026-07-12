@@ -1,0 +1,29 @@
+{
+  "id": "note-article-writing",
+  "name": "note記事作成",
+  "version": "0.1.0",
+  "description": "note向けの記事を、事実を足さずに読みやすく整える公開教材です。",
+  "visibility": "public",
+  "modes": [
+    {
+      "id": "rewrite-for-note",
+      "name": "note向けに整える",
+      "promptFile": "modes/rewrite-for-note.md"
+    },
+    {
+      "id": "continue-series",
+      "name": "連載の続きを作る",
+      "promptFile": "modes/continue-series.md"
+    },
+    {
+      "id": "paste-ready",
+      "name": "貼り付け用にする",
+      "promptFile": "modes/paste-ready.md"
+    },
+    {
+      "id": "prepublish-check",
+      "name": "公開前に確認する",
+      "promptFile": "modes/prepublish-check.md"
+    }
+  ]
+}
