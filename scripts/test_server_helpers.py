@@ -893,6 +893,32 @@ def test_context_size_error_is_friendly() -> None:
     )
 
 
+def test_context_size_error_type_only_hides_raw_json_and_tokens() -> None:
+    body = '{"error":{"type":"exceed_context_size_error"}}'
+    message = server.friendly_ollama_error(body)
+    serialized = json.dumps({"error": message}, ensure_ascii=False)
+    expected = "文章が長いため一度に処理できませんでした。章ごとに分けるか、長文対応モードでもう一度お試しください。"
+
+    assert message == expected
+    assert body not in serialized
+    assert "exceed_context_size_error" not in serialized
+    assert "tokens" not in serialized
+    assert "available context size" not in serialized
+
+
+def test_context_size_error_message_only_hides_raw_json_and_tokens() -> None:
+    body = '{"error":{"message":"exceeds the available context size"}}'
+    message = server.friendly_ollama_error(body)
+    serialized = json.dumps({"error": message}, ensure_ascii=False)
+    expected = "文章が長いため一度に処理できませんでした。章ごとに分けるか、長文対応モードでもう一度お試しください。"
+
+    assert message == expected
+    assert body not in serialized
+    assert "exceed_context_size_error" not in serialized
+    assert "tokens" not in serialized
+    assert "available context size" not in serialized
+
+
 def test_pc_diagnostics_recommendation_levels() -> None:
     comfortable = server.pc_diagnostics_recommendation({
         "memoryGb": 32,
@@ -3190,6 +3216,8 @@ if __name__ == "__main__":
     test_iter_subprocess_output_lines_handles_binary_lines()
     test_ollama_http_error_event_is_stream_json_safe()
     test_context_size_error_is_friendly()
+    test_context_size_error_type_only_hides_raw_json_and_tokens()
+    test_context_size_error_message_only_hides_raw_json_and_tokens()
     test_pc_diagnostics_recommendation_levels()
     test_pc_diagnostics_payload_shape()
     test_internet_layer_diagnostics_payload_shape()
