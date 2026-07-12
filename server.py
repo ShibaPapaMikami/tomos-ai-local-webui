@@ -1528,6 +1528,8 @@ def friendly_ollama_error(error_body: str) -> str:
         message = str(data.get("error") or error_body)
     except Exception:
         message = error_body
+    if "exceed_context_size_error" in error_body or "exceeds the available context size" in message:
+        return "文章が長いため一度に処理できませんでした。章ごとに分けるか、長文対応モードでもう一度お試しください。"
     match = re.search(r"model ['\"]?([^'\"\s]+)['\"]? not found", message, flags=re.IGNORECASE)
     if match:
         model = match.group(1)

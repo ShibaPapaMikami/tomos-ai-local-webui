@@ -886,6 +886,13 @@ def test_ollama_http_error_event_is_stream_json_safe() -> None:
     assert "モデルが未取得です: gemma4:12b" in event["error"]
 
 
+def test_context_size_error_is_friendly() -> None:
+    body = '{"error":{"code":400,"message":"request (7994 tokens) exceeds the available context size (4096 tokens)","type":"exceed_context_size_error"}}'
+    assert server.friendly_ollama_error(body) == (
+        "文章が長いため一度に処理できませんでした。章ごとに分けるか、長文対応モードでもう一度お試しください。"
+    )
+
+
 def test_pc_diagnostics_recommendation_levels() -> None:
     comfortable = server.pc_diagnostics_recommendation({
         "memoryGb": 32,
@@ -3182,6 +3189,7 @@ if __name__ == "__main__":
     test_decode_subprocess_output_handles_invalid_locale_bytes()
     test_iter_subprocess_output_lines_handles_binary_lines()
     test_ollama_http_error_event_is_stream_json_safe()
+    test_context_size_error_is_friendly()
     test_pc_diagnostics_recommendation_levels()
     test_pc_diagnostics_payload_shape()
     test_internet_layer_diagnostics_payload_shape()
