@@ -210,6 +210,10 @@ const indexSource = fs.readFileSync("web/index.html", "utf8");
 const serviceWorkerSource = fs.readFileSync("web/sw.js", "utf8");
 const stylesSource = fs.readFileSync("web/styles.css", "utf8");
 const appSource = fs.readFileSync("web/app.js", "utf8");
+assert.match(appSource, /function isNoteArticleWritingRequest\(text\)/);
+assert.match(appSource, /function shouldKeepNoteArticleInChat\(text\)/);
+assert.match(appSource, /isNoteArticleWritingRequest\(text\) && !explicitlyRequestsWorkspaceSave\(text\)/);
+assert.match(appSource, /if \(shouldKeepNoteArticleInChat\(text\)\) return false;/);
 const externalLlmCheckHelperSource = appSource.match(
   /function isCurrentExternalLlmCheck\(requestId, requestUrl, currentRequestId, currentUrl\) \{[\s\S]*?\n\}/,
 )?.[0];

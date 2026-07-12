@@ -4187,6 +4187,7 @@ function isWorkspaceBuildRequest(text) {
   if (isTranslationRequest(text)) return false;
   if (isBusinessEmailDraft(text)) return false;
   if (isReplyDraftRequest(text)) return false;
+  if (shouldKeepNoteArticleInChat(text)) return false;
   if (isStudyPackRewriteRequest(text) && !explicitlyRequestsWorkspaceSave(text)) return false;
   if (shouldKeepStudyPackReplyInChat(text)) return false;
   if (isWorkspaceLookupRequest(text)) return false;
@@ -4215,10 +4216,22 @@ function shouldKeepStudyPackReplyInChat(text) {
   return selectedStudyPackModes().length > 0 && !explicitlyRequestsWorkspaceSave(normalized);
 }
 
+function isNoteArticleWritingRequest(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  return /(note記事|ブログ記事|投稿記事)/i.test(normalized)
+    && /(整える|編集|書き直す|続き|貼り付け|公開前)/i.test(normalized);
+}
+
+function shouldKeepNoteArticleInChat(text) {
+  return isNoteArticleWritingRequest(text) && !explicitlyRequestsWorkspaceSave(text);
+}
+
 function isStudyPackRewriteRequest(text) {
   const normalized = String(text || "").trim();
   if (!normalized) return false;
-  return /(リライト|書き直|書き換|言い換|推敲|添削|校正|読みやすく|読みやすい|論理チェック|論理の抜け|AIっぽさ|レポート向け|レポート添削|文章を整|文を整|返信文|返信案|返信メール|メール返信|返答案|文案|例文|続きを考えて|つづく返信|続く返信|rewrite|proofread|revise|polish|reply draft|email reply)/i.test(normalized);
+  return isNoteArticleWritingRequest(normalized)
+    || /(リライト|書き直|書き換|言い換|推敲|添削|校正|読みやすく|読みやすい|論理チェック|論理の抜け|AIっぽさ|レポート向け|レポート添削|文章を整|文を整|返信文|返信案|返信メール|メール返信|返答案|文案|例文|続きを考えて|つづく返信|続く返信|rewrite|proofread|revise|polish|reply draft|email reply)/i.test(normalized);
 }
 
 function isReplyDraftRequest(text) {

@@ -842,6 +842,10 @@ async function runImportTests() {
   assert.equal(shouldApplyStudyPackForText("リライトして\n本文です", { hasSelection: true }), true);
   assert.equal(shouldApplyStudyPackForText("このメールを添削して", { hasSelection: true }), true);
   assert.equal(shouldApplyStudyPackForText("以下につづく返信文を考えて", { hasSelection: true }), true);
+  assert.equal(shouldApplyStudyPackForText(
+    "以下のnote記事を貼り付け用に編集して。設定ファイルとコード例があります。",
+    { hasSelection: true },
+  ), true);
   assert.match(appJs, /返信文\|返信案\|返信メール\|メール返信/);
   assert.match(appJs, /function isReplyDraftRequest/);
   assert.match(appJs, /返信本文案:/);
