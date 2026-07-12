@@ -4536,6 +4536,8 @@ function chatRequestOptions(text, hasImages = false) {
   const codingMode = !translationMode && !noteArticleWriting && isWorkspaceBuildRequest(text);
   const useExternalResearch = Boolean(state.webSearch || (!codingMode && !translationMode && shouldAutoUseExternalResearch?.(text)));
   const hasStudyPackSelection = shouldApplyStudyPackToRequest(text, hasImages);
+  const useStudyPackContext = hasStudyPackSelection
+    && !(codingMode && isNoteArticleWritingRequest(text) && explicitlyRequestsWorkspaceSave(text));
   const rewriteStudyPackMode = hasStudyPackSelection
     && !translationMode
     && !explicitlyRequestsWorkspaceSave(text)
@@ -4564,7 +4566,7 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: "15m",
       think: false,
       webSearch: false,
-      useStudyPackContext: hasStudyPackSelection,
+      useStudyPackContext,
       isolateUserMessage: true,
     };
   }
@@ -4585,7 +4587,7 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: "30m",
       think: false,
       webSearch: false,
-      useStudyPackContext: true,
+      useStudyPackContext,
       isolateUserMessage: true,
     };
   }
@@ -4649,8 +4651,8 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: "30m",
       think: false,
       webSearch: false,
-      useStudyPackContext: hasStudyPackSelection,
-      isolateUserMessage: hasStudyPackSelection,
+      useStudyPackContext,
+      isolateUserMessage: useStudyPackContext,
     });
   }
   if (mode === "quality") {
@@ -4670,8 +4672,8 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: codingMode ? "30m" : "20m",
       think: false,
       webSearch: useExternalResearch,
-      useStudyPackContext: hasStudyPackSelection,
-      isolateUserMessage: hasStudyPackSelection,
+      useStudyPackContext,
+      isolateUserMessage: useStudyPackContext,
     });
   }
   const searchBudget = applySearchBudget?.({
@@ -4705,7 +4707,7 @@ function chatRequestOptions(text, hasImages = false) {
     keepAlive: codingMode ? "20m" : "15m",
     think: false,
     webSearch: useExternalResearch,
-    useStudyPackContext: hasStudyPackSelection,
+    useStudyPackContext,
     isolateUserMessage: rewriteStudyPackMode,
   });
 }

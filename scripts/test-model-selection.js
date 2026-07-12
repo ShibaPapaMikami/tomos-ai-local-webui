@@ -266,8 +266,20 @@ vm.runInContext(
   noteArticleBudgetContext,
   { filename: "web/app.js" },
 );
+const noteArticleShortBoundaryText = "あ".repeat(2999);
+const noteArticleLongBoundaryText = "あ".repeat(3000);
+assert.equal(noteArticleShortBoundaryText.length, 2999);
+assert.equal(noteArticleLongBoundaryText.length, 3000);
 assert.deepEqual(
-  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget("note記事を整えて\n" + "本文".repeat(3000), 4096))),
+  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget(noteArticleShortBoundaryText, 4096))),
+  {
+    numCtx: 4096,
+    numPredict: 900,
+    historyTurns: 1,
+  },
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget(noteArticleLongBoundaryText, 4096))),
   {
     numCtx: 12288,
     numPredict: 2048,
@@ -291,7 +303,7 @@ assert.deepEqual(
   },
 );
 assert.deepEqual(
-  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget("note記事を整えて\n" + "本文".repeat(3000), 16384))),
+  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget(noteArticleLongBoundaryText, 16384))),
   {
     numCtx: 16384,
     numPredict: 2048,
@@ -516,6 +528,8 @@ for (const text of [
   assert.equal(options.codingMode, true, `${text} はワークスペース経路を使う`);
   assert.equal(options.translationMode, false);
   assert.equal(options.responseMode, "quality");
+  assert.equal(options.useStudyPackContext, false, `${text} は教材文脈を使わない`);
+  assert.equal(options.isolateUserMessage, false, `${text} は単一メッセージに分離しない`);
 }
 const externalLlmCheckHelperSource = appSource.match(
   /function isCurrentExternalLlmCheck\(requestId, requestUrl, currentRequestId, currentUrl\) \{[\s\S]*?\n\}/,
