@@ -4530,7 +4530,9 @@ function modelReasonText(reasonKey) {
 
 function chatRequestOptions(text, hasImages = false) {
   const translationMode = isTranslationRequest(text);
-  const noteArticleWriting = !translationMode && isNoteArticleWritingRequest(text);
+  const noteArticleWriting = !translationMode
+    && isNoteArticleWritingRequest(text)
+    && !explicitlyRequestsWorkspaceSave(text);
   const codingMode = !translationMode && !noteArticleWriting && isWorkspaceBuildRequest(text);
   const useExternalResearch = Boolean(state.webSearch || (!codingMode && !translationMode && shouldAutoUseExternalResearch?.(text)));
   const hasStudyPackSelection = shouldApplyStudyPackToRequest(text, hasImages);

@@ -303,6 +303,7 @@ const noteArticleOptionsContext = {
   state: { webSearch: false },
   isTranslationRequest: () => false,
   isNoteArticleWritingRequest: () => true,
+  explicitlyRequestsWorkspaceSave: () => false,
   isWorkspaceBuildRequest: () => true,
   shouldAutoUseExternalResearch: () => false,
   shouldApplyStudyPackToRequest: () => false,
@@ -344,6 +345,26 @@ assert.deepEqual(
     isolateUserMessage: true,
   },
 );
+const savedNoteArticleOptionsContext = {
+  ...noteArticleOptionsContext,
+  applyThinkingBudget: (options) => options,
+  applySearchBudget: null,
+};
+vm.createContext(savedNoteArticleOptionsContext);
+vm.runInContext(
+  [
+    extractFunctionSource(appSource, "explicitlyRequestsWorkspaceSave"),
+    extractFunctionSource(appSource, "chatRequestOptions"),
+  ].join("\n"),
+  savedNoteArticleOptionsContext,
+  { filename: "web/app.js" },
+);
+for (const text of ["note記事を編集して保存してください", "保存をお願いします"]) {
+  const options = savedNoteArticleOptionsContext.chatRequestOptions(text);
+  assert.equal(options.codingMode, true, `${text} はワークスペース経路を維持する`);
+  assert.equal(options.historyTurns, 8, `${text} はnote専用の履歴予算を使わない`);
+  assert.equal(options.isolateUserMessage, false, `${text} はワークスペース経路を分離しない`);
+}
 const translationNoteOptionsContext = {
   ...noteArticleOptionsContext,
   isTranslationRequest: () => true,
