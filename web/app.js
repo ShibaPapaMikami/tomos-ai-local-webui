@@ -4536,7 +4536,10 @@ function chatRequestOptions(text, hasImages = false) {
   const codingMode = !translationMode && !noteArticleWriting && isWorkspaceBuildRequest(text);
   const useExternalResearch = Boolean(state.webSearch || (!codingMode && !translationMode && shouldAutoUseExternalResearch?.(text)));
   const hasStudyPackSelection = shouldApplyStudyPackToRequest(text, hasImages);
-  const rewriteStudyPackMode = hasStudyPackSelection && (isStudyPackRewriteRequest(text) || isImplicitStudyPackWritingRequest(text));
+  const rewriteStudyPackMode = hasStudyPackSelection
+    && !translationMode
+    && !explicitlyRequestsWorkspaceSave(text)
+    && (isStudyPackRewriteRequest(text) || isImplicitStudyPackWritingRequest(text));
   const lightweightMode = !hasStudyPackSelection && !codingMode && !translationMode && isLightweightChatRequest(text, hasImages);
   const mode = effectiveResponseMode(text, codingMode);
   const thinkingMode = effectiveThinkingMode(text, codingMode, mode);

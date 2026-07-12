@@ -427,6 +427,96 @@ assert.deepEqual(
     useStudyPackContext: false,
   },
 );
+
+const selectedStudyPackOptionsContext = {
+  els: {
+    numPredict: { value: "9999" },
+    numCtx: { value: "2048" },
+    historyTurns: { value: "8" },
+    temperature: { value: "0.7" },
+    topP: { value: "0.9" },
+    topK: { value: "40" },
+  },
+  state: { webSearch: false, workspaceRoot: "/tmp/tomos-note-test" },
+  window: {
+    GEMMA_MANAGEMENT: {
+      shouldApplyStudyPackForText: (text, { hasSelection }) => hasSelection && /note記事/.test(text),
+    },
+  },
+  selectedStudyPackModes: () => ["note-article-writing:rewrite-for-note"],
+  selectedStudyPackMode: () => "note-article-writing:rewrite-for-note",
+  isTranslationRequest: (text) => /英訳/.test(text),
+  translationBudget: () => ({ numPredict: 512, numCtx: 4096 }),
+  translationNeedsQuality: () => false,
+  isBusinessEmailDraft: () => false,
+  isReplyDraftRequest: () => false,
+  shouldKeepStudyPackReplyInChat: () => false,
+  isWorkspaceLookupRequest: () => false,
+  shouldAutoUseExternalResearch: () => false,
+  isLightweightChatRequest: () => false,
+  effectiveResponseMode: (_text, codingMode) => codingMode ? "quality" : "balanced",
+  effectiveThinkingMode: (_text, _codingMode, mode) => mode === "quality" ? "high" : "medium",
+  applyThinkingBudget: (options) => options,
+  applySearchBudget: null,
+  numberValue: (element, fallback) => Number(element?.value) || fallback,
+  t: (key) => key,
+  modelReasonText: (key) => key,
+};
+vm.createContext(selectedStudyPackOptionsContext);
+vm.runInContext(
+  [
+    "isWorkspaceBuildRequest",
+    "explicitlyRequestsWorkspaceSave",
+    "isNoteArticleWritingRequest",
+    "noteArticleRequestBudget",
+    "shouldKeepNoteArticleInChat",
+    "isStudyPackRewriteRequest",
+    "isImplicitStudyPackWritingRequest",
+    "shouldApplyStudyPackToRequest",
+    "chatRequestOptions",
+  ].map((name) => extractFunctionSource(appSource, name)).join("\n"),
+  selectedStudyPackOptionsContext,
+  { filename: "web/app.js" },
+);
+const selectedUnsavedNoteText = "note記事を編集して貼り付け用に整えてください";
+assert.equal(selectedStudyPackOptionsContext.shouldApplyStudyPackToRequest(selectedUnsavedNoteText), true);
+assert.equal(selectedStudyPackOptionsContext.isStudyPackRewriteRequest(selectedUnsavedNoteText), true);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(selectedStudyPackOptionsContext.chatRequestOptions(selectedUnsavedNoteText))),
+  {
+    codingMode: false,
+    translationMode: false,
+    responseMode: "balanced",
+    thinkingMode: "medium",
+    progressLabel: "progress.generating",
+    modelReason: "model.reasonDefaultChat",
+    temperature: 0.7,
+    topP: 0.9,
+    topK: 40,
+    numPredict: 900,
+    numCtx: 4096,
+    historyTurns: 1,
+    keepAlive: "15m",
+    think: false,
+    webSearch: false,
+    useStudyPackContext: true,
+    isolateUserMessage: true,
+  },
+);
+const selectedTranslationOptions = selectedStudyPackOptionsContext.chatRequestOptions("note記事を編集して英訳して");
+assert.equal(selectedTranslationOptions.translationMode, true);
+assert.equal(selectedTranslationOptions.codingMode, false);
+assert.equal(selectedTranslationOptions.numPredict, 512);
+assert.equal(selectedTranslationOptions.useStudyPackContext, false);
+for (const text of [
+  "note記事を編集して保存してください",
+  "note記事を編集して保存をお願いします",
+]) {
+  const options = selectedStudyPackOptionsContext.chatRequestOptions(text);
+  assert.equal(options.codingMode, true, `${text} はワークスペース経路を使う`);
+  assert.equal(options.translationMode, false);
+  assert.equal(options.responseMode, "quality");
+}
 const externalLlmCheckHelperSource = appSource.match(
   /function isCurrentExternalLlmCheck\(requestId, requestUrl, currentRequestId, currentUrl\) \{[\s\S]*?\n\}/,
 )?.[0];
