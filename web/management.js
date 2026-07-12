@@ -447,28 +447,42 @@ window.GEMMA_MANAGEMENT = (() => {
       renderStudyPacksPanel({ state, t });
       return { ok: true, pack };
     } catch {
-      state.managedStudyPack = { id: "note-article-writing", status: "error" };
+      state.managedStudyPack = {
+        id: "note-article-writing",
+        status: "error",
+        errorMessage: t("management.noteArticlePackApiMissing"),
+      };
       renderStudyPacksPanel({ state, t });
       return { ok: false, error: t("management.noteArticlePackApiMissing") };
     }
+  }
+
+  function managedStudyPackInstallError(response, payload, t) {
+    if ([404, 405, 501].includes(Number(response?.status || 0))) {
+      return t("management.noteArticlePackApiMissing");
+    }
+    return t("management.noteArticlePackDownloadError");
   }
 
   async function installManagedStudyPack({ state, t }) {
     if (!window.confirm(t("management.noteArticlePackInstallConfirm"))) return { ok: false, cancelled: true };
     state.managedStudyPack = { ...(state.managedStudyPack || {}), status: "downloading" };
     renderStudyPacksPanel({ state, t });
+    let response = null;
+    let payload = {};
     try {
-      const response = await fetch("/api/study-packs/note-article/install", { method: "POST" });
-      const payload = await response.json();
+      response = await fetch("/api/study-packs/note-article/install", { method: "POST" });
+      payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) throw new Error(payload.error || "download failed");
       registerManagedStudyPack({ state, definition: payload.definition });
       state.managedStudyPack = payload.pack;
       renderStudyPacksPanel({ state, t });
       return { ok: true, message: t("management.noteArticlePackInstallDone") };
     } catch {
-      state.managedStudyPack = { ...(state.managedStudyPack || {}), status: "error" };
+      const errorMessage = managedStudyPackInstallError(response, payload, t);
+      state.managedStudyPack = { ...(state.managedStudyPack || {}), status: "error", errorMessage };
       renderStudyPacksPanel({ state, t });
-      return { ok: false, error: t("management.noteArticlePackDownloadError") };
+      return { ok: false, error: errorMessage };
     }
   }
 
@@ -1358,7 +1372,9 @@ window.GEMMA_MANAGEMENT = (() => {
         "update-available": "management.noteArticlePackUpdate",
       };
       managedCard.dataset.status = status;
-      managedStatus.textContent = t(statusKeys[status] || statusKeys.error);
+      managedStatus.textContent = status === "error" && state.managedStudyPack?.errorMessage
+        ? state.managedStudyPack.errorMessage
+        : t(statusKeys[status] || statusKeys.error);
       managedAction.textContent = t(actionKeys[status] || statusKeys[status] || statusKeys.error);
       managedAction.disabled = !actionKeys[status];
       managedAction.dataset.action = status === "installed" ? "remove" : "install";
@@ -1600,9 +1616,6 @@ window.GEMMA_MANAGEMENT = (() => {
       const result = action === "remove"
         ? await removeManagedStudyPack({ state, t })
         : await installManagedStudyPack({ state, t });
-      if (!result.cancelled && els.studyPackImportStatus) {
-        els.studyPackImportStatus.textContent = result.ok ? result.message : result.error;
-      }
       onPluginsChanged?.();
     });
     els.studyPackImportInput?.addEventListener("change", async () => {
@@ -1744,5 +1757,6 @@ window.GEMMA_MANAGEMENT = (() => {
     loadManagedStudyPackCatalog,
     installManagedStudyPack,
     removeManagedStudyPack,
+    managedStudyPackInstallError,
   };
 })();

@@ -44,8 +44,18 @@ const {
   togglePluginCandidate,
   studyPackById,
   contextMemoryListModel,
+  managedStudyPackInstallError,
   internetLayerSetupDisplayLines,
 } = context.window.GEMMA_MANAGEMENT;
+
+assert.equal(
+  managedStudyPackInstallError({ status: 404 }, {}, (key) => key),
+  "management.noteArticlePackApiMissing",
+);
+assert.equal(
+  managedStudyPackInstallError({ status: 400 }, { error: "download failed" }, (key) => key),
+  "management.noteArticlePackDownloadError",
+);
 
 const els = {
   settingsPanel: { hidden: false },
@@ -477,7 +487,7 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.221-note-pack-install"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.222-note-pack-error"/);
 assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.221-note-pack-install"/);
 assert.match(fs.readFileSync("web/management.js", "utf8"), /onMenuPanelOpen/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
