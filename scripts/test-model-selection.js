@@ -282,6 +282,14 @@ assert.deepEqual(
     historyTurns: 1,
   },
 );
+assert.deepEqual(
+  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget("note記事を整えて", 8192))),
+  {
+    numCtx: 8192,
+    numPredict: 900,
+    historyTurns: 1,
+  },
+);
 
 const noteArticleOptionsContext = {
   els: {
@@ -334,6 +342,39 @@ assert.deepEqual(
     webSearch: false,
     useStudyPackContext: false,
     isolateUserMessage: true,
+  },
+);
+const translationNoteOptionsContext = {
+  ...noteArticleOptionsContext,
+  isTranslationRequest: () => true,
+  translationBudget: () => ({ numPredict: 512, numCtx: 4096 }),
+  translationNeedsQuality: () => false,
+};
+vm.createContext(translationNoteOptionsContext);
+vm.runInContext(
+  extractFunctionSource(appSource, "chatRequestOptions"),
+  translationNoteOptionsContext,
+  { filename: "web/app.js" },
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(translationNoteOptionsContext.chatRequestOptions("note記事を編集して英訳して"))),
+  {
+    codingMode: false,
+    translationMode: true,
+    responseMode: "fast",
+    thinkingMode: "low",
+    progressLabel: "progress.translation",
+    modelReason: "model.reasonTranslation",
+    temperature: 0.1,
+    topP: 0.7,
+    topK: 10,
+    numPredict: 512,
+    numCtx: 4096,
+    historyTurns: 1,
+    keepAlive: "30m",
+    think: false,
+    webSearch: false,
+    useStudyPackContext: false,
   },
 );
 const externalLlmCheckHelperSource = appSource.match(
