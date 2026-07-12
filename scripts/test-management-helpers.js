@@ -468,8 +468,9 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.211-listground1"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.211-listground1"/);
+assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.218-final-review"/);
+assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.218-final-review"/);
+assert.match(fs.readFileSync("web/management.js", "utf8"), /onMenuPanelOpen/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
 assert.equal(indexHtml.slice(codegraphCardStart, codegraphCardEnd).includes('data-plugin-workspace="codegraph"'), false);

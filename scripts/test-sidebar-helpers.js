@@ -17,6 +17,7 @@ const {
   selectFolderInState,
   selectSessionInState,
   shouldCloseMobileSidebar,
+  shouldHideSidebarAfterManagementOpen,
   shouldStartSidebarHidden,
   startSessionRenameInState,
   visibleFolders,
@@ -85,6 +86,21 @@ assert.equal(
   }),
   false,
   "desktop sidebar should not close from outside click",
+);
+assert.equal(
+  shouldHideSidebarAfterManagementOpen({ isMobile: true, sidebarHidden: false }),
+  true,
+  "mobile sidebar should close after choosing a management panel",
+);
+assert.equal(
+  shouldHideSidebarAfterManagementOpen({ isMobile: true, sidebarHidden: true }),
+  false,
+  "already hidden mobile sidebar should stay hidden without extra render",
+);
+assert.equal(
+  shouldHideSidebarAfterManagementOpen({ isMobile: false, sidebarHidden: false }),
+  false,
+  "desktop sidebar should stay visible after choosing a management panel",
 );
 
 const folderCreation = createFolderInState({

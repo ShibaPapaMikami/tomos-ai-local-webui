@@ -76,6 +76,15 @@
     return patterns.find((item) => item.pattern.test(normalized))?.kind || "";
   }
 
+  function hasExplicitWorkspaceLookupIntent(text) {
+    const normalized = String(text || "").trim();
+    if (!normalized) return false;
+    if (/\b[A-Za-z0-9_.-]+\.(txt|md|pdf|docx?|html|css|js|jsx|ts|tsx|py|json|csv)\b/i.test(normalized)) return true;
+    const hasJapaneseIntent = /(フォルダ|フォルダー|ディレクトリ|作業ディレクトリ|ローカル|ファイル|保存先|中身|一覧|検索|探|見つけ|どこにある|どこに保存|場所|入って|含ま|書か|記載|契約書|請求書|仕様書|見積書|領収書|議事録|資料|文書|テキスト|PDF|Word)/i.test(normalized);
+    const hasEnglishIntent = /\b(folder|directory|file|where is|search|find|contain|contract|invoice|spec|receipt|minutes)\b/i.test(normalized);
+    return hasJapaneseIntent || hasEnglishIntent;
+  }
+
   function compactWorkspaceContent(content) {
     return String(content || "")
       .replace(/\r/g, "")
@@ -960,6 +969,7 @@
     extractFilesFromCodeBlocks,
     extractJsonObject,
     formatSearchResults,
+    hasExplicitWorkspaceLookupIntent,
     inferSavePath,
     inferSimpleTextSave,
     isSaveCommand,

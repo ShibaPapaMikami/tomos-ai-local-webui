@@ -10,6 +10,7 @@ vm.runInContext(source, context, { filename: "web/workspace.js" });
 const {
   extractJsonObject,
   formatSearchResults,
+  hasExplicitWorkspaceLookupIntent,
   inferSimpleTextSave,
   isWorkspaceSourceContentFollowup,
   normalizeWorkspacePlan,
@@ -20,6 +21,22 @@ const {
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
+
+assert.equal(
+  hasExplicitWorkspaceLookupIntent?.("このErrorはなに？ エラー: formatSearchDiagnosticsForDisplay is not a function"),
+  false,
+  "関数名にSearchが含まれてもフォルダー検索として扱わない",
+);
+assert.equal(
+  hasExplicitWorkspaceLookupIntent?.("search for contract files"),
+  true,
+  "独立した英単語のsearchはフォルダー検索として扱う",
+);
+assert.equal(
+  hasExplicitWorkspaceLookupIntent?.("フォルダーに契約書はある？"),
+  true,
+  "日本語のフォルダー検索意図は維持する",
+);
 
 assert.deepEqual(
   plain(inferSimpleTextSave({

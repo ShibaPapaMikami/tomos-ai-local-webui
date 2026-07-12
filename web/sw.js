@@ -1,4 +1,4 @@
-const CACHE_NAME = "gemma4-pwa-0.8.218-final-review";
+const CACHE_NAME = "gemma4-pwa-0.8.219-searchfix";
 const APP_SHELL = [
   "/",
   "/mobile.html",
@@ -14,7 +14,7 @@ const APP_SHELL = [
   "/asr.js?v=0.8.209-tomos53",
   "/attachments.js?v=0.8.209-tomos53",
   "/composer.js?v=0.8.209-tomos53",
-  "/workspace.js?v=0.8.209-tomos53",
+  "/workspace.js?v=0.8.219-searchfix",
   "/training.js?v=0.8.209-tomos53",
   "/tomos-character-core.js?v=0.8.209-tomos53",
   "/character-core-adapter.js?v=0.8.209-tomos53",
@@ -23,14 +23,14 @@ const APP_SHELL = [
   "/person-relationship.js?v=0.8.209-tomos53",
   "/models.js?v=0.8.209-tomos53",
   "/messages.js?v=0.8.211-listground1",
-  "/sidebar.js?v=0.8.209-tomos53",
+  "/sidebar.js?v=0.8.219-searchfix",
   "/settings.js?v=0.8.218-final-review",
-  "/management.js?v=0.8.209-tomos53",
+  "/management.js?v=0.8.219-searchfix",
   "/router.js?v=0.8.209-tomos53",
-  "/search.js?v=0.8.211-listground1",
-  "/pwa.js?v=0.8.211-listground1",
+  "/search.js?v=0.8.219-searchfix",
+  "/pwa.js?v=0.8.219-searchfix",
   "/mobile-standalone.js?v=0.8.209-tomos53",
-  "/app.js?v=0.8.218-final-review",
+  "/app.js?v=0.8.219-searchfix",
   "/icons/icon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png"

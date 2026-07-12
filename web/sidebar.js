@@ -61,6 +61,10 @@ function shouldCloseMobileSidebar({
   return Boolean(isMobile && !sidebarHidden && !targetInsideSidebar && !targetInsideToggle);
 }
 
+function shouldHideSidebarAfterManagementOpen({ isMobile, sidebarHidden }) {
+  return Boolean(isMobile && !sidebarHidden);
+}
+
 function setSidebarWidth({ state, width }) {
   state.sidebarWidth = Math.min(420, Math.max(220, Math.round(width)));
   localStorage.setItem("gemma4.sidebarWidth", String(state.sidebarWidth));
@@ -506,6 +510,7 @@ window.GEMMA_SIDEBAR = {
   setSidebarHidden,
   setSidebarWidth,
   shouldCloseMobileSidebar,
+  shouldHideSidebarAfterManagementOpen,
   shouldStartSidebarHidden,
   startSessionRenameInState,
   visibleFolders,

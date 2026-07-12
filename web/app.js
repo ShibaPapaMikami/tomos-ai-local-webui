@@ -4140,6 +4140,7 @@ const {
   compactWorkspaceContent,
   extractCodeBlocks,
   extractJsonObject,
+  hasExplicitWorkspaceLookupIntent: hasExplicitWorkspaceLookupIntentFromWorkspace,
   inferSavePath: inferWorkspaceSavePath,
   inferSimpleTextSave: inferWorkspaceSimpleTextSave,
   isSaveCommand,
@@ -4244,8 +4245,12 @@ function shouldApplyStudyPackToRequest(text, hasImages = false) {
 function hasExplicitWorkspaceLookupIntent(text) {
   const normalized = String(text || "").trim();
   if (!normalized) return false;
+  if (typeof hasExplicitWorkspaceLookupIntentFromWorkspace === "function") {
+    return hasExplicitWorkspaceLookupIntentFromWorkspace(normalized);
+  }
   if (/\b[A-Za-z0-9_.-]+\.(txt|md|pdf|docx?|html|css|js|jsx|ts|tsx|py|json|csv)\b/i.test(normalized)) return true;
-  return /(フォルダ|フォルダー|ディレクトリ|作業ディレクトリ|ローカル|ファイル|保存先|中身|一覧|検索|探|見つけ|どこにある|どこに保存|場所|入って|含ま|書か|記載|契約書|請求書|仕様書|見積書|領収書|議事録|資料|文書|テキスト|PDF|Word|folder|directory|file|where is|search|find|contain|contract|invoice|spec|receipt|minutes)/i.test(normalized);
+  return /(フォルダ|フォルダー|ディレクトリ|作業ディレクトリ|ローカル|ファイル|保存先|中身|一覧|検索|探|見つけ|どこにある|どこに保存|場所|入って|含ま|書か|記載|契約書|請求書|仕様書|見積書|領収書|議事録|資料|文書|テキスト|PDF|Word)/i.test(normalized)
+    || /\b(folder|directory|file|where is|search|find|contain|contract|invoice|spec|receipt|minutes)\b/i.test(normalized);
 }
 
 function isCharacterPreferenceRequest(text) {
@@ -5769,7 +5774,7 @@ async function sendMessage(text) {
       assistantMessage.sources = requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(normalizeSearchResults?.(streamSearchResults) || streamSearchResults)];
-      assistantMessage.searchDiagnostics = formatSearchDiagnosticsForDisplay(streamSearchDiagnostics, t);
+      assistantMessage.searchDiagnostics = formatSearchDiagnosticsForDisplay?.(streamSearchDiagnostics, t) || [];
       assistantMessage.durationSeconds = durationSeconds;
       assistantMessage.runMeta = messageRunMeta(requestOptions, requestModel, runMetaOverrides);
       delete assistantMessage.streaming;
@@ -5807,7 +5812,7 @@ async function sendMessage(text) {
       sources: requestOptions.codingMode
         ? workspacePreviewSources({ root: state.workspaceRoot, files: savedFiles, label: t("chat.preview") })
         : [...attachmentSources, ...localSearchSources, ...codegraphSources, ...(searchResultsFromResponse?.(data) || [])],
-      searchDiagnostics: formatSearchDiagnosticsForDisplay(searchDiagnosticsFromResponse?.(data) || [], t),
+      searchDiagnostics: formatSearchDiagnosticsForDisplay?.(searchDiagnosticsFromResponse?.(data) || [], t) || [],
       durationSeconds,
       runMeta: messageRunMeta(requestOptions, data.model || requestModel, runMetaOverrides),
     });
@@ -7722,6 +7727,14 @@ window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
   onOpenWorkspace: openWorkspaceForPlugin,
   onMobileImport: importMobileChatJson,
   onMobilePendingImport: importPendingMobileChats,
+  onMenuPanelOpen: () => {
+    if (window.GEMMA_SIDEBAR?.shouldHideSidebarAfterManagementOpen?.({
+      isMobile: window.matchMedia("(max-width: 760px)").matches,
+      sidebarHidden: state.sidebarHidden,
+    })) {
+      window.GEMMA_SIDEBAR.setSidebarHidden({ hidden: true, state, onRender: render });
+    }
+  },
   onPluginsChanged: render,
 });
 

@@ -329,8 +329,8 @@ assert.deepEqual(
 const appSource = fs.readFileSync("web/app.js", "utf8");
 const i18nSource = fs.readFileSync("web/i18n.js", "utf8");
 assert.match(appSource, /formatSearchDiagnosticsForDisplay,/);
-assert.match(appSource, /formatSearchDiagnosticsForDisplay\(streamSearchDiagnostics, t\)/);
-assert.match(appSource, /formatSearchDiagnosticsForDisplay\(searchDiagnosticsFromResponse\?\.\(data\) \|\| \[\], t\)/);
+assert.match(appSource, /formatSearchDiagnosticsForDisplay\?\.\(streamSearchDiagnostics, t\) \|\| \[\]/);
+assert.match(appSource, /formatSearchDiagnosticsForDisplay\?\.\(searchDiagnosticsFromResponse\?\.\(data\) \|\| \[\], t\) \|\| \[\]/);
 assert.doesNotMatch(appSource, /function displaySearchDiagnostics\(/);
 assert.match(i18nSource, /"chat\.searchRouteLabel": "使用経路"/);
 assert.match(i18nSource, /"chat\.searchRouteRouteFailed": "\{backend\}で確認できませんでした。"/);

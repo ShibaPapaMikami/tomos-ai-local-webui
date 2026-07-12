@@ -1368,8 +1368,10 @@ window.GEMMA_MANAGEMENT = (() => {
     onOpenWorkspace,
     onMobileImport,
     onMobilePendingImport,
+    onMenuPanelOpen,
     onPluginsChanged,
   }) {
+    const afterMenuPanelOpen = () => onMenuPanelOpen?.();
     els.settingsMenuToggle?.addEventListener("click", () => {
       setSidebarSettingsMode({ els, open: true });
     });
@@ -1380,10 +1382,12 @@ window.GEMMA_MANAGEMENT = (() => {
     els.settingsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.settingsPanel });
       onOpenSettings?.();
+      afterMenuPanelOpen();
     });
     els.pcDiagnosticsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.settingsPanel });
       onOpenSettings?.("pc-diagnostics");
+      afterMenuPanelOpen();
     });
     els.settingsClose?.addEventListener("click", () => {
       if (els.settingsPanel) els.settingsPanel.hidden = true;
@@ -1393,6 +1397,7 @@ window.GEMMA_MANAGEMENT = (() => {
       if (els.mobileConnectToggle.disabled) return;
       openManagementPanel({ els, panel: els.mobileConnectPanel });
       refreshMobileConnectInfo({ els, t });
+      afterMenuPanelOpen();
     });
     els.mobileConnectClose?.addEventListener("click", () => {
       if (els.mobileConnectPanel) els.mobileConnectPanel.hidden = true;
@@ -1412,6 +1417,7 @@ window.GEMMA_MANAGEMENT = (() => {
     });
     els.responseSettingsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.responseSettingsPanel });
+      afterMenuPanelOpen();
     });
     els.responseSettingsClose?.addEventListener("click", () => {
       if (els.responseSettingsPanel) els.responseSettingsPanel.hidden = true;
@@ -1420,6 +1426,7 @@ window.GEMMA_MANAGEMENT = (() => {
     els.asrToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.asrPanel });
       onOpenSettings?.("asr");
+      afterMenuPanelOpen();
     });
     els.asrClose?.addEventListener("click", () => {
       if (els.asrPanel) els.asrPanel.hidden = true;
@@ -1429,6 +1436,7 @@ window.GEMMA_MANAGEMENT = (() => {
     els.characterToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.characterPanel });
       onOpenCharacter?.();
+      afterMenuPanelOpen();
     });
     els.characterClose?.addEventListener("click", () => {
       if (els.characterPanel) els.characterPanel.hidden = true;
@@ -1438,13 +1446,17 @@ window.GEMMA_MANAGEMENT = (() => {
     els.personRelationshipToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.personRelationshipPanel });
       renderPersonRelationshipPanel?.();
+      afterMenuPanelOpen();
     });
     els.personRelationshipClose?.addEventListener("click", () => {
       if (els.personRelationshipPanel) els.personRelationshipPanel.hidden = true;
       syncManagementLayout({ els });
     });
 
-    els.studyPacksToggle?.addEventListener("click", () => openManagementPanel({ els, panel: els.studyPacksPanel }));
+    els.studyPacksToggle?.addEventListener("click", () => {
+      openManagementPanel({ els, panel: els.studyPacksPanel });
+      afterMenuPanelOpen();
+    });
     els.studyPacksClose?.addEventListener("click", () => {
       if (els.studyPacksPanel) els.studyPacksPanel.hidden = true;
       syncManagementLayout({ els });
@@ -1470,6 +1482,7 @@ window.GEMMA_MANAGEMENT = (() => {
 
     els.trainingManagementToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.trainingManagementPanel });
+      afterMenuPanelOpen();
     });
     els.trainingManagementClose?.addEventListener("click", () => {
       if (els.trainingManagementPanel) els.trainingManagementPanel.hidden = true;
@@ -1479,13 +1492,17 @@ window.GEMMA_MANAGEMENT = (() => {
     els.contextMemoryToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.contextMemoryPanel });
       onOpenSettings?.("context-memory");
+      afterMenuPanelOpen();
     });
     els.contextMemoryClose?.addEventListener("click", () => {
       if (els.contextMemoryPanel) els.contextMemoryPanel.hidden = true;
       syncManagementLayout({ els });
     });
 
-    els.pluginsToggle?.addEventListener("click", () => openManagementPanel({ els, panel: els.pluginsPanel }));
+    els.pluginsToggle?.addEventListener("click", () => {
+      openManagementPanel({ els, panel: els.pluginsPanel });
+      afterMenuPanelOpen();
+    });
     els.pluginsClose?.addEventListener("click", () => {
       if (els.pluginsPanel) els.pluginsPanel.hidden = true;
       syncManagementLayout({ els });
@@ -1493,6 +1510,7 @@ window.GEMMA_MANAGEMENT = (() => {
     els.contractsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.contractsPanel });
       renderContractsPanel?.();
+      afterMenuPanelOpen();
     });
     els.contractsClose?.addEventListener("click", () => {
       if (els.contractsPanel) els.contractsPanel.hidden = true;
@@ -1500,6 +1518,7 @@ window.GEMMA_MANAGEMENT = (() => {
     });
     els.languageModelsToggle?.addEventListener("click", () => {
       openManagementPanel({ els, panel: els.languageModelsPanel });
+      afterMenuPanelOpen();
     });
     els.languageModelsClose?.addEventListener("click", () => {
       if (els.languageModelsPanel) els.languageModelsPanel.hidden = true;
@@ -1532,6 +1551,7 @@ window.GEMMA_MANAGEMENT = (() => {
         const target = button.dataset.pluginSettings || "";
         openManagementPanel({ els, panel: target === "asr" ? els.asrPanel : els.settingsPanel });
         onOpenSettings?.(target);
+        afterMenuPanelOpen();
       });
     });
     document.querySelectorAll("[data-plugin-workspace]").forEach((button) => {
