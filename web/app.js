@@ -4207,7 +4207,7 @@ function isBusinessEmailDraft(text) {
 function explicitlyRequestsWorkspaceSave(text) {
   const normalized = String(text || "").trim();
   if (!normalized) return false;
-  return /(保存して|保存する|保存$|ファイルに保存|ファイルとして保存|書き出して|書き出し|ダウンロード|上書き|新規ファイル)/i.test(normalized);
+  return /(保存(?:して)?(?:ください|下さい)|保存をお願い(?:します|いたします)|保存して|保存する|保存$|ファイルに保存|ファイルとして保存|書き出して|書き出し|ダウンロード|上書き|新規ファイル)/i.test(normalized);
 }
 
 function shouldKeepStudyPackReplyInChat(text) {

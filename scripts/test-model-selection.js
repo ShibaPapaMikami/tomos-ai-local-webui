@@ -214,6 +214,31 @@ assert.match(appSource, /function isNoteArticleWritingRequest\(text\)/);
 assert.match(appSource, /function shouldKeepNoteArticleInChat\(text\)/);
 assert.match(appSource, /isNoteArticleWritingRequest\(text\) && !explicitlyRequestsWorkspaceSave\(text\)/);
 assert.match(appSource, /if \(shouldKeepNoteArticleInChat\(text\)\) return false;/);
+const workspaceRouteFunctionSource = [
+  "isWorkspaceBuildRequest",
+  "explicitlyRequestsWorkspaceSave",
+  "isNoteArticleWritingRequest",
+  "shouldKeepNoteArticleInChat",
+].map((name) => appSource.match(
+  new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`),
+)?.[0]).join("\n");
+assert.match(workspaceRouteFunctionSource, /function isWorkspaceBuildRequest\(text\)/);
+const workspaceRouteContext = {
+  state: { workspaceRoot: "/tmp/tomos-note-test" },
+  isTranslationRequest: () => false,
+  isBusinessEmailDraft: () => false,
+  isReplyDraftRequest: () => false,
+  isStudyPackRewriteRequest: () => false,
+  shouldKeepStudyPackReplyInChat: () => false,
+  isWorkspaceLookupRequest: () => false,
+};
+vm.createContext(workspaceRouteContext);
+vm.runInContext(workspaceRouteFunctionSource, workspaceRouteContext, { filename: "web/app.js" });
+assert.equal(workspaceRouteContext.explicitlyRequestsWorkspaceSave("note記事を編集して保存してください"), true);
+assert.equal(workspaceRouteContext.explicitlyRequestsWorkspaceSave("note記事を編集して保存をお願いします"), true);
+assert.equal(workspaceRouteContext.isWorkspaceBuildRequest("note記事を編集して"), false);
+assert.equal(workspaceRouteContext.isWorkspaceBuildRequest("note記事を編集して保存してください"), true);
+assert.equal(workspaceRouteContext.isWorkspaceBuildRequest("note記事を編集して保存をお願いします"), true);
 const externalLlmCheckHelperSource = appSource.match(
   /function isCurrentExternalLlmCheck\(requestId, requestUrl, currentRequestId, currentUrl\) \{[\s\S]*?\n\}/,
 )?.[0];
