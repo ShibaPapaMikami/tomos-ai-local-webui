@@ -318,7 +318,8 @@ window.GEMMA_MANAGEMENT = (() => {
   function isNoteArticleWritingRequest(text) {
     const normalized = String(text || "").trim();
     if (!normalized) return false;
-    const hasNoteArticleTarget = /note/i.test(normalized) && /記事/.test(normalized);
+    const hasNoteArticleTarget = (/note/i.test(normalized) && /記事/.test(normalized))
+      || /(ブログ記事|投稿記事|投稿文)/.test(normalized);
     const hasWritingAction = /(整え|編集|書き直|続き|貼り付け|公開前)/i.test(normalized);
     return hasNoteArticleTarget && hasWritingAction;
   }

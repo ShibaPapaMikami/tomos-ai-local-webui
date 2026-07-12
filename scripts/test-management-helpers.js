@@ -858,6 +858,20 @@ async function runImportTests() {
   ]) {
     assert.equal(isNoteArticleWritingRequest(text), true, `${text} はnote記事要求である`);
   }
+  for (const text of [
+    "ブログ記事を整えて。設定ファイルとコード例があります。",
+    "投稿記事を公開前に編集して。",
+    "投稿文を貼り付け用に書き直して。",
+  ]) {
+    assert.equal(isNoteArticleWritingRequest(text), true, `${text} は記事作成要求である`);
+    assert.equal(shouldApplyStudyPackForText(text, { hasSelection: true }), true, `${text} は教材適用対象である`);
+  }
+  for (const text of [
+    "ブログについて相談したい。",
+    "投稿を見た。",
+  ]) {
+    assert.equal(isNoteArticleWritingRequest(text), false, `${text} は記事作成要求ではない`);
+  }
   assert.match(appJs, /返信文\|返信案\|返信メール\|メール返信/);
   assert.match(appJs, /function isReplyDraftRequest/);
   assert.match(appJs, /返信本文案:/);

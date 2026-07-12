@@ -486,9 +486,7 @@ const selectedStudyPackOptionsContext = {
   },
   state: { webSearch: false, workspaceRoot: "/tmp/tomos-note-test" },
   window: {
-    GEMMA_MANAGEMENT: {
-      shouldApplyStudyPackForText: (text, { hasSelection }) => hasSelection && /note記事/.test(text),
-    },
+    GEMMA_MANAGEMENT: sharedClassifierContext.window.GEMMA_MANAGEMENT,
   },
   selectedStudyPackModes: () => ["note-article-writing:rewrite-for-note"],
   selectedStudyPackMode: () => "note-article-writing:rewrite-for-note",
@@ -550,6 +548,16 @@ assert.deepEqual(
     isolateUserMessage: true,
   },
 );
+for (const text of [
+  "ブログ記事を整えて。設定ファイルとコード例があります。",
+  "投稿文を編集して。コードとファイルがあります。",
+]) {
+  assert.equal(selectedStudyPackOptionsContext.shouldApplyStudyPackToRequest(text), true, `${text} は教材適用対象である`);
+  assert.equal(selectedStudyPackOptionsContext.isStudyPackRewriteRequest(text), true, `${text} は記事作成要求である`);
+  const options = selectedStudyPackOptionsContext.chatRequestOptions(text);
+  assert.equal(options.codingMode, false, `${text} は通常チャット経路を使う`);
+  assert.equal(options.useStudyPackContext, true, `${text} は教材文脈を使う`);
+}
 const selectedTranslationOptions = selectedStudyPackOptionsContext.chatRequestOptions("note記事を編集して英訳して");
 assert.equal(selectedTranslationOptions.translationMode, true);
 assert.equal(selectedTranslationOptions.codingMode, false);
