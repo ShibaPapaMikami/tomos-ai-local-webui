@@ -327,6 +327,7 @@ const noteArticleOptionsContext = {
   state: { webSearch: false },
   isTranslationRequest: () => false,
   isNoteArticleWritingRequest: () => true,
+  hasSelectedNoteArticlePack: () => false,
   explicitlyRequestsWorkspaceSave: () => false,
   isWorkspaceBuildRequest: () => false,
   shouldAutoUseExternalResearch: () => false,
@@ -400,6 +401,27 @@ assert.equal(realisticNoteOptions.numCtx, 12288);
 assert.equal(realisticNoteOptions.numPredict, 2048);
 assert.equal(realisticNoteOptions.historyTurns, 1);
 assert.equal(realisticNoteOptions.isolateUserMessage, true);
+const selectedNotePackOptionsContext = {
+  ...noteArticleOptionsContext,
+  isNoteArticleWritingRequest: () => false,
+  hasSelectedNoteArticlePack: () => true,
+  isWorkspaceBuildRequest: () => true,
+  applySearchBudget: null,
+  applyThinkingBudget: (options) => options,
+};
+vm.createContext(selectedNotePackOptionsContext);
+vm.runInContext(
+  extractFunctionSource(appSource, "chatRequestOptions"),
+  selectedNotePackOptionsContext,
+  { filename: "web/app.js" },
+);
+const selectedNotePackOptions = selectedNotePackOptionsContext.chatRequestOptions(
+  "設定ファイルとコード例を含む記事本文\n" + "本文".repeat(3000),
+);
+assert.equal(selectedNotePackOptions.codingMode, false);
+assert.equal(selectedNotePackOptions.numCtx, 12288);
+assert.equal(selectedNotePackOptions.historyTurns, 1);
+assert.equal(selectedNotePackOptions.isolateUserMessage, true);
 const savedNoteArticleOptionsContext = {
   ...noteArticleOptionsContext,
   state: { webSearch: false, workspaceRoot: "/tmp/tomos-note-test" },
@@ -633,11 +655,11 @@ assert.match(indexSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.220-note-article/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.223-long-note/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.222-note-pack-error"/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.223-long-note"/);
 assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.209-tomos53/);
@@ -647,7 +669,7 @@ assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.222-note-pack-error
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.220-note-article/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.223-long-note/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);

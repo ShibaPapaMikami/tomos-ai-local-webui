@@ -4238,6 +4238,10 @@ function noteArticleRequestBudget(text, baseContext) {
   };
 }
 
+function hasSelectedNoteArticlePack() {
+  return selectedStudyPackModes().some((selection) => selection.pack?.id === "note-article-writing");
+}
+
 function shouldKeepNoteArticleInChat(text) {
   return isNoteArticleWritingRequest(text) && !explicitlyRequestsWorkspaceSave(text);
 }
@@ -4537,7 +4541,7 @@ function modelReasonText(reasonKey) {
 function chatRequestOptions(text, hasImages = false) {
   const translationMode = isTranslationRequest(text);
   const noteArticleWriting = !translationMode
-    && isNoteArticleWritingRequest(text)
+    && (isNoteArticleWritingRequest(text) || hasSelectedNoteArticlePack())
     && !explicitlyRequestsWorkspaceSave(text);
   const codingMode = !translationMode && !noteArticleWriting && isWorkspaceBuildRequest(text);
   const useExternalResearch = Boolean(state.webSearch || (!codingMode && !translationMode && shouldAutoUseExternalResearch?.(text)));

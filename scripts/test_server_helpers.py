@@ -889,7 +889,7 @@ def test_ollama_http_error_event_is_stream_json_safe() -> None:
 def test_context_size_error_is_friendly() -> None:
     body = '{"error":{"code":400,"message":"request (7994 tokens) exceeds the available context size (4096 tokens)","type":"exceed_context_size_error"}}'
     assert server.friendly_ollama_error(body) == (
-        "文章が長いため一度に処理できませんでした。章ごとに分けるか、長文対応モードでもう一度お試しください。"
+        "会話履歴または文章が長いため、一度に処理できませんでした。新しいチャットでやり直すか、文章を章ごとに分けて送ってください。"
     )
 
 
@@ -897,7 +897,7 @@ def test_context_size_error_type_only_hides_raw_json_and_tokens() -> None:
     body = '{"error":{"type":"exceed_context_size_error"}}'
     message = server.friendly_ollama_error(body)
     serialized = json.dumps({"error": message}, ensure_ascii=False)
-    expected = "文章が長いため一度に処理できませんでした。章ごとに分けるか、長文対応モードでもう一度お試しください。"
+    expected = "会話履歴または文章が長いため、一度に処理できませんでした。新しいチャットでやり直すか、文章を章ごとに分けて送ってください。"
 
     assert message == expected
     assert body not in serialized
@@ -910,7 +910,7 @@ def test_context_size_error_message_only_hides_raw_json_and_tokens() -> None:
     body = '{"error":{"message":"exceeds the available context size"}}'
     message = server.friendly_ollama_error(body)
     serialized = json.dumps({"error": message}, ensure_ascii=False)
-    expected = "文章が長いため一度に処理できませんでした。章ごとに分けるか、長文対応モードでもう一度お試しください。"
+    expected = "会話履歴または文章が長いため、一度に処理できませんでした。新しいチャットでやり直すか、文章を章ごとに分けて送ってください。"
 
     assert message == expected
     assert body not in serialized
