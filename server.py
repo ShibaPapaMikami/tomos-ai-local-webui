@@ -6313,6 +6313,9 @@ class Handler(BaseHTTPRequestHandler):
                 selected_model = MODEL
             try:
                 llm_base_url = normalize_local_llm_base_url(str(body.get("llm_base_url") or ""))
+            except LocalLlmCheckError as exc:
+                json_response(self, 400, local_llm_check_error_payload(exc))
+                return
             except ValueError as exc:
                 json_response(self, 400, {"ok": False, "error": str(exc)})
                 return

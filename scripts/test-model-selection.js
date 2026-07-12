@@ -290,8 +290,13 @@ assert.match(
 );
 assert.match(appSource, /state\.externalLlmStatusKey\s*\? t\(state\.externalLlmStatusKey, state\.externalLlmStatusParams\)/);
 assert.match(appSource, /function clearExternalLlmSettings\(\) \{[\s\S]*?setExternalLlmStatus\("settings\.externalLlmStandard"\)/);
-assert.match(indexHtml, /<details class="external-llm-details">[\s\S]*external-llm-guide/);
-assert.match(indexHtml, /<details class="external-llm-details">[\s\S]*<div class="external-llm-model-card">[\s\S]*<\/details>/);
+const externalLlmDetailsStart = indexHtml.indexOf('<details class="external-llm-details">');
+assert.notEqual(externalLlmDetailsStart, -1, "別のローカルAI用の詳細設定が必要です");
+const externalLlmDetailsEnd = indexHtml.indexOf("</details>", externalLlmDetailsStart);
+assert.notEqual(externalLlmDetailsEnd, -1, "別のローカルAI用の詳細設定を閉じる必要があります");
+const externalLlmDetailsHtml = indexHtml.slice(externalLlmDetailsStart, externalLlmDetailsEnd + "</details>".length);
+assert.match(externalLlmDetailsHtml, /external-llm-guide/);
+assert.match(externalLlmDetailsHtml, /<div class="external-llm-model-card">/);
 assert.doesNotMatch(indexHtml, /外部LLM接続/);
 assert.doesNotMatch(i18nSource, /外部LLM接続/);
 

@@ -191,7 +191,19 @@ assert.match(composerVisibilityEl.innerHTML, /checked/);
 const checkedVisibilityHtml = composerVisibilityEl.innerHTML;
 assert.match(checkedVisibilityHtml, /data-composer-model-visible="qwen2\.5:3b" checked/);
 assert.doesNotMatch(checkedVisibilityHtml, new RegExp(`data-composer-model-visible="${agenticCoder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" checked`));
-assert.match(checkedVisibilityHtml, /class="is-selected"/);
+function visibilityLabelForModel(html, model) {
+  const marker = `data-composer-model-visible="${model}"`;
+  const inputStart = html.indexOf(marker);
+  assert.notEqual(inputStart, -1, `モデル ${model} のチェック欄が必要です`);
+  const labelStart = html.lastIndexOf("<label", inputStart);
+  const labelEnd = html.indexOf("</label>", inputStart);
+  assert.notEqual(labelStart, -1, `モデル ${model} のラベル開始タグが必要です`);
+  assert.notEqual(labelEnd, -1, `モデル ${model} のラベル終了タグが必要です`);
+  return html.slice(labelStart, labelEnd + "</label>".length);
+}
+
+assert.match(visibilityLabelForModel(checkedVisibilityHtml, "qwen2.5:3b"), /class="is-selected"/);
+assert.doesNotMatch(visibilityLabelForModel(checkedVisibilityHtml, agenticCoder), /\bis-selected\b/);
 
 const defaultVisibilityEl = new FakeElement("section");
 renderComposerModelVisibility({

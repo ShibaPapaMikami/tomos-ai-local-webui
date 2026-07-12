@@ -2074,6 +2074,28 @@ def post_local_chat(url: str, payload: dict) -> tuple[str, str]:
         return response.headers.get_content_type(), response.read().decode("utf-8")
 
 
+def test_chat_handler_returns_actionable_local_llm_error() -> None:
+    with local_chat_handler() as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({
+                "messages": [{"role": "user", "content": "通常チャット"}],
+                "llm_base_url": "https://example.com",
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            response = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("非ローカルURLは通常チャットで拒否される必要があります")
+
+    assert response == server.local_llm_check_error_payload(server.LocalLlmCheckError("non_local_url"))
+
+
 def test_chat_handler_collects_failed_exa_fallback_diagnostic() -> None:
     calls = []
 
@@ -3217,6 +3239,7 @@ if __name__ == "__main__":
     test_complete_list_finalizer_returns_same_content_for_both_api_modes()
     test_complete_list_stream_excludes_specialized_channels_and_sources()
     test_local_chat_handler_scopes_doctor_cache()
+    test_chat_handler_returns_actionable_local_llm_error()
     test_chat_handler_collects_failed_exa_fallback_diagnostic()
     test_chat_handler_uses_web_search_results_for_decision()
     test_chat_http_complete_list_events_and_youtube_stream_regression()
