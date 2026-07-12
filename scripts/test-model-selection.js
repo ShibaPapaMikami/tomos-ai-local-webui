@@ -234,11 +234,16 @@ const workspaceRouteContext = {
 };
 vm.createContext(workspaceRouteContext);
 vm.runInContext(workspaceRouteFunctionSource, workspaceRouteContext, { filename: "web/app.js" });
-assert.equal(workspaceRouteContext.explicitlyRequestsWorkspaceSave("note記事を編集して保存してください"), true);
-assert.equal(workspaceRouteContext.explicitlyRequestsWorkspaceSave("note記事を編集して保存をお願いします"), true);
-assert.equal(workspaceRouteContext.isWorkspaceBuildRequest("note記事を編集して"), false);
-assert.equal(workspaceRouteContext.isWorkspaceBuildRequest("note記事を編集して保存してください"), true);
-assert.equal(workspaceRouteContext.isWorkspaceBuildRequest("note記事を編集して保存をお願いします"), true);
+const noteArticleEditingRequest = "以下のnote記事を貼り付け用に編集して。設定ファイル（config.toml）とコード例（JavaScript）があります。";
+assert.equal(workspaceRouteContext.isWorkspaceBuildRequest(noteArticleEditingRequest), false);
+assert.equal(
+  workspaceRouteContext.isWorkspaceBuildRequest(`${noteArticleEditingRequest} 保存してください`),
+  true,
+);
+assert.equal(
+  workspaceRouteContext.isWorkspaceBuildRequest(`${noteArticleEditingRequest} 保存をお願いします`),
+  true,
+);
 const externalLlmCheckHelperSource = appSource.match(
   /function isCurrentExternalLlmCheck\(requestId, requestUrl, currentRequestId, currentUrl\) \{[\s\S]*?\n\}/,
 )?.[0];
