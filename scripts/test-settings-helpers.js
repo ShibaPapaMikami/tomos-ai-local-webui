@@ -6,7 +6,13 @@ const context = { window: {}, console };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("web/settings.js", "utf8"), context, { filename: "web/settings.js" });
 
-const { composerModelCandidates, installedOrCurrentModels, renderComposerModelVisibility, renderPcDiagnosticsPanel } = context.window.GEMMA_SETTINGS;
+const {
+  composerModelCandidates,
+  externalLlmCheckStatusKey,
+  installedOrCurrentModels,
+  renderComposerModelVisibility,
+  renderPcDiagnosticsPanel,
+} = context.window.GEMMA_SETTINGS;
 const { renderSettingsMeta } = context.window.GEMMA_SETTINGS;
 
 const agenticCoder = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-GGUF:Q4_K_M";
@@ -115,10 +121,26 @@ const filteredComposerCandidates = composerModelCandidates({
   state: {
     ...state,
     composerModelVisibleModels: ["qwen2.5:3b"],
+    composerModelVisibleModelsSaved: true,
   },
   modelIsInstalled,
 });
 assert.equal(JSON.stringify(filteredComposerCandidates), JSON.stringify(["qwen2.5:3b"]));
+
+const clearedComposerCandidates = composerModelCandidates({
+  state: {
+    ...state,
+    composerModelVisibleModels: [],
+    composerModelVisibleModelsSaved: true,
+  },
+  modelIsInstalled,
+});
+assert.equal(JSON.stringify(clearedComposerCandidates), JSON.stringify([]));
+
+assert.equal(externalLlmCheckStatusKey("invalid_url"), "settings.externalLlmInvalidUrl");
+assert.equal(externalLlmCheckStatusKey("non_local_url"), "settings.externalLlmLocalOnly");
+assert.equal(externalLlmCheckStatusKey("connection_failed"), "settings.externalLlmError");
+assert.equal(externalLlmCheckStatusKey("unexpected"), "settings.externalLlmError");
 
 class FakeElement {
   constructor(tagName = "div") {
@@ -160,7 +182,7 @@ renderComposerModelVisibility({
   composerModelLabel: (model) => model === "qwen2.5:3b" ? "Qwen" : model,
   els: { composerModelVisibility: composerVisibilityEl },
   models: ["qwen2.5:3b", agenticCoder],
-  state: { language: "ja", composerModelVisibleModels: ["qwen2.5:3b"] },
+  state: { language: "ja", composerModelVisibleModels: ["qwen2.5:3b"], composerModelVisibleModelsSaved: true },
 });
 assert.match(composerVisibilityEl.innerHTML, /チャット欄に表示するAIモデル/);
 assert.match(composerVisibilityEl.innerHTML, /Qwen/);
@@ -176,9 +198,19 @@ renderComposerModelVisibility({
   composerModelLabel: (model) => model,
   els: { composerModelVisibility: defaultVisibilityEl },
   models: ["qwen2.5:3b", agenticCoder],
-  state: { language: "ja", composerModelVisibleModels: [] },
+  state: { language: "ja", composerModelVisibleModels: [], composerModelVisibleModelsSaved: false },
 });
 assert.equal((defaultVisibilityEl.innerHTML.match(/ checked/g) || []).length, 2);
+
+const clearedVisibilityEl = new FakeElement("section");
+renderComposerModelVisibility({
+  composerModelLabel: (model) => model,
+  els: { composerModelVisibility: clearedVisibilityEl },
+  models: ["qwen2.5:3b", agenticCoder],
+  state: { language: "ja", composerModelVisibleModels: [], composerModelVisibleModelsSaved: true },
+});
+assert.equal((clearedVisibilityEl.innerHTML.match(/ checked/g) || []).length, 0);
+assert.doesNotMatch(clearedVisibilityEl.innerHTML, /class="is-selected"/);
 
 const pcDiagnosticsEl = new FakeElement("section");
 renderPcDiagnosticsPanel({

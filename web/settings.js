@@ -487,6 +487,12 @@ function renderComposerModelSelect({
   select.value = current || "";
 }
 
+function externalLlmCheckStatusKey(errorCode) {
+  if (errorCode === "invalid_url") return "settings.externalLlmInvalidUrl";
+  if (errorCode === "non_local_url") return "settings.externalLlmLocalOnly";
+  return "settings.externalLlmError";
+}
+
 function installedOrCurrentModels({ models, task, state, modelIsInstalled }) {
   const current = state.modelOverrides?.[task] || "";
   const recommendedCoding = state.serverModels?.recommendedCoding || [];
@@ -547,8 +553,8 @@ function composerModelCandidates({ state, modelIsInstalled }) {
     isComposerModelCandidate(state.composerModel) ? state.composerModel : "",
   ].filter((model) => isComposerModelCandidate(model) || experimentalComposerModelCandidates({ state }).includes(model)), "chat");
   const uniqueCandidates = [...new Set(candidates)];
+  if (state.composerModelVisibleModelsSaved !== true) return uniqueCandidates;
   const visible = Array.isArray(state.composerModelVisibleModels) ? state.composerModelVisibleModels.filter(Boolean) : [];
-  if (visible.length === 0) return uniqueCandidates;
   const visibleSet = new Set(visible);
   return uniqueCandidates.filter((model) => visibleSet.has(model));
 }
@@ -569,7 +575,7 @@ function renderComposerModelVisibility({
   const savedVisibleModels = Array.isArray(state.composerModelVisibleModels)
     ? state.composerModelVisibleModels.filter(Boolean)
     : [];
-  const selected = new Set(savedVisibleModels.length > 0 ? savedVisibleModels : uniqueModels);
+  const selected = new Set(state.composerModelVisibleModelsSaved === true ? savedVisibleModels : uniqueModels);
   els.composerModelVisibility.innerHTML = `
     <div class="composer-model-visibility-title">
       <strong>${language === "en" ? "Models shown in chat" : "チャット欄に表示するAIモデル"}</strong>
@@ -643,7 +649,7 @@ function renderModelSettingsSelects({
   });
   const composerModels = composerModelCandidates({ state, modelIsInstalled });
   const allComposerModels = composerModelCandidates({
-    state: { ...state, composerModelVisibleModels: [] },
+    state: { ...state, composerModelVisibleModels: [], composerModelVisibleModelsSaved: false },
     modelIsInstalled,
   });
   renderComposerModelSelect({
@@ -688,6 +694,7 @@ function bindSettingsEvents({
 window.GEMMA_SETTINGS = {
   bindSettingsEvents,
   composerModelCandidates,
+  externalLlmCheckStatusKey,
   fetchModelPullStatus,
   installedOrCurrentModels,
   renderComposerModelSelect,

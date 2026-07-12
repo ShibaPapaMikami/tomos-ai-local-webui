@@ -14,12 +14,25 @@ function initialAsrPartialMode() {
 }
 
 function loadComposerModelVisibleModels() {
+  const rawValue = localStorage.getItem("gemma4.composerModelVisibleModels");
+  if (rawValue === null) return { models: [], saved: false };
   try {
-    const parsed = JSON.parse(localStorage.getItem("gemma4.composerModelVisibleModels") || "[]");
-    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) ? { models: parsed.filter(Boolean), saved: true } : { models: [], saved: false };
   } catch {
-    return [];
+    return { models: [], saved: false };
   }
+}
+
+const initialComposerModelVisibility = loadComposerModelVisibleModels();
+const initialComposerModel = localStorage.getItem("gemma4.composerModel") || "";
+const storedComposerModel = initialComposerModelVisibility.saved
+  && !initialComposerModelVisibility.models.includes(initialComposerModel)
+  ? ""
+  : initialComposerModel;
+
+if (storedComposerModel !== initialComposerModel) {
+  localStorage.setItem("gemma4.composerModel", storedComposerModel);
 }
 
 const state = {
@@ -74,8 +87,9 @@ const state = {
     coding: localStorage.getItem("gemma4.model.coding") || "",
     translation: localStorage.getItem("gemma4.model.translation") || "",
   },
-  composerModel: localStorage.getItem("gemma4.composerModel") || "",
-  composerModelVisibleModels: loadComposerModelVisibleModels(),
+  composerModel: storedComposerModel,
+  composerModelVisibleModels: initialComposerModelVisibility.models,
+  composerModelVisibleModelsSaved: initialComposerModelVisibility.saved,
   externalLlmUrl: localStorage.getItem("gemma4.externalLlmUrl") || "",
   externalLlmCheckId: 0,
   externalLlmStatus: "",
@@ -1732,8 +1746,9 @@ function setComposerModel(value) {
 
 function setComposerModelVisibleModels(models) {
   state.composerModelVisibleModels = [...new Set((models || []).filter(Boolean))];
+  state.composerModelVisibleModelsSaved = true;
   localStorage.setItem("gemma4.composerModelVisibleModels", JSON.stringify(state.composerModelVisibleModels));
-  if (state.composerModel && state.composerModelVisibleModels.length > 0 && !state.composerModelVisibleModels.includes(state.composerModel)) {
+  if (state.composerModel && !state.composerModelVisibleModels.includes(state.composerModel)) {
     setComposerModel("");
   }
   syncModelInputs();
@@ -2163,7 +2178,11 @@ async function checkExternalLlmServer() {
       body: JSON.stringify({ url: state.externalLlmUrl }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.ok) throw new Error(data.error || t("settings.externalLlmError"));
+    if (!response.ok || !data.ok) {
+      if (!isCurrentExternalLlmCheck(requestId, requestUrl, state.externalLlmCheckId, state.externalLlmUrl)) return;
+      setExternalLlmStatus(window.GEMMA_SETTINGS?.externalLlmCheckStatusKey?.(data.errorCode) || "settings.externalLlmError");
+      return;
+    }
     if (!isCurrentExternalLlmCheck(requestId, requestUrl, state.externalLlmCheckId, state.externalLlmUrl)) return;
     const modelCount = Array.isArray(data.models) ? data.models.length : 0;
     setExternalLlmStatus("settings.externalLlmReady", {

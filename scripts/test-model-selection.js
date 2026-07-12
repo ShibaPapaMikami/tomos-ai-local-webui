@@ -242,19 +242,19 @@ assert.match(serverSource, /"safetyLevel": "low"/);
 assert.match(serverSource, /"external-send-check"/);
 assert.doesNotMatch(codingCandidatesBlock, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
 assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
-assert.match(indexSource, /\/i18n\.js\?v=0\.8\.212-local-ai-status/);
+assert.match(indexSource, /\/i18n\.js\?v=0\.8\.218-final-review/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/models\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/settings\.js\?v=0\.8\.209-tomos53/);
+assert.match(indexSource, /\/settings\.js\?v=0\.8\.218-final-review/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.212-local-ai-status/);
-assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.212-local-ai-status/);
-assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.212-local-ai-status/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.218-final-review/);
+assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.218-final-review/);
+assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.218-final-review/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.209-tomos53/);
+assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.218-final-review/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.212-local-ai-status/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.218-final-review/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
@@ -277,9 +277,13 @@ assert.match(i18nSource, /"settings\.externalLlmTitle": "別のローカルAIを
 assert.match(i18nSource, /"settings\.externalLlmClear": "標準に戻す"/);
 assert.match(i18nSource, /"settings\.externalLlmStandard": "TOMOS標準のローカルAIを使用中"/);
 assert.match(i18nSource, /"settings\.externalLlmSaved": "設定を保存しました。接続を確認してください。"/);
-assert.match(i18nSource, /"settings\.externalLlmError": "接続できませんでした。別のローカルAIがこのPCで起動しているか確認してください。"/);
+assert.match(i18nSource, /"settings\.externalLlmInvalidUrl": "URLの形式を確認してください。入力例: http:\/\/127\.0\.0\.1:11434"/);
+assert.match(i18nSource, /"settings\.externalLlmLocalOnly": "このPC内だけ利用可能です。localhost または 127\.0\.0\.1 を指定してください。"/);
+assert.match(i18nSource, /"settings\.externalLlmError": "接続できませんでした。別のローカルAIが起動中か確認してください。"/);
 assert.match(i18nSource, /"settings\.externalLlmSaved": "Saved the setting\. Check the connection before using it\."/);
-assert.match(i18nSource, /"settings\.externalLlmError": "Could not connect\. Check whether another local AI is running on this computer\."/);
+assert.match(i18nSource, /"settings\.externalLlmInvalidUrl": "Check the URL format\. Example: http:\/\/127\.0\.0\.1:11434"/);
+assert.match(i18nSource, /"settings\.externalLlmLocalOnly": "Only this computer can be used\. Specify localhost or 127\.0\.0\.1\."/);
+assert.match(i18nSource, /"settings\.externalLlmError": "Could not connect\. Check whether another local AI is running\."/);
 assert.match(
   appSource,
   /state\.externalLlmUrl \? t\("settings\.externalLlmSaved"\) : t\("settings\.externalLlmStandard"\)/,
@@ -287,6 +291,7 @@ assert.match(
 assert.match(appSource, /state\.externalLlmStatusKey\s*\? t\(state\.externalLlmStatusKey, state\.externalLlmStatusParams\)/);
 assert.match(appSource, /function clearExternalLlmSettings\(\) \{[\s\S]*?setExternalLlmStatus\("settings\.externalLlmStandard"\)/);
 assert.match(indexHtml, /<details class="external-llm-details">[\s\S]*external-llm-guide/);
+assert.match(indexHtml, /<details class="external-llm-details">[\s\S]*<div class="external-llm-model-card">[\s\S]*<\/details>/);
 assert.doesNotMatch(indexHtml, /外部LLM接続/);
 assert.doesNotMatch(i18nSource, /外部LLM接続/);
 

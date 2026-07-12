@@ -659,10 +659,31 @@ def test_external_llm_url_allows_only_localhost() -> None:
     assert server.normalize_local_llm_base_url("http://localhost:8080") == "http://localhost:8080"
     try:
         server.normalize_local_llm_base_url("https://example.com")
-    except ValueError as exc:
-        assert "localhost" in str(exc) or "127.0.0.1" in str(exc)
+    except server.LocalLlmCheckError as exc:
+        assert exc.code == "non_local_url"
     else:
         raise AssertionError("non-local LLM URL should be rejected")
+
+
+def test_external_llm_check_error_payloads_are_safe_and_actionable() -> None:
+    invalid = server.local_llm_check_error_payload(server.LocalLlmCheckError("invalid_url"))
+    assert invalid == {
+        "ok": False,
+        "errorCode": "invalid_url",
+        "error": "URLの形式を確認してください。入力例: http://127.0.0.1:11434",
+    }
+    non_local = server.local_llm_check_error_payload(server.LocalLlmCheckError("non_local_url"))
+    assert non_local == {
+        "ok": False,
+        "errorCode": "non_local_url",
+        "error": "このPC内だけ利用可能です。localhost または 127.0.0.1 を指定してください。",
+    }
+    connection = server.local_llm_check_error_payload(server.urllib.error.URLError("connection refused: /private/secret"))
+    assert connection == {
+        "ok": False,
+        "errorCode": "connection_failed",
+        "error": "接続できませんでした。別のローカルAIが起動中か確認してください。",
+    }
 
 
 def test_mobile_connect_info_localhost_uses_lan_candidates_for_qr() -> None:
@@ -3123,6 +3144,7 @@ if __name__ == "__main__":
     test_workspace_context_uses_codegraph_summary_when_ready()
     test_workspace_search_capabilities_shape()
     test_external_llm_url_allows_only_localhost()
+    test_external_llm_check_error_payloads_are_safe_and_actionable()
     test_mobile_connect_info_localhost_uses_lan_candidates_for_qr()
     test_mobile_connect_info_lan_host_builds_pairing_payload()
     test_mobile_connect_info_reuses_active_pairing_code()

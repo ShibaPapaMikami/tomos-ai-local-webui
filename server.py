@@ -1410,16 +1410,45 @@ def run_asr_transcription(audio_base64: str, mime_type: str, model: str) -> dict
             pass
 
 
+class LocalLlmCheckError(ValueError):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def local_llm_check_error_payload(error: Exception) -> dict[str, object]:
+    code = error.code if isinstance(error, LocalLlmCheckError) else "connection_failed"
+    messages = {
+        "invalid_url": "URLの形式を確認してください。入力例: http://127.0.0.1:11434",
+        "non_local_url": "このPC内だけ利用可能です。localhost または 127.0.0.1 を指定してください。",
+        "connection_failed": "接続できませんでした。別のローカルAIが起動中か確認してください。",
+    }
+    return {"ok": False, "errorCode": code, "error": messages.get(code, messages["connection_failed"])}
+
+
 def normalize_local_llm_base_url(raw_url: str) -> str:
     value = str(raw_url or "").strip().rstrip("/")
     if not value:
         return OLLAMA_URL
-    parsed = urllib.parse.urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("URLは http://127.0.0.1:ポート または http://localhost:ポート の形式にしてください。")
-    host = (parsed.hostname or "").lower()
+    try:
+        parsed = urllib.parse.urlparse(value)
+        host = (parsed.hostname or "").lower()
+        _ = parsed.port
+    except ValueError as exc:
+        raise LocalLlmCheckError("invalid_url") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise LocalLlmCheckError("invalid_url")
     if host not in {"127.0.0.1", "localhost", "::1"}:
-        raise ValueError("安全のため、外部LLMサーバーはこのPC上の localhost / 127.0.0.1 のみ指定できます。")
+        raise LocalLlmCheckError("non_local_url")
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
@@ -6522,7 +6551,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
         except Exception as exc:
-            json_response(self, 400, {"ok": False, "error": str(exc)})
+            json_response(self, 400, local_llm_check_error_payload(exc))
 
     def handle_asr_transcribe(self) -> None:
         try:
