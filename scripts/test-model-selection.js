@@ -212,6 +212,7 @@ const stylesSource = fs.readFileSync("web/styles.css", "utf8");
 const appSource = fs.readFileSync("web/app.js", "utf8");
 assert.match(appSource, /function isNoteArticleWritingRequest\(text\)/);
 assert.match(appSource, /function shouldKeepNoteArticleInChat\(text\)/);
+assert.match(appSource, /function noteArticleRequestBudget\(text, baseContext\)/);
 assert.match(appSource, /isNoteArticleWritingRequest\(text\) && !explicitlyRequestsWorkspaceSave\(text\)/);
 assert.match(appSource, /if \(shouldKeepNoteArticleInChat\(text\)\) return false;/);
 const workspaceRouteFunctionSource = [
@@ -243,6 +244,97 @@ assert.equal(
 assert.equal(
   workspaceRouteContext.isWorkspaceBuildRequest(`${noteArticleEditingRequest} 保存をお願いします`),
   true,
+);
+
+function extractFunctionSource(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} が必要です`);
+  const openingBrace = source.indexOf("{", start);
+  let depth = 0;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") depth -= 1;
+    if (depth === 0) return source.slice(start, index + 1);
+  }
+  assert.fail(`${name} の終端が見つかりません`);
+}
+
+const noteArticleBudgetContext = {};
+vm.createContext(noteArticleBudgetContext);
+vm.runInContext(
+  extractFunctionSource(appSource, "noteArticleRequestBudget"),
+  noteArticleBudgetContext,
+  { filename: "web/app.js" },
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget("note記事を整えて\n" + "本文".repeat(3000), 4096))),
+  {
+    numCtx: 12288,
+    numPredict: 2048,
+    historyTurns: 1,
+  },
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget("note記事を整えて", 4096))),
+  {
+    numCtx: 4096,
+    numPredict: 900,
+    historyTurns: 1,
+  },
+);
+
+const noteArticleOptionsContext = {
+  els: {
+    numPredict: { value: "256" },
+    numCtx: { value: "2048" },
+    historyTurns: { value: "8" },
+    temperature: { value: "0.7" },
+    topP: { value: "0.9" },
+    topK: { value: "40" },
+  },
+  state: { webSearch: false },
+  isTranslationRequest: () => false,
+  isNoteArticleWritingRequest: () => true,
+  isWorkspaceBuildRequest: () => true,
+  shouldAutoUseExternalResearch: () => false,
+  shouldApplyStudyPackToRequest: () => false,
+  isStudyPackRewriteRequest: () => false,
+  isImplicitStudyPackWritingRequest: () => false,
+  isLightweightChatRequest: () => false,
+  effectiveResponseMode: () => "balanced",
+  effectiveThinkingMode: () => "medium",
+  numberValue: (element, fallback) => Number(element?.value) || fallback,
+  noteArticleRequestBudget: noteArticleBudgetContext.noteArticleRequestBudget,
+  t: (key) => key,
+  modelReasonText: (key) => key,
+};
+vm.createContext(noteArticleOptionsContext);
+vm.runInContext(
+  extractFunctionSource(appSource, "chatRequestOptions"),
+  noteArticleOptionsContext,
+  { filename: "web/app.js" },
+);
+assert.deepEqual(
+  JSON.parse(JSON.stringify(noteArticleOptionsContext.chatRequestOptions("note記事を整えて\n" + "本文".repeat(3000)))),
+  {
+    codingMode: false,
+    translationMode: false,
+    responseMode: "balanced",
+    thinkingMode: "medium",
+    progressLabel: "progress.generating",
+    modelReason: "model.reasonDefaultChat",
+    temperature: 0.7,
+    topP: 0.9,
+    topK: 40,
+    numPredict: 2048,
+    numCtx: 12288,
+    historyTurns: 1,
+    keepAlive: "15m",
+    think: false,
+    webSearch: false,
+    useStudyPackContext: false,
+    isolateUserMessage: true,
+  },
 );
 const externalLlmCheckHelperSource = appSource.match(
   /function isCurrentExternalLlmCheck\(requestId, requestUrl, currentRequestId, currentUrl\) \{[\s\S]*?\n\}/,

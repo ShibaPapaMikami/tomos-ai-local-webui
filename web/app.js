@@ -4223,6 +4223,15 @@ function isNoteArticleWritingRequest(text) {
     && /(整える|編集|書き直す|続き|貼り付け|公開前)/i.test(normalized);
 }
 
+function noteArticleRequestBudget(text, baseContext) {
+  const isLongArticle = String(text || "").length >= 3000;
+  return {
+    numCtx: Math.max(Number(baseContext) || 0, isLongArticle ? 12288 : 4096),
+    numPredict: isLongArticle ? 2048 : 900,
+    historyTurns: 1,
+  };
+}
+
 function shouldKeepNoteArticleInChat(text) {
   return isNoteArticleWritingRequest(text) && !explicitlyRequestsWorkspaceSave(text);
 }
@@ -4521,7 +4530,8 @@ function modelReasonText(reasonKey) {
 
 function chatRequestOptions(text, hasImages = false) {
   const translationMode = isTranslationRequest(text);
-  const codingMode = !translationMode && isWorkspaceBuildRequest(text);
+  const noteArticleWriting = !translationMode && isNoteArticleWritingRequest(text);
+  const codingMode = !translationMode && !noteArticleWriting && isWorkspaceBuildRequest(text);
   const useExternalResearch = Boolean(state.webSearch || (!codingMode && !translationMode && shouldAutoUseExternalResearch?.(text)));
   const hasStudyPackSelection = shouldApplyStudyPackToRequest(text, hasImages);
   const rewriteStudyPackMode = hasStudyPackSelection && (isStudyPackRewriteRequest(text) || isImplicitStudyPackWritingRequest(text));
@@ -4531,6 +4541,28 @@ function chatRequestOptions(text, hasImages = false) {
   const maxTokens = numberValue(els.numPredict, 96);
   const contextSize = numberValue(els.numCtx, 2048);
   const historyTurns = numberValue(els.historyTurns, 4);
+  if (noteArticleWriting) {
+    const budget = noteArticleRequestBudget(text, contextSize);
+    return {
+      codingMode: false,
+      translationMode,
+      responseMode: mode,
+      thinkingMode,
+      progressLabel: t("progress.generating"),
+      modelReason: modelReasonText("model.reasonDefaultChat"),
+      temperature: numberValue(els.temperature, 0.7),
+      topP: numberValue(els.topP, 0.9),
+      topK: numberValue(els.topK, 40),
+      numPredict: budget.numPredict,
+      numCtx: budget.numCtx,
+      historyTurns: budget.historyTurns,
+      keepAlive: "15m",
+      think: false,
+      webSearch: false,
+      useStudyPackContext: false,
+      isolateUserMessage: true,
+    };
+  }
   if (rewriteStudyPackMode) {
     return {
       codingMode,
