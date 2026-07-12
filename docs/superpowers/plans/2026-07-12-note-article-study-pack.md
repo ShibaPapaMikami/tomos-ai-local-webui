@@ -214,18 +214,22 @@ git commit -m "長文コンテキストエラーを分かりやすくする"
 - Consumes: Tasks 1-4の実装
 - Produces: 実行結果を記録した完了チェック
 
-- [ ] **Step 1: 記事①②を使って判定と予算を確認する**
+- [x] **Step 1: 記事①②を使って判定と予算を確認する**
 
 個人パスを含む入力をローカルテストへ渡し、`codingMode === false`、`numCtx >= 12288`、`historyTurns === 1`を確認する。外部送信は行わない。
 
-- [ ] **Step 2: 公開前チェックを確認する**
+- [x] **Step 2: 公開前チェックを確認する**
 
 教材プロンプトへ`/Users/example/...`を含む一般化サンプルを渡し、個人パスを公開本文へ残さない指示が入ることを確認する。
 
-- [ ] **Step 3: 全検証を再実行する**
+- [x] **Step 3: 全検証を再実行する**
 
 Run: `node scripts/test-management-helpers.js && node scripts/test-model-selection.js && node scripts/test-pwa-assets.js && python3 -m unittest scripts.test_server_helpers && node --check web/app.js && node --check web/management.js && python3 -m py_compile server.py && git diff --check`
 Expected: all pass
+
+**実行結果（2026-07-12）:** Blender記事相当の5,367文字のローカル文字列（設定ファイル、Pythonコード、個人パス形式、会社名、秘密情報を含む）をVMの既存要求経路へ渡した。保存なしでは`codingMode: false`、`numCtx: 12288`、`historyTurns: 1`、教材適用あり、ワークスペース保存なしを確認した。4モードすべての実行時教材プロンプトに、ローカルパス、会社名、秘密情報を公開本文へ残さず一般化または非出力にする指示が含まれた。`test-management-helpers`、`test-model-selection`、`test-pwa-assets`、構文確認、Pythonコンパイル、`git diff --check`は成功した。`python3 -m unittest scripts.test_server_helpers`はpytest形式のため0件終了し、同一の162関数をローカル実行して162/162件成功した。
+
+**確定仕様:** 翻訳要求はnote記事より翻訳経路を優先する。長文note記事の`numCtx`下限は12,288。明示的な保存要求があるnote記事だけをワークスペース生成へ送る。
 
 - [ ] **Step 4: 実装結果をコミットしてプッシュする**
 
