@@ -62,7 +62,7 @@ assert.match(sw, /manifest\.webmanifest/);
 assert.match(sw, /gemma4-pwa-0\.8\.219-searchfix/);
 assert.match(sw, /\/styles\.css\?v=0\.8\.218-final-review/);
 assert.match(sw, /\/i18n\.js\?v=0\.8\.218-final-review/);
-assert.match(sw, /\/settings\.js\?v=0\.8\.218-final-review/);
+assert.match(sw, /\/settings\.js\?v=0\.8\.219-searchfix/);
 assert.match(sw, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(sw, /\/management\.js\?v=0\.8\.219-searchfix/);
 assert.match(sw, /\/app\.js\?v=0\.8\.219-searchfix/);

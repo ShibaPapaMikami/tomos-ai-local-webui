@@ -245,7 +245,7 @@ assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-ge
 assert.match(indexSource, /\/i18n\.js\?v=0\.8\.218-final-review/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/models\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/settings\.js\?v=0\.8\.218-final-review/);
+assert.match(indexSource, /\/settings\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.219-searchfix/);
@@ -258,7 +258,7 @@ assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.218-final-review/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.218-final-review/);
+assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.219-searchfix/);

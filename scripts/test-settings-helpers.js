@@ -135,7 +135,7 @@ const clearedComposerCandidates = composerModelCandidates({
   },
   modelIsInstalled,
 });
-assert.equal(JSON.stringify(clearedComposerCandidates), JSON.stringify([]));
+assert.equal(JSON.stringify(clearedComposerCandidates), JSON.stringify(["qwen2.5:3b"]));
 
 assert.equal(externalLlmCheckStatusKey("invalid_url"), "settings.externalLlmInvalidUrl");
 assert.equal(externalLlmCheckStatusKey("non_local_url"), "settings.externalLlmLocalOnly");
@@ -223,6 +223,31 @@ renderComposerModelVisibility({
 });
 assert.equal((clearedVisibilityEl.innerHTML.match(/ checked/g) || []).length, 0);
 assert.doesNotMatch(clearedVisibilityEl.innerHTML, /class="is-selected"/);
+
+const currentChatVisibilityEl = new FakeElement("section");
+renderComposerModelVisibility({
+  composerModelLabel: (model) => model === "gemma4:12b-mlx" ? "Gemma 4 MLX" : model,
+  els: { composerModelVisibility: currentChatVisibilityEl },
+  models: ["gemma4:12b-mlx", "qwen2.5:3b", agenticCoder],
+  state: {
+    language: "ja",
+    composerModelVisibleModels: ["qwen2.5:3b"],
+    composerModelVisibleModelsSaved: true,
+    composerModel: "",
+    modelOverrides: { chat: "" },
+    serverModels: { chat: "gemma4:12b-mlx" },
+  },
+});
+assert.match(
+  visibilityLabelForModel(currentChatVisibilityEl.innerHTML, "gemma4:12b-mlx"),
+  /\bchecked\b/,
+  "自動選択中の現在チャットAIモデルは表示チェックを付ける",
+);
+assert.match(
+  visibilityLabelForModel(currentChatVisibilityEl.innerHTML, "gemma4:12b-mlx"),
+  /\bis-selected\b/,
+  "自動選択中の現在チャットAIモデルは選択状態にする",
+);
 
 const pcDiagnosticsEl = new FakeElement("section");
 renderPcDiagnosticsPanel({

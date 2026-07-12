@@ -533,6 +533,15 @@ function experimentalComposerModelCandidates({ state }) {
     .filter(Boolean);
 }
 
+function currentComposerModelVisibilityCandidates({ state }) {
+  const current = [
+    state.composerModel,
+    state.modelOverrides?.chat,
+    state.serverModels?.chat,
+  ].find((model) => isComposerModelCandidate(model));
+  return current ? [current] : [];
+}
+
 function composerModelCandidates({ state, modelIsInstalled }) {
   const installed = (models, task) => installedOrCurrentModels({
     models,
@@ -555,7 +564,10 @@ function composerModelCandidates({ state, modelIsInstalled }) {
   const uniqueCandidates = [...new Set(candidates)];
   if (state.composerModelVisibleModelsSaved !== true) return uniqueCandidates;
   const visible = Array.isArray(state.composerModelVisibleModels) ? state.composerModelVisibleModels.filter(Boolean) : [];
-  const visibleSet = new Set(visible);
+  const visibleSet = new Set([
+    ...visible,
+    ...currentComposerModelVisibilityCandidates({ state }),
+  ]);
   return uniqueCandidates.filter((model) => visibleSet.has(model));
 }
 
@@ -575,7 +587,9 @@ function renderComposerModelVisibility({
   const savedVisibleModels = Array.isArray(state.composerModelVisibleModels)
     ? state.composerModelVisibleModels.filter(Boolean)
     : [];
-  const selected = new Set(state.composerModelVisibleModelsSaved === true ? savedVisibleModels : uniqueModels);
+  const selected = new Set(state.composerModelVisibleModelsSaved === true
+    ? [...savedVisibleModels, ...currentComposerModelVisibilityCandidates({ state })]
+    : uniqueModels);
   els.composerModelVisibility.innerHTML = `
     <div class="composer-model-visibility-title">
       <strong>${language === "en" ? "Models shown in chat" : "チャット欄に表示するAIモデル"}</strong>
