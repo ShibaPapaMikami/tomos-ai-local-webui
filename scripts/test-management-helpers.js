@@ -879,10 +879,10 @@ assert.deepEqual(notePack.modes.map((mode) => mode.id), [
 ]);
 for (const mode of notePack.modes) {
   assert.ok(fs.existsSync(`study-packs/note-article-writing-pack/${mode.promptFile}`));
-  assert.match(
-    fs.readFileSync(`study-packs/note-article-writing-pack/${mode.promptFile}`, "utf8"),
-    /公開前チェック|事実確認|個人情報/,
-  );
+  const prompt = fs.readFileSync(`study-packs/note-article-writing-pack/${mode.promptFile}`, "utf8");
+  assert.match(prompt, /事実確認/);
+  assert.match(prompt, /個人情報/);
+  assert.match(prompt, /公開前チェック/);
 }
 assert.ok(fs.existsSync("study-packs/note-article-writing-pack/examples/generic-technical-article.md"));
 
