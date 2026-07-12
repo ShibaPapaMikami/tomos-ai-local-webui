@@ -290,6 +290,14 @@ assert.deepEqual(
     historyTurns: 1,
   },
 );
+assert.deepEqual(
+  JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget("note記事を整えて\n" + "本文".repeat(3000), 16384))),
+  {
+    numCtx: 16384,
+    numPredict: 2048,
+    historyTurns: 1,
+  },
+);
 
 const noteArticleOptionsContext = {
   els: {
@@ -304,9 +312,9 @@ const noteArticleOptionsContext = {
   isTranslationRequest: () => false,
   isNoteArticleWritingRequest: () => true,
   explicitlyRequestsWorkspaceSave: () => false,
-  isWorkspaceBuildRequest: () => true,
+  isWorkspaceBuildRequest: () => false,
   shouldAutoUseExternalResearch: () => false,
-  shouldApplyStudyPackToRequest: () => false,
+  shouldApplyStudyPackToRequest: () => true,
   isStudyPackRewriteRequest: () => false,
   isImplicitStudyPackWritingRequest: () => false,
   isLightweightChatRequest: () => false,
@@ -341,25 +349,46 @@ assert.deepEqual(
     keepAlive: "15m",
     think: false,
     webSearch: false,
-    useStudyPackContext: false,
+    useStudyPackContext: true,
     isolateUserMessage: true,
   },
 );
 const savedNoteArticleOptionsContext = {
   ...noteArticleOptionsContext,
+  state: { webSearch: false, workspaceRoot: "/tmp/tomos-note-test" },
+  isBusinessEmailDraft: () => false,
+  isReplyDraftRequest: () => false,
+  isStudyPackRewriteRequest: () => false,
+  shouldKeepStudyPackReplyInChat: () => false,
+  isWorkspaceLookupRequest: () => false,
+  shouldApplyStudyPackToRequest: () => false,
   applyThinkingBudget: (options) => options,
   applySearchBudget: null,
 };
 vm.createContext(savedNoteArticleOptionsContext);
 vm.runInContext(
   [
+    extractFunctionSource(appSource, "isNoteArticleWritingRequest"),
     extractFunctionSource(appSource, "explicitlyRequestsWorkspaceSave"),
+    extractFunctionSource(appSource, "shouldKeepNoteArticleInChat"),
+    extractFunctionSource(appSource, "isWorkspaceBuildRequest"),
     extractFunctionSource(appSource, "chatRequestOptions"),
   ].join("\n"),
   savedNoteArticleOptionsContext,
   { filename: "web/app.js" },
 );
-for (const text of ["note記事を編集して保存してください", "保存をお願いします"]) {
+const unsavedNoteArticleText = "note記事を編集して貼り付け用に整えてください";
+assert.equal(savedNoteArticleOptionsContext.isNoteArticleWritingRequest(unsavedNoteArticleText), true, "保存なしはnote記事要求である");
+assert.equal(savedNoteArticleOptionsContext.explicitlyRequestsWorkspaceSave(unsavedNoteArticleText), false, "保存なしは保存要求でない");
+assert.equal(savedNoteArticleOptionsContext.isWorkspaceBuildRequest(unsavedNoteArticleText), false, "保存なしはワークスペース要求でない");
+assert.equal(savedNoteArticleOptionsContext.chatRequestOptions(unsavedNoteArticleText).codingMode, false, "保存なしはコーディングモードにしない");
+for (const text of [
+  "note記事を編集して保存してください",
+  "note記事を編集して保存をお願いします",
+]) {
+  assert.equal(savedNoteArticleOptionsContext.isNoteArticleWritingRequest(text), true, `${text} はnote記事要求である`);
+  assert.equal(savedNoteArticleOptionsContext.explicitlyRequestsWorkspaceSave(text), true, `${text} は保存要求である`);
+  assert.equal(savedNoteArticleOptionsContext.isWorkspaceBuildRequest(text), true, `${text} はワークスペース要求である`);
   const options = savedNoteArticleOptionsContext.chatRequestOptions(text);
   assert.equal(options.codingMode, true, `${text} はワークスペース経路を維持する`);
   assert.equal(options.historyTurns, 8, `${text} はnote専用の履歴予算を使わない`);

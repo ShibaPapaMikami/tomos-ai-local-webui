@@ -4561,7 +4561,7 @@ function chatRequestOptions(text, hasImages = false) {
       keepAlive: "15m",
       think: false,
       webSearch: false,
-      useStudyPackContext: false,
+      useStudyPackContext: hasStudyPackSelection,
       isolateUserMessage: true,
     };
   }
