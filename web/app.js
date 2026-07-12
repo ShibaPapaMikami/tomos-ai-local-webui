@@ -4223,9 +4223,10 @@ function isNoteArticleWritingRequest(text) {
   if (typeof sharedClassifier === "function") return sharedClassifier(text);
   const normalized = String(text || "").trim();
   if (!normalized) return false;
-  return /note/i.test(normalized)
-    && /記事/.test(normalized)
-    && /(整え|編集|書き直|続き|貼り付け|公開前)/i.test(normalized);
+  const hasNoteArticleTarget = (/note/i.test(normalized) && /記事/.test(normalized))
+    || /(ブログ記事|投稿記事|投稿文)/.test(normalized);
+  const hasWritingAction = /(整え|編集|書き直|続き|貼り付け|公開前)/i.test(normalized);
+  return hasNoteArticleTarget && hasWritingAction;
 }
 
 function noteArticleRequestBudget(text, baseContext) {

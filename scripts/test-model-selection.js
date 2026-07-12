@@ -486,7 +486,10 @@ const selectedStudyPackOptionsContext = {
   },
   state: { webSearch: false, workspaceRoot: "/tmp/tomos-note-test" },
   window: {
-    GEMMA_MANAGEMENT: sharedClassifierContext.window.GEMMA_MANAGEMENT,
+    GEMMA_MANAGEMENT: {
+      shouldApplyStudyPackForText: (text, { hasSelection }) => hasSelection
+        && /(note|ブログ記事|投稿記事|投稿文)/i.test(text),
+    },
   },
   selectedStudyPackModes: () => ["note-article-writing:rewrite-for-note"],
   selectedStudyPackMode: () => "note-article-writing:rewrite-for-note",
@@ -549,14 +552,29 @@ assert.deepEqual(
   },
 );
 for (const text of [
+  "noteの記事を編集して。",
+  "note向けの記事に書き直す。",
+  "この記事をnote向けに整えて。",
+  "note記事の続きを作って。",
+  "noteへ貼り付けできる形にこの記事を編集して。",
+  "この記事をnote向けに公開前チェックして。",
   "ブログ記事を整えて。設定ファイルとコード例があります。",
+  "投稿記事を公開前に編集して。",
   "投稿文を編集して。コードとファイルがあります。",
 ]) {
+  assert.equal(selectedStudyPackOptionsContext.isNoteArticleWritingRequest(text), true, `${text} は旧版共有判定なしでも記事作成要求である`);
   assert.equal(selectedStudyPackOptionsContext.shouldApplyStudyPackToRequest(text), true, `${text} は教材適用対象である`);
   assert.equal(selectedStudyPackOptionsContext.isStudyPackRewriteRequest(text), true, `${text} は記事作成要求である`);
   const options = selectedStudyPackOptionsContext.chatRequestOptions(text);
   assert.equal(options.codingMode, false, `${text} は通常チャット経路を使う`);
   assert.equal(options.useStudyPackContext, true, `${text} は教材文脈を使う`);
+}
+for (const text of [
+  "noteについて相談したい。",
+  "ブログ記事を見た。",
+  "投稿文の話をしたい。",
+]) {
+  assert.equal(selectedStudyPackOptionsContext.isNoteArticleWritingRequest(text), false, `${text} は単なる言及である`);
 }
 const selectedTranslationOptions = selectedStudyPackOptionsContext.chatRequestOptions("note記事を編集して英訳して");
 assert.equal(selectedTranslationOptions.translationMode, true);
@@ -611,23 +629,25 @@ assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/models\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/settings\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
-assert.match(indexSource, /\/management\.js\?v=0\.8\.219-searchfix/);
+assert.match(indexSource, /\/management\.js\?v=0\.8\.220-note-article/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.219-searchfix/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.219-searchfix/);
+assert.match(indexSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.220-note-article/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /gemma4-pwa-0\.8\.219-searchfix/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.220-note-article"/);
 assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.218-final-review/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
-assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.219-searchfix/);
+assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.220-note-article/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.219-searchfix/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.219-searchfix/);
+assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.220-note-article/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
