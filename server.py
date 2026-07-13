@@ -1575,6 +1575,134 @@ def friendly_ollama_error(error_body: str) -> str:
     return message
 
 
+def split_note_article(text: str, max_chars: int = 4500) -> list[str]:
+    normalized = str(text or "").replace("\r\n", "\n").strip()
+    if not normalized:
+        return []
+    blocks = [block.strip() for block in re.split(r"\n{2,}", normalized) if block.strip()]
+    chunks: list[str] = []
+    current = ""
+    for block in blocks:
+        parts = [block[index:index + max_chars] for index in range(0, len(block), max_chars)] or [block]
+        for part in parts:
+            candidate = f"{current}\n\n{part}".strip() if current else part
+            if current and len(candidate) > max_chars:
+                chunks.append(current)
+                current = part
+            else:
+                current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _note_pipeline_call(
+    *,
+    model: str,
+    base_url: str,
+    system: str,
+    content: str,
+    num_ctx: int,
+    num_predict: int,
+) -> str:
+    response = ollama_json(
+        "/api/chat",
+        payload={
+            "model": model,
+            "stream": False,
+            "system": system,
+            "messages": [{"role": "user", "content": content}],
+            "options": {
+                "temperature": 0.35,
+                "num_ctx": num_ctx,
+                "num_predict": num_predict,
+            },
+            "think": False,
+            "keep_alive": "20m",
+        },
+        timeout=600,
+        base_url=base_url,
+    )
+    return str(response.get("message", {}).get("content", "")).strip()
+
+
+def reconstruct_long_note_article(
+    *,
+    text: str,
+    system_prompt: str,
+    model: str,
+    base_url: str,
+    num_ctx: int = 12288,
+    max_chunk_chars: int = 4500,
+) -> dict:
+    chunks = split_note_article(text, max_chars=max_chunk_chars)
+    if len(chunks) < 2:
+        raise ValueError("自動分割するには文章が短すぎます。")
+
+    summaries = []
+    for index, chunk in enumerate(chunks, start=1):
+        summary = _note_pipeline_call(
+            model=model,
+            base_url=base_url,
+            system=(
+                "章ごとの要約を作成してください。事実、見出し、固有名詞、手順、コードの役割を保持し、"
+                "200文字以内で要約してください。新しい事実は追加しないでください。"
+            ),
+            content=f"全{len(chunks)}章のうち第{index}章:\n\n{chunk}",
+            num_ctx=min(num_ctx, 8192),
+            num_predict=350,
+        )
+        summaries.append(summary or f"第{index}章")
+
+    summary_text = "\n".join(f"第{index}章: {summary}" for index, summary in enumerate(summaries, start=1))
+    outline = _note_pipeline_call(
+        model=model,
+        base_url=base_url,
+        system=(
+            "記事全体の構成案を作成してください。章の順序と事実を維持し、重複を整理してください。"
+            "見出し構成と各章の役割だけを簡潔に返してください。"
+        ),
+        content=summary_text,
+        num_ctx=min(num_ctx, 8192),
+        num_predict=700,
+    )
+    if not outline:
+        outline = summary_text
+
+    rewritten = []
+    for index, chunk in enumerate(chunks, start=1):
+        neighbor_context = []
+        if index > 1:
+            neighbor_context.append(f"前章要約: {summaries[index - 2]}")
+        if index < len(chunks):
+            neighbor_context.append(f"次章要約: {summaries[index]}")
+        chapter = _note_pipeline_call(
+            model=model,
+            base_url=base_url,
+            system=(
+                f"{system_prompt}\n\n"
+                "以下の記事全体の構成案に従って各章を再編集してください。"
+                "入力章の事実を省略・追加せず、前後の章と自然につながる本文だけを返してください。"
+                "章番号、作業説明、確認結果は追加しないでください。\n\n"
+                f"記事全体の構成案:\n{outline}\n\n"
+                + "\n".join(neighbor_context)
+            ),
+            content=f"全{len(chunks)}章のうち第{index}章:\n\n{chunk}",
+            num_ctx=num_ctx,
+            num_predict=2400,
+        )
+        rewritten.append(chapter or chunk)
+
+    return {
+        "ok": True,
+        "message": {"role": "assistant", "content": "\n\n".join(rewritten)},
+        "model": model,
+        "task": "note-article-reconstruction",
+        "chunkCount": len(chunks),
+        "done": True,
+    }
+
+
 def ollama_http_error_event(exc: urllib.error.HTTPError, model: str = "") -> dict:
     error_body = exc.read().decode("utf-8", errors="replace")
     event = {
@@ -6131,6 +6259,26 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 json_response(self, 200, remove_note_article_pack_payload())
             except (OSError, ValueError) as exc:
+                json_response(self, 400, {"ok": False, "error": str(exc)})
+            return
+        if self.path == "/api/note-article/reconstruct":
+            try:
+                body = read_json_body(self)
+                text = str(body.get("text", "")).strip()
+                if len(text) < 6000:
+                    raise ValueError("自動分割の対象となる長文がありません。")
+                result = reconstruct_long_note_article(
+                    text=text,
+                    system_prompt=str(body.get("system", "")),
+                    model=str(body.get("model") or MODEL),
+                    base_url=normalize_local_llm_base_url(str(body.get("llm_base_url") or "")),
+                    num_ctx=max(8192, min(int(body.get("num_ctx") or 12288), 16384)),
+                )
+                json_response(self, 200, result)
+            except urllib.error.HTTPError as exc:
+                error_body = exc.read().decode("utf-8", errors="replace")
+                json_response(self, exc.code, {"ok": False, "error": friendly_ollama_error(error_body)})
+            except Exception as exc:
                 json_response(self, 400, {"ok": False, "error": str(exc)})
             return
         if self.path == "/api/llm/check":

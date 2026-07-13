@@ -919,6 +919,48 @@ def test_context_size_error_message_only_hides_raw_json_and_tokens() -> None:
     assert "available context size" not in serialized
 
 
+def test_split_note_article_keeps_order_and_limits_chunks() -> None:
+    text = "# はじめに\n\n" + ("導入文です。" * 300) + "\n\n# 設定\n\n" + ("設定手順です。" * 300)
+    chunks = server.split_note_article(text, max_chars=1200)
+    assert len(chunks) >= 2
+    assert all(len(chunk) <= 1200 for chunk in chunks)
+    assert chunks[0].startswith("# はじめに")
+    assert any("# 設定" in chunk for chunk in chunks)
+
+
+def test_reconstruct_long_note_article_uses_outline_and_ordered_chunks() -> None:
+    calls = []
+
+    def fake_ollama_json(path, payload, timeout, base_url=""):
+        calls.append(payload)
+        system = payload.get("system", "")
+        if "各章を再編集" in system:
+            return {"message": {"content": f"再編集章{sum('各章を再編集' in item.get('system', '') for item in calls)}"}}
+        if "章ごとの要約" in system:
+            return {"message": {"content": f"要約{len(calls)}"}}
+        if "記事全体の構成案" in system:
+            return {"message": {"content": "全体構成"}}
+        return {"message": {"content": ""}}
+
+    article = "# 第一章\n\n" + ("本文A。" * 700) + "\n\n# 第二章\n\n" + ("本文B。" * 700)
+    with patch.object(server, "ollama_json", side_effect=fake_ollama_json):
+        result = server.reconstruct_long_note_article(
+            text=article,
+            system_prompt="note記事作成ルール",
+            model="gemma4:12b",
+            base_url="http://127.0.0.1:11434",
+            num_ctx=12288,
+            max_chunk_chars=4500,
+        )
+
+    assert result["ok"] is True
+    assert result["chunkCount"] == 2
+    assert result["message"]["content"] == "再編集章1\n\n再編集章2"
+    assert len(calls) == 5
+    rewrite_calls = [item for item in calls if "各章を再編集" in item.get("system", "")]
+    assert all("全体構成" in item["system"] for item in rewrite_calls)
+
+
 def test_pc_diagnostics_recommendation_levels() -> None:
     comfortable = server.pc_diagnostics_recommendation({
         "memoryGb": 32,
@@ -3218,6 +3260,8 @@ if __name__ == "__main__":
     test_context_size_error_is_friendly()
     test_context_size_error_type_only_hides_raw_json_and_tokens()
     test_context_size_error_message_only_hides_raw_json_and_tokens()
+    test_split_note_article_keeps_order_and_limits_chunks()
+    test_reconstruct_long_note_article_uses_outline_and_ordered_chunks()
     test_pc_diagnostics_recommendation_levels()
     test_pc_diagnostics_payload_shape()
     test_internet_layer_diagnostics_payload_shape()

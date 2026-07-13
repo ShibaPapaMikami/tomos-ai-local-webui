@@ -4242,6 +4242,28 @@ function hasSelectedNoteArticlePack() {
   return selectedStudyPackModes().some((selection) => selection.pack?.id === "note-article-writing");
 }
 
+function shouldUseLongNoteArticlePipeline(text, requestOptions) {
+  requestOptions = requestOptions || {};
+  return String(text || "").length >= 6000
+    && requestOptions.codingMode === false
+    && requestOptions.translationMode === false
+    && requestOptions.isolateUserMessage === true;
+}
+
+async function requestLongNoteArticleReconstruction(payload, signal) {
+  const response = await fetch("/api/note-article/reconstruct", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "長文記事を再構成できませんでした。");
+  }
+  return data;
+}
+
 function shouldKeepNoteArticleInChat(text) {
   return isNoteArticleWritingRequest(text) && !explicitlyRequestsWorkspaceSave(text);
 }
@@ -5678,6 +5700,29 @@ async function sendMessage(text) {
     const stream = true;
     const requestTask = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
     requestModel = modelForRequestTask(requestTask, requestOptions);
+    if (shouldUseLongNoteArticlePipeline(text, requestOptions)) {
+      requestModel = modelForTask("chat") || requestModel;
+      state.abortController = new AbortController();
+      const data = await requestLongNoteArticleReconstruction({
+        text,
+        system: requestSystemWithTraining,
+        model: requestModel,
+        llm_base_url: externalLlmBaseUrlForRequest(),
+        num_ctx: requestOptions.numCtx,
+      }, state.abortController.signal);
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      session.messages.push({
+        role: "assistant",
+        content: formatAssistantContent(data.message?.content || ""),
+        sources: attachmentSources,
+        durationSeconds,
+        runMeta: messageRunMeta(requestOptions, data.model || requestModel, {
+          longNotePipeline: true,
+          chunkCount: data.chunkCount || 0,
+        }),
+      });
+      return;
+    }
     const shouldUseWorkspaceShortcuts = !hasAttachmentFiles;
     const shouldUseWorkspaceContext = shouldUseWorkspaceShortcuts && shouldUseWorkspaceContextForChat(text, requestOptions);
     const requestedFileKind = shouldUseWorkspaceContext ? workspaceFileKindFromText(text) : "";

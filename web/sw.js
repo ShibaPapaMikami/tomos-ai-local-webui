@@ -1,4 +1,4 @@
-const CACHE_NAME = "gemma4-pwa-0.8.223-long-note";
+const CACHE_NAME = "gemma4-pwa-0.8.224-long-note-pipeline";
 const APP_SHELL = [
   "/",
   "/mobile.html",
@@ -30,7 +30,7 @@ const APP_SHELL = [
   "/search.js?v=0.8.219-searchfix",
   "/pwa.js?v=0.8.220-note-article",
   "/mobile-standalone.js?v=0.8.209-tomos53",
-  "/app.js?v=0.8.223-long-note",
+  "/app.js?v=0.8.224-long-note-pipeline",
   "/icons/icon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png"
