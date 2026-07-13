@@ -70,6 +70,15 @@ assert.equal(
 
 assert.equal(
   inferSimpleTextSave({
+    text: `note記事を変換してください。\n${"長文の本文です。".repeat(180)}\nファイルに同じ行と記載して保存します。`,
+    hasWorkspace: true,
+  }),
+  null,
+  "長文記事内の保存表現を単純テキスト保存と誤認しない",
+);
+
+assert.equal(
+  inferSimpleTextSave({
     text: "三上昌史についてというテキストファイルを保存して",
     hasWorkspace: false,
   }),

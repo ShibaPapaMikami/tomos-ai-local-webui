@@ -1,4 +1,4 @@
-const CACHE_NAME = "gemma4-pwa-0.8.224-long-note-pipeline";
+const CACHE_NAME = "gemma4-pwa-0.8.225-note-no-save";
 const APP_SHELL = [
   "/",
   "/mobile.html",
@@ -14,7 +14,7 @@ const APP_SHELL = [
   "/asr.js?v=0.8.209-tomos53",
   "/attachments.js?v=0.8.209-tomos53",
   "/composer.js?v=0.8.209-tomos53",
-  "/workspace.js?v=0.8.219-searchfix",
+  "/workspace.js?v=0.8.225-note-no-save",
   "/training.js?v=0.8.209-tomos53",
   "/tomos-character-core.js?v=0.8.209-tomos53",
   "/character-core-adapter.js?v=0.8.209-tomos53",
@@ -30,7 +30,7 @@ const APP_SHELL = [
   "/search.js?v=0.8.219-searchfix",
   "/pwa.js?v=0.8.220-note-article",
   "/mobile-standalone.js?v=0.8.209-tomos53",
-  "/app.js?v=0.8.224-long-note-pipeline",
+  "/app.js?v=0.8.225-note-no-save",
   "/icons/icon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png"

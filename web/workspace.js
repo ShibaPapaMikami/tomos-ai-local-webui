@@ -437,6 +437,7 @@
 
   function inferSimpleTextSave({ text, hasWorkspace }) {
     if (!hasWorkspace || !isSaveCommand(text)) return null;
+    if (String(text || "").length > 1000) return null;
     if (/プログラム|アプリ|ゲーム|html|javascript|コード|サイト|web/i.test(text)) return null;
     const contentMatch = text.match(/[「『"']([^「」『』"']{1,500})[」』"']\s*(?:と|を)?\s*(?:記載|書い|入力|保存)/)
       || text.match(/[A-Za-z0-9_.\/-]+\.(?:txt|text|md)\s*に\s*([^「」『』"'\n]{1,200}?)\s*(?:と|を)?\s*(?:記載|書い|入力|保存)/i)

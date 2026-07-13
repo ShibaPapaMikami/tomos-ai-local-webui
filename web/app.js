@@ -6467,6 +6467,10 @@ els.composer.addEventListener("submit", async (event) => {
     sendMessage(text || (state.pendingFiles.length > 0 ? (state.language === "en" ? "Read the attached file." : "添付ファイルを読んでください。") : (state.language === "en" ? "Describe this image." : "この画像を説明してください。")));
     return;
   }
+  if (hasSelectedNoteArticlePack() && !isTranslationRequest(text)) {
+    sendMessage(text);
+    return;
+  }
   const previousAttachment = lastReadableAttachment(activeSession());
   const previousAttachmentReference = previousAttachment || lastAttachmentReference(activeSession());
   const shouldPreferAttachmentFollowup = previousAttachmentReference && isAttachmentFollowupRequest(text, attachmentReplyOptions());

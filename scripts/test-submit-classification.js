@@ -25,6 +25,11 @@ const {
   inferSimpleTextSave,
   isSaveCommand,
 } = context.window.GEMMA_WORKSPACE;
+const appSource = fs.readFileSync("web/app.js", "utf8");
+assert.match(
+  appSource,
+  /if \(hasSelectedNoteArticlePack\(\) && !isTranslationRequest\(text\)\) \{\s*sendMessage\(text\);\s*return;/,
+);
 
 function workspaceBuildRequest(text) {
   if (isTranslationRequest(text)) return false;
@@ -40,7 +45,8 @@ function workspaceLookupRequest(text) {
     && !/(保存|作って|つくって|作成|生成|構築|実装|修正|変更|write|save|create|build|implement)/i.test(normalized);
 }
 
-function classify(text, { hasImages = false, hasWorkspace = true, hasActiveSession = true } = {}) {
+function classify(text, { hasImages = false, hasWorkspace = true, hasActiveSession = true, notePackSelected = false } = {}) {
+  if (notePackSelected && !isTranslationRequest(text)) return "chat";
   return classifySubmitIntent({
     text,
     hasImages,
@@ -68,5 +74,9 @@ assert.equal(classify("赤いリンゴの画像を生成して"), "image");
 assert.equal(classify("いま何時？"), "local");
 assert.equal(classify("何時から何時まで？"), "chat");
 assert.equal(classify("画像を説明して", { hasImages: true }), "chat");
+assert.equal(classify(
+  `長文のnote記事を変換して\n${"本文です。".repeat(300)}\nファイルに同じ行と記載して保存します。`,
+  { notePackSelected: true },
+), "chat");
 
 console.log("submit classification tests passed");
