@@ -330,6 +330,57 @@ assert.deepEqual(
     historyTurns: 1,
   },
 );
+
+const noteRewriteContext = {};
+vm.createContext(noteRewriteContext);
+vm.runInContext(
+  [
+    extractFunctionSource(appSource, "isShortRewriteFollowup"),
+    extractFunctionSource(appSource, "noteArticleTextForRequest"),
+  ].join("\n"),
+  noteRewriteContext,
+  { filename: "web/app.js" },
+);
+const previousLongArticle = `note記事をリライトして\n${"元の記事本文です。".repeat(500)}`;
+const continuedRewriteText = noteRewriteContext.noteArticleTextForRequest(
+  "かきかえて",
+  [{ role: "user", content: previousLongArticle }],
+  true,
+);
+assert.match(continuedRewriteText, /追指示:\nかきかえて/);
+assert.match(continuedRewriteText, /書き換え対象本文:\nnote記事をリライトして/);
+assert.ok(continuedRewriteText.length > previousLongArticle.length);
+assert.equal(
+  noteRewriteContext.noteArticleTextForRequest("かきかえて", [], true),
+  "かきかえて",
+);
+assert.equal(
+  noteRewriteContext.noteArticleTextForRequest("普通の質問", [{ role: "user", content: previousLongArticle }], true),
+  "普通の質問",
+);
+for (const followup of ["リライトして", "書き直してください", "この記事を完成稿にして"]) {
+  assert.match(
+    noteRewriteContext.noteArticleTextForRequest(followup, [{ role: "user", content: previousLongArticle }], true),
+    new RegExp(`追指示:\\n${followup}`),
+  );
+}
+assert.match(appSource, /shouldUseLongNoteArticlePipeline\(noteArticleText, requestOptions\)/);
+assert.match(appSource, /text: noteArticleText,/);
+
+const noteOutputPromptContext = { isReplyDraftRequest: () => false };
+vm.createContext(noteOutputPromptContext);
+vm.runInContext(
+  extractFunctionSource(appSource, "studyPackModeOutputPrompt"),
+  noteOutputPromptContext,
+  { filename: "web/app.js" },
+);
+const noteOutputPrompt = noteOutputPromptContext.studyPackModeOutputPrompt({
+  pack: { id: "note-article-writing" },
+  mode: { id: "rewrite-for-note" },
+}, "かきかえて");
+assert.match(noteOutputPrompt, /完成した記事/);
+assert.match(noteOutputPrompt, /全文/);
+assert.match(noteOutputPrompt, /構成案.*確認質問.*止めない/);
 assert.deepEqual(
   JSON.parse(JSON.stringify(noteArticleBudgetContext.noteArticleRequestBudget(noteArticleLongBoundaryText, 16384))),
   {
@@ -679,11 +730,11 @@ assert.match(indexSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.225-note-no-save/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.226-note-complete/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.225-note-no-save"/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.226-note-complete"/);
 assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.209-tomos53/);
@@ -693,7 +744,7 @@ assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.222-note-pack-error
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.225-note-no-save/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.226-note-complete/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);

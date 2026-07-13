@@ -2575,6 +2575,9 @@ function studyPackModeOutputPrompt(selected, requestText = "") {
   if (isReplyDraftRequest(requestText)) {
     return "出力はまず「返信本文案:」として、すぐコピペできる返信本文だけを書いてください。件名案、修正版、変更した理由、送信前の確認事項、複数パターンは、ユーザーが求めた時だけ出してください。";
   }
+  if (selected?.pack?.id === "note-article-writing" && selected?.mode?.id !== "prepublish-check") {
+    return "出力は、完成した記事を今すぐ全文書いてください。構成案、作業方針、書き換え予告、準備確認、確認質問だけで止めないでください。元本文が会話内にある場合は再提示を求めず、その本文を使って完成稿を返してください。ファイル保存やダウンロード案内は、ユーザーが明示しない限り行わないでください。";
+  }
   const modeId = selected?.mode?.id || "";
   if (modeId === "logic-gap-check") {
     return "出力は「気になる点」「直し方」「必要なら修正版」の順にしてください。指摘だけで十分な場合は、無理に全文を書き換えないでください。ファイル保存やダウンロード案内は、ユーザーが明示しない限り行わないでください。";
@@ -4242,6 +4245,23 @@ function hasSelectedNoteArticlePack() {
   return selectedStudyPackModes().some((selection) => selection.pack?.id === "note-article-writing");
 }
 
+function isShortRewriteFollowup(text) {
+  const normalized = String(text || "").replace(/\s+/g, "").trim();
+  if (!normalized || normalized.length > 40) return false;
+  return /^(?:(?:これ|この記事|上記|さっきの(?:文章|記事))を)?(?:リライト(?:して(?:ください|くれる|くれない)?)?|書き直し|書き直して|書き換え|書き換えて|かきかえ|かきかえて|完成稿にして|本文を書いて)(?:ください)?[。！!？?]*$/.test(normalized);
+}
+
+function noteArticleTextForRequest(text, previousMessages = [], notePackSelected = false) {
+  const current = String(text || "").trim();
+  if (!notePackSelected || !isShortRewriteFollowup(current)) return current;
+  const previousSource = [...(previousMessages || [])].reverse().find((message) => {
+    const content = String(message?.content || "").trim();
+    return message?.role === "user" && content.length >= 40 && !isShortRewriteFollowup(content);
+  });
+  if (!previousSource) return current;
+  return `追指示:\n${current}\n\n書き換え対象本文:\n${String(previousSource.content).trim()}`;
+}
+
 function shouldUseLongNoteArticlePipeline(text, requestOptions) {
   requestOptions = requestOptions || {};
   return String(text || "").length >= 6000
@@ -5561,7 +5581,8 @@ async function sendMessage(text) {
     size: file.size,
     sizeLabel: file.sizeLabel,
   }));
-  const requestOptions = chatRequestOptions(text, images.length > 0);
+  const noteArticleText = noteArticleTextForRequest(text, session.messages, hasSelectedNoteArticlePack());
+  const requestOptions = chatRequestOptions(noteArticleText, images.length > 0);
   if (!confirmExternalResearchIfNeeded(requestOptions)) return;
   const appliedStudyPackSelections = requestOptions.useStudyPackContext ? selectedStudyPackModes() : [];
   const appliedStudyPackModeLabel = studyPackModesDisplayLabel(appliedStudyPackSelections);
@@ -5693,18 +5714,21 @@ async function sendMessage(text) {
             requestOptions.translationMode,
           );
     const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${requestOptions.translationMode ? "" : personRelationshipContextSystemPrompt()}${selectedRecipientContextPrompt()}${baseRequestSystem}${requestOptions.translationMode ? "" : replyDraftContextSystemPrompt(text)}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${trainingContextSystemPrompt()}`;
-    const modelUserMessage = messageWithAttachmentContext(userMessage, attachmentContext);
+    const modelRequestUserMessage = noteArticleText === text
+      ? userMessage
+      : { ...userMessage, content: noteArticleText };
+    const modelUserMessage = messageWithAttachmentContext(modelRequestUserMessage, attachmentContext);
     const requestMessages = requestOptions.translationMode || requestOptions.fastModel || requestOptions.isolateUserMessage
       ? [modelUserMessage]
       : [...session.messages.slice(0, -1), modelUserMessage];
     const stream = true;
     const requestTask = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
     requestModel = modelForRequestTask(requestTask, requestOptions);
-    if (shouldUseLongNoteArticlePipeline(text, requestOptions)) {
+    if (shouldUseLongNoteArticlePipeline(noteArticleText, requestOptions)) {
       requestModel = modelForTask("chat") || requestModel;
       state.abortController = new AbortController();
       const data = await requestLongNoteArticleReconstruction({
-        text,
+        text: noteArticleText,
         system: requestSystemWithTraining,
         model: requestModel,
         llm_base_url: externalLlmBaseUrlForRequest(),
