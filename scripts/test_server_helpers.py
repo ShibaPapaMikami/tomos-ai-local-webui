@@ -3084,6 +3084,8 @@ def test_internet_layer_context_results_prefers_youtube_channel(monkeypatch=None
 
 def test_should_auto_use_external_research_requires_url_and_intent() -> None:
     assert server.should_auto_use_external_research("https://www.youtube.com/watch?v=zfN4QApep6s この動画を分析して")
+    assert server.should_auto_use_external_research("内容をぬきだして\nhttps://youtu.be/o__a6R21_dw?si=test")
+    assert server.should_auto_use_external_research("https://youtu.be/abc123 文字起こしして")
     assert server.should_auto_use_external_research("https://github.com/openai/codex を調べて")
     assert not server.should_auto_use_external_research("https://www.youtube.com/watch?v=zfN4QApep6s")
     assert not server.should_auto_use_external_research("この動画を分析して")
@@ -3134,6 +3136,14 @@ def test_direct_external_research_answer_uses_available_source() -> None:
     assert "動画タイトル: Demo" in answer
     assert "字幕本文を取得できていない" in answer
     assert "Web調査をON" not in answer
+
+    unavailable_answer = server.direct_external_research_answer(
+        "内容をぬきだして\nhttps://youtu.be/o__a6R21_dw?si=test",
+        [],
+        "YouTube字幕を取得できませんでした。",
+    )
+    assert "字幕本文を取得できなかった" in unavailable_answer
+    assert "推測して要約しません" in unavailable_answer
 
 
 def test_direct_external_research_answer_uses_generic_copy_for_web_page() -> None:

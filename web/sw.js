@@ -1,4 +1,4 @@
-const CACHE_NAME = "gemma4-pwa-0.8.226-note-complete";
+const CACHE_NAME = "gemma4-pwa-0.8.227-youtube-grounded";
 const APP_SHELL = [
   "/",
   "/mobile.html",
@@ -27,7 +27,7 @@ const APP_SHELL = [
   "/settings.js?v=0.8.219-searchfix",
   "/management.js?v=0.8.222-note-pack-error",
   "/router.js?v=0.8.209-tomos53",
-  "/search.js?v=0.8.219-searchfix",
+  "/search.js?v=0.8.227-youtube-grounded",
   "/pwa.js?v=0.8.220-note-article",
   "/mobile-standalone.js?v=0.8.209-tomos53",
   "/app.js?v=0.8.226-note-complete",

@@ -3756,7 +3756,7 @@ def should_auto_use_external_research(query: str) -> bool:
     if not has_supported_url:
         return False
     return bool(re.search(
-        r"分析|調べ|調査|要約|解説|説明|見て|読んで|確認|評価|比較|まとめ|analy[sz]e|summari[sz]e|explain|review|check|research",
+        r"分析|調べ|調査|要約|解説|説明|見て|読んで|確認|評価|比較|まとめ|抜き出|ぬきだ|抽出|文字起こし|書き起こし|analy[sz]e|summari[sz]e|explain|review|check|research|extract|transcri(?:be|pt)",
         normalized,
         re.IGNORECASE,
     ))
@@ -4708,7 +4708,17 @@ def route_diagnostic(
 
 
 def direct_external_research_answer(query: str, results: list[dict[str, str]], error: str = "") -> str:
-    if not should_auto_use_external_research(query) or not results:
+    if not should_auto_use_external_research(query):
+        return ""
+    if extract_youtube_urls(query, limit=1) and not results:
+        return (
+            "YouTube動画の内容を抜き出せませんでした。\n\n"
+            "## 確認できていない点\n"
+            "- 字幕本文を取得できなかったため、動画内の具体的な内容は未確認です。\n"
+            "- 根拠がない内容は推測して要約しません。\n"
+            "- 時間をおいて、同じURLでもう一度お試しください。"
+        )
+    if not results:
         return ""
     primary = results[0]
     title = str(primary.get("title") or "Web調査結果").strip()

@@ -245,6 +245,8 @@ assert.equal(searchEnabledForChat({ codingMode: true, webSearch: true }), false)
 assert.equal(searchEnabledForChat({ codingMode: false, webSearch: false }), false);
 assert.equal(shouldAutoUseExternalResearch("https://www.youtube.com/watch?v=zfN4QApep6s この動画を分析して"), true);
 assert.equal(shouldAutoUseExternalResearch("https://youtu.be/abc123 を要約して"), true);
+assert.equal(shouldAutoUseExternalResearch("内容をぬきだして\nhttps://youtu.be/o__a6R21_dw?si=test"), true);
+assert.equal(shouldAutoUseExternalResearch("https://youtu.be/abc123 文字起こしして"), true);
 assert.equal(shouldAutoUseExternalResearch("https://github.com/openai/codex を調べて"), true);
 assert.equal(shouldAutoUseExternalResearch("https://www.youtube.com/watch?v=zfN4QApep6s"), false);
 assert.deepEqual(plain(searchPayloadOptions({ codingMode: false, webSearch: true }, 6)), {

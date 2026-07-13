@@ -91,7 +91,7 @@ function shouldAutoUseExternalResearch(text) {
   if (!normalized) return false;
   const hasSupportedUrl = /https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?|shorts\/|live\/)|youtu\.be\/|github\.com\/|[^\s<>"、。]+\/[^\s<>"、。]*)/i.test(normalized);
   if (!hasSupportedUrl) return false;
-  return /(分析|調べ|調査|要約|解説|説明|見て|読んで|確認|評価|比較|まとめ|analy[sz]e|summari[sz]e|explain|review|check|research)/i.test(normalized);
+  return /(分析|調べ|調査|要約|解説|説明|見て|読んで|確認|評価|比較|まとめ|抜き出|ぬきだ|抽出|文字起こし|書き起こし|analy[sz]e|summari[sz]e|explain|review|check|research|extract|transcri(?:be|pt))/i.test(normalized);
 }
 
 function searchPayloadOptions(options, resultCount = 4) {
