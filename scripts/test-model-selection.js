@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const vm = require("node:vm");
 
 const context = { window: {}, console };
@@ -48,6 +49,8 @@ const {
   modelForRequestTask,
   fastChatModel,
   fallbackCodingModel,
+  isStudentHiddenModel,
+  safeSavedModel,
 } = context.window.GEMMA_MODELS;
 
 const coder = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M";
@@ -55,6 +58,18 @@ const hauhauBalanced = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanc
 const huihuiAbliterated = "hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M";
 const gemmaMlx = "gemma4:12b-mlx";
 const qwen2507 = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL";
+const enterpriseModel = "enterprise:test-model";
+const experimentalModel = "experimental:test-model";
+const autoDisabledModel = "custom:auto-disabled";
+const unclassifiedModel = "custom:unclassified";
+const unclassifiedEnterpriseModel = "enterprise:unclassified";
+const classifiedAllowedModel = "custom:classified-allowed";
+const serverPullableModels = JSON.parse(execFileSync(
+  "python3",
+  ["-c", "import json; import server; print(json.dumps(server.PULLABLE_MODELS))"],
+  { encoding: "utf8" },
+));
+const serverModelById = new Map(serverPullableModels.map((item) => [item.model, item]));
 const baseModels = {
   chat: "gemma4:12b",
   coding: coder,
@@ -65,15 +80,240 @@ const mlxModels = {
   ...baseModels,
   available: ["gemma4:12b", gemmaMlx, "qwen2.5:3b", coder],
 };
+const coreModels = {
+  ...baseModels,
+  available: ["gemma4:12b", "qwen2.5:3b", qwen2507, coder],
+};
 
 assert.equal(
-  modelForTask("chat", { serverModels: baseModels, modelOverrides: {} }),
+  modelForTask("chat", { serverModels: coreModels, modelOverrides: {} }),
+  qwen2507,
+);
+
+assert.equal(
+  modelForTask("translation", { serverModels: coreModels, modelOverrides: {} }),
+  qwen2507,
+);
+
+assert.equal(
+  modelForTask("research", { serverModels: coreModels, modelOverrides: {} }),
+  qwen2507,
+);
+
+assert.equal(
+  modelForTask("study-pack", { serverModels: coreModels, modelOverrides: {} }),
+  qwen2507,
+);
+
+assert.equal(
+  modelForTask("coding", { serverModels: coreModels, modelOverrides: {} }),
+  coder,
+);
+
+assert.equal(
+  modelForTask("coding", {
+    serverModels: { ...coreModels, available: coreModels.available.filter((model) => model !== coder) },
+    modelOverrides: {},
+  }),
+  qwen2507,
+);
+
+assert.equal(
+  modelForRequestTask("chat", {}, {
+    composerModel: gemmaMlx,
+    serverModels: coreModels,
+    modelOverrides: {},
+  }),
+  gemmaMlx,
+);
+
+assert.equal(
+  modelForRequestTask("chat", { hasImages: true }, {
+    composerModel: qwen2507,
+    serverModels: { ...coreModels, available: [...coreModels.available, gemmaMlx] },
+    modelOverrides: {},
+  }),
+  gemmaMlx,
+);
+
+assert.equal(
+  modelForRequestTask("chat", { hasImages: true }, {
+    serverModels: { ...coreModels, available: ["gemma4:12b", qwen2507] },
+    modelOverrides: {},
+  }),
   "gemma4:12b",
 );
 
 assert.equal(
-  modelForTask("chat", { serverModels: mlxModels, modelOverrides: {} }),
+  modelForRequestTask("chat", { hasImages: true }, {
+    serverModels: { ...coreModels, available: [qwen2507] },
+    modelOverrides: {},
+  }),
+  "",
+);
+
+assert.equal(isStudentHiddenModel(hauhauBalanced), true);
+assert.equal(isStudentHiddenModel(huihuiAbliterated), true);
+assert.equal(isStudentHiddenModel("gemma4:12b"), false);
+assert.equal(safeSavedModel(hauhauBalanced), "");
+assert.equal(safeSavedModel(huihuiAbliterated), "");
+assert.equal(safeSavedModel("gemma4:12b"), "gemma4:12b");
+
+assert.equal(
+  modelForTask("chat", {
+    useComposer: true,
+    composerModel: hauhauBalanced,
+    serverModels: coreModels,
+    modelOverrides: {},
+  }),
+  qwen2507,
+);
+
+assert.equal(
+  modelForTask("coding", {
+    serverModels: coreModels,
+    modelOverrides: { coding: huihuiAbliterated },
+  }),
+  qwen2507,
+);
+
+assert.equal(
+  modelForTask("chat", {
+    serverModels: { ...coreModels, chat: hauhauBalanced },
+    modelOverrides: {},
+  }),
+  qwen2507,
+);
+
+const classifiedUnsafeModels = {
+  chat: enterpriseModel,
+  coding: experimentalModel,
+  translation: enterpriseModel,
+  available: [enterpriseModel, experimentalModel],
+  pullable: [
+    {
+      model: enterpriseModel,
+      role: "enterprise",
+      tier: "enterprise",
+      defaultVisible: false,
+      allowAutoSelect: false,
+    },
+    {
+      model: experimentalModel,
+      role: "coding-experimental",
+      tier: "experimental",
+      defaultVisible: false,
+      allowAutoSelect: false,
+    },
+  ],
+};
+assert.notEqual(
+  modelForTask("chat", { serverModels: classifiedUnsafeModels, modelOverrides: {} }),
+  enterpriseModel,
+);
+assert.notEqual(
+  modelForTask("coding", { serverModels: classifiedUnsafeModels, modelOverrides: {} }),
+  experimentalModel,
+);
+assert.notEqual(
+  modelForTask("chat", {
+    useComposer: true,
+    composerModel: enterpriseModel,
+    serverModels: classifiedUnsafeModels,
+    modelOverrides: {},
+  }),
+  enterpriseModel,
+);
+assert.notEqual(
+  modelForTask("coding", {
+    serverModels: classifiedUnsafeModels,
+    modelOverrides: { coding: experimentalModel },
+  }),
+  experimentalModel,
+);
+const explicitHighPerformanceModels = {
+  ...coreModels,
+  pullable: [{
+    model: gemmaMlx,
+    role: "high-performance",
+    tier: "important",
+    defaultVisible: true,
+    allowAutoSelect: false,
+  }],
+};
+assert.equal(
+  modelForTask("chat", {
+    useComposer: true,
+    composerModel: gemmaMlx,
+    serverModels: explicitHighPerformanceModels,
+    modelOverrides: {},
+  }),
   gemmaMlx,
+);
+const autoDisabledModels = {
+  chat: autoDisabledModel,
+  available: [autoDisabledModel],
+  pullable: [{
+    model: autoDisabledModel,
+    role: "standard",
+    tier: "optional",
+    defaultVisible: true,
+    allowAutoSelect: false,
+  }],
+};
+assert.notEqual(modelForTask("chat", { serverModels: autoDisabledModels, modelOverrides: {} }), autoDisabledModel);
+for (const model of [unclassifiedModel, unclassifiedEnterpriseModel]) {
+  assert.notEqual(
+    modelForTask("chat", {
+      serverModels: { chat: model, available: [model], pullable: [] },
+      modelOverrides: {},
+    }),
+    model,
+  );
+}
+assert.equal(
+  modelForTask("chat", {
+    useComposer: true,
+    composerModel: unclassifiedModel,
+    serverModels: { chat: "gemma4:12b", available: [unclassifiedModel], pullable: [] },
+    modelOverrides: {},
+  }),
+  unclassifiedModel,
+);
+assert.notEqual(
+  modelForTask("chat", {
+    useComposer: true,
+    composerModel: unclassifiedEnterpriseModel,
+    serverModels: { chat: "gemma4:12b", available: [unclassifiedEnterpriseModel], pullable: [] },
+    modelOverrides: {},
+  }),
+  unclassifiedEnterpriseModel,
+);
+assert.equal(
+  modelForTask("chat", {
+    serverModels: {
+      chat: classifiedAllowedModel,
+      available: [classifiedAllowedModel],
+      pullable: [{
+        model: classifiedAllowedModel,
+        role: "standard",
+        tier: "optional",
+        allowAutoSelect: true,
+      }],
+    },
+    modelOverrides: {},
+  }),
+  classifiedAllowedModel,
+);
+
+assert.equal(
+  modelForTask("chat", { serverModels: baseModels, modelOverrides: {} }),
+  "qwen2.5:3b",
+);
+
+assert.equal(
+  modelForTask("chat", { serverModels: mlxModels, modelOverrides: {} }),
+  "qwen2.5:3b",
 );
 
 assert.equal(
@@ -111,7 +351,7 @@ assert.equal(
 
 assert.equal(
   fastChatModel({ serverModels: mlxModels }),
-  gemmaMlx,
+  "qwen2.5:3b",
 );
 
 assert.equal(
@@ -132,7 +372,7 @@ assert.equal(
     serverModels: mlxModels,
     modelOverrides: {},
   }),
-  gemmaMlx,
+  "qwen2.5:3b",
 );
 
 assert.equal(
@@ -140,7 +380,7 @@ assert.equal(
     serverModels: baseModels,
     modelOverrides: {},
   }),
-  "gemma4:12b",
+  "qwen2.5:3b",
 );
 
 assert.equal(
@@ -148,7 +388,7 @@ assert.equal(
     serverModels: mlxModels,
     modelOverrides: {},
   }),
-  gemmaMlx,
+  "qwen2.5:3b",
 );
 
 assert.equal(
@@ -189,8 +429,8 @@ assert.equal(composerModelLabel(hauhauBalanced, { t: (key) => key }), "HauhauCS"
 assert.equal(typeof modelPurpose, "function");
 assert.equal(modelPurpose("gemma4:12b"), "標準チャット・画像理解");
 assert.equal(modelPurpose(gemmaMlx), "Apple Silicon向け高速チャット・コード生成");
-assert.equal(modelPurpose("qwen2.5:3b"), "高速チャット・翻訳");
-assert.equal(modelPurpose(qwen2507), "軽量標準・資料検索・学習パック");
+assert.equal(modelPurpose("qwen2.5:3b"), "低スペックPC・移行用の予備");
+assert.equal(modelPurpose(qwen2507), "標準AI・資料検索・学習パック");
 assert.equal(displayModelName(qwen2507), "Qwen3 4B Instruct 2507");
 assert.equal(composerModelLabel(qwen2507, { t: (key) => key }), "Qwen3 2507");
 assert.equal(displayModelName("qwen3:4b"), "Qwen3 4B");
@@ -215,6 +455,11 @@ assert.match(managementSource, /function isNoteArticleWritingRequest\(text\)/);
 assert.match(managementSource, /isNoteArticleWritingRequest,/);
 assert.match(appSource, /function isNoteArticleWritingRequest\(text\)/);
 assert.match(appSource, /window\.GEMMA_MANAGEMENT\?\.isNoteArticleWritingRequest/);
+assert.match(appSource, /hasImages: images\.length > 0/);
+assert.match(appSource, /content: t\("chat\.imageModelRequired"\)/);
+assert.match(appSource, /if \(!canSendModelRequest\(requestOptions, requestModel\)\)/);
+assert.match(appSource, /async function sendMessage\(text\) \{\s*if \(state\.busy \|\| !\(await prepareComposerMessageForSend\(text\)\)\) return false;/);
+assert.match(appSource, /if \(state\.composerModel\) return modelForTask\("coding", true\);/);
 assert.match(appSource, /function shouldKeepNoteArticleInChat\(text\)/);
 assert.match(appSource, /function noteArticleRequestBudget\(text, baseContext\)/);
 assert.match(appSource, /isNoteArticleWritingRequest\(text\) && !explicitlyRequestsWorkspaceSave\(text\)/);
@@ -251,9 +496,11 @@ assert.equal(
 );
 
 function extractFunctionSource(source, name) {
-  const start = source.indexOf(`function ${name}(`);
+  let start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} が必要です`);
-  const openingBrace = source.indexOf("{", start);
+  const asyncStart = source.lastIndexOf("async ", start);
+  if (asyncStart >= 0 && source.slice(asyncStart + 6, start) === "") start = asyncStart;
+  const openingBrace = source.indexOf("{", source.indexOf(")", start));
   let depth = 0;
   for (let index = openingBrace; index < source.length; index += 1) {
     if (source[index] === "{") depth += 1;
@@ -262,6 +509,340 @@ function extractFunctionSource(source, name) {
   }
   assert.fail(`${name} の終端が見つかりません`);
 }
+
+const imageRequestHelperContext = {};
+vm.createContext(imageRequestHelperContext);
+vm.runInContext(
+  [
+    extractFunctionSource(appSource, "shouldUseLongNoteArticlePipeline"),
+    extractFunctionSource(appSource, "shouldUseWorkspaceTextShortcuts"),
+    extractFunctionSource(appSource, "chatRequestMessages"),
+    extractFunctionSource(appSource, "canSendModelRequest"),
+    extractFunctionSource(appSource, "chatModelRequestFields"),
+  ].join("\n"),
+  imageRequestHelperContext,
+  { filename: "web/app.js" },
+);
+const imageRequestOptions = {
+  codingMode: false,
+  translationMode: false,
+  isolateUserMessage: true,
+  hasImages: true,
+};
+assert.equal(
+  imageRequestHelperContext.shouldUseLongNoteArticlePipeline("あ".repeat(6000), imageRequestOptions),
+  false,
+);
+assert.equal(imageRequestHelperContext.shouldUseWorkspaceTextShortcuts(false, imageRequestOptions), false);
+assert.equal(imageRequestHelperContext.shouldUseWorkspaceTextShortcuts(false, { hasImages: false }), true);
+assert.equal(imageRequestHelperContext.canSendModelRequest(imageRequestOptions, ""), false);
+assert.equal(imageRequestHelperContext.canSendModelRequest(imageRequestOptions, gemmaMlx), true);
+const imageMessage = { role: "user", content: "画像を説明して", images: ["base64-image-data"] };
+const imageRequestMessages = imageRequestHelperContext.chatRequestMessages(
+  [{ role: "user", content: "前の質問" }, imageMessage],
+  imageMessage,
+  imageRequestOptions,
+);
+assert.equal(imageRequestMessages.length, 1);
+assert.equal(imageRequestMessages[0].images[0], "base64-image-data");
+const imageRequestFields = imageRequestHelperContext.chatModelRequestFields(gemmaMlx, imageRequestMessages);
+assert.equal(imageRequestFields.model, gemmaMlx);
+assert.equal(imageRequestFields.messages[0].images[0], "base64-image-data");
+
+const healthHelperContext = { Promise, setTimeout, clearTimeout };
+vm.createContext(healthHelperContext);
+vm.runInContext(
+  [
+    extractFunctionSource(appSource, "performHealthCheck"),
+    extractFunctionSource(appSource, "ensureModelListReady"),
+    extractFunctionSource(appSource, "prepareModelListForRequest"),
+    extractFunctionSource(appSource, "shouldStartModelRequest"),
+    extractFunctionSource(appSource, "prepareModelRequestForSend"),
+    extractFunctionSource(appSource, "clearComposerInputIfUnchanged"),
+    extractFunctionSource(appSource, "prepareComposerMessageForSend"),
+  ].join("\n"),
+  healthHelperContext,
+  { filename: "web/app.js" },
+);
+const healthReadyTestsPromise = (async () => {
+  Object.assign(healthHelperContext, {
+    state: {
+      language: "ja",
+      busy: false,
+      appInfo: {
+        version: "確認中",
+        commit: "",
+        searchCapabilities: null,
+        pcDiagnostics: null,
+      },
+      serverModels: {
+        chat: "gemma4:12b",
+        coding: coder,
+        translation: "qwen2.5:3b",
+        recommendedCoding: [],
+        pullable: [],
+        available: [],
+      },
+    },
+    els: {
+      statusDot: { className: "" },
+      statusText: { textContent: "" },
+    },
+    t: (key) => key,
+    renderSettingsMeta: () => {},
+    renderModelInstaller: () => {},
+    renderMessages: () => {},
+    syncModelInputs: () => {},
+  });
+
+  let healthFetchCalls = 0;
+  healthHelperContext.fetch = async () => {
+    healthFetchCalls += 1;
+    return {
+      ok: false,
+      json: async () => ({ ok: false, appVersion: "unexpected" }),
+    };
+  };
+  assert.equal(await healthHelperContext.performHealthCheck(), false);
+  assert.equal(healthFetchCalls, 2, "HTTP 503では固定ポート再確認後も準備失敗にする");
+
+  healthFetchCalls = 0;
+  healthHelperContext.fetch = async () => {
+    healthFetchCalls += 1;
+    return {
+      ok: true,
+      json: async () => ({ ok: false, appVersion: "unexpected" }),
+    };
+  };
+  assert.equal(await healthHelperContext.performHealthCheck(), false);
+  assert.equal(healthFetchCalls, 1, "HTTP 200でもok:falseは準備失敗にする");
+
+  let preparingForHealth = false;
+  const failedHealthInput = { value: "消してはいけない入力" };
+  let modelSendCalls = 0;
+  const healthAllowsSend = await healthHelperContext.prepareComposerMessageForSend(
+    "消してはいけない入力",
+    {
+      input: failedHealthInput,
+      resize: () => {},
+      prepare: () => healthHelperContext.prepareModelListForRequest({
+        isPreparing: () => preparingForHealth,
+        setPreparing: (value) => {
+          preparingForHealth = value;
+        },
+        ensureReady: () => healthHelperContext.ensureModelListReady({
+          isReady: () => false,
+          pending: () => null,
+          refresh: () => healthHelperContext.performHealthCheck(),
+          timeoutMs: 100,
+        }),
+      }),
+    },
+  );
+  if (healthAllowsSend) modelSendCalls += 1;
+  assert.equal(healthAllowsSend, false);
+  assert.equal(modelSendCalls, 0, "healthのok:falseでは送信を開始しない");
+  assert.equal(failedHealthInput.value, "消してはいけない入力");
+
+  let ready = false;
+  let refreshCalls = 0;
+  assert.equal(await healthHelperContext.ensureModelListReady({
+    isReady: () => ready,
+    pending: () => null,
+    refresh: async () => {
+      refreshCalls += 1;
+      ready = true;
+    },
+    timeoutMs: 100,
+  }), true);
+  assert.equal(refreshCalls, 1);
+  assert.equal(await healthHelperContext.ensureModelListReady({
+    isReady: () => ready,
+    pending: () => null,
+    refresh: async () => {
+      refreshCalls += 1;
+    },
+    timeoutMs: 100,
+  }), true);
+  assert.equal(refreshCalls, 1);
+
+  assert.equal(await healthHelperContext.ensureModelListReady({
+    isReady: () => false,
+    pending: () => null,
+    refresh: async () => false,
+    timeoutMs: 100,
+  }), false);
+
+  let resolvePending;
+  const pending = new Promise((resolve) => {
+    resolvePending = resolve;
+  });
+  let duplicateRefreshCalls = 0;
+  const waiting = healthHelperContext.ensureModelListReady({
+    isReady: () => false,
+    pending: () => pending,
+    refresh: () => {
+      duplicateRefreshCalls += 1;
+      return Promise.resolve();
+    },
+    timeoutMs: 100,
+  });
+  resolvePending();
+  assert.equal(await waiting, true);
+  assert.equal(duplicateRefreshCalls, 0);
+
+  const timedOut = await healthHelperContext.ensureModelListReady({
+    isReady: () => false,
+    pending: () => null,
+    refresh: () => new Promise(() => {}),
+    timeoutMs: 1,
+  });
+  assert.equal(timedOut, false);
+
+  const timedOutInput = { value: "タイムアウトでも残す" };
+  assert.equal(await healthHelperContext.prepareComposerMessageForSend("タイムアウトでも残す", {
+    input: timedOutInput,
+    resize: () => {},
+    prepare: () => healthHelperContext.ensureModelListReady({
+      isReady: () => false,
+      pending: () => null,
+      refresh: () => new Promise(() => {}),
+      timeoutMs: 1,
+    }),
+  }), false);
+  assert.equal(timedOutInput.value, "タイムアウトでも残す");
+
+  let duplicatePreparing = false;
+  let resolveDuplicatePreparation;
+  const duplicatePreparation = new Promise((resolve) => {
+    resolveDuplicatePreparation = resolve;
+  });
+  const duplicateInput = { value: "二重送信でも残す" };
+  const sharedPrepare = () => healthHelperContext.prepareModelListForRequest({
+    isPreparing: () => duplicatePreparing,
+    setPreparing: (value) => {
+      duplicatePreparing = value;
+    },
+    ensureReady: () => duplicatePreparation,
+  });
+  const firstPreparation = healthHelperContext.prepareComposerMessageForSend("二重送信でも残す", {
+    input: duplicateInput,
+    resize: () => {},
+    prepare: sharedPrepare,
+  });
+  assert.equal(await healthHelperContext.prepareComposerMessageForSend("二重送信でも残す", {
+    input: duplicateInput,
+    resize: () => {},
+    prepare: sharedPrepare,
+  }), false);
+  assert.equal(duplicateInput.value, "二重送信でも残す");
+  resolveDuplicatePreparation(false);
+  assert.equal(await firstPreparation, false);
+  assert.equal(duplicateInput.value, "二重送信でも残す");
+
+  let resizeCalls = 0;
+  const readyInput = { value: "準備成功後に消す" };
+  assert.equal(await healthHelperContext.prepareComposerMessageForSend("準備成功後に消す", {
+    input: readyInput,
+    resize: () => {
+      resizeCalls += 1;
+    },
+    prepare: async () => true,
+  }), true);
+  assert.equal(readyInput.value, "");
+  assert.equal(resizeCalls, 1);
+
+  let resolveEditedPreparation;
+  const editedPreparation = new Promise((resolve) => {
+    resolveEditedPreparation = resolve;
+  });
+  const editedInput = { value: "最初の入力" };
+  const preparedAfterEdit = healthHelperContext.prepareComposerMessageForSend("最初の入力", {
+    input: editedInput,
+    resize: () => {},
+    prepare: () => editedPreparation,
+  });
+  editedInput.value = "待機中に書き直した入力";
+  resolveEditedPreparation(true);
+  assert.equal(await preparedAfterEdit, true);
+  assert.equal(editedInput.value, "待機中に書き直した入力");
+
+  let preparing = false;
+  assert.equal(await healthHelperContext.prepareModelListForRequest({
+    isPreparing: () => preparing,
+    setPreparing: (value) => {
+      preparing = value;
+    },
+    ensureReady: async () => false,
+  }), false);
+  assert.equal(preparing, false);
+
+  let notice = "";
+  let fetchCalls = 0;
+  const maySend = await healthHelperContext.prepareModelRequestForSend({
+    prepare: async () => false,
+    notify: (message) => {
+      notice = message;
+    },
+    language: "ja",
+  });
+  if (maySend) fetchCalls += 1;
+  assert.equal(maySend, false);
+  assert.equal(fetchCalls, 0);
+  assert.equal(notice, "モデル一覧を確認できませんでした。接続を確認して、もう一度送信してください。");
+})();
+
+const migrationContext = {};
+vm.createContext(migrationContext);
+vm.runInContext(
+  extractFunctionSource(appSource, "migrateStudentModelRoutingStorage"),
+  migrationContext,
+  { filename: "web/app.js" },
+);
+const migratedValues = new Map([
+  ["gemma4.composerModel", hauhauBalanced],
+  ["gemma4.model.chat", "gemma4:12b"],
+  ["gemma4.model.coding", huihuiAbliterated],
+  ["gemma4.model.translation", qwen2507],
+  ["gemma4.composerModelVisibleModels", JSON.stringify([hauhauBalanced, "gemma4:12b", huihuiAbliterated])],
+]);
+const migrationWrites = [];
+const migrationStorage = {
+  getItem: (key) => migratedValues.has(key) ? migratedValues.get(key) : null,
+  setItem: (key, value) => {
+    migrationWrites.push([key, String(value)]);
+    migratedValues.set(key, String(value));
+  },
+};
+assert.equal(
+  migrationContext.migrateStudentModelRoutingStorage(migrationStorage, safeSavedModel),
+  true,
+);
+assert.equal(migratedValues.get("gemma4.composerModel"), "");
+assert.equal(migratedValues.get("gemma4.model.chat"), "gemma4:12b");
+assert.equal(migratedValues.get("gemma4.model.coding"), "");
+assert.equal(migratedValues.get("gemma4.model.translation"), qwen2507);
+assert.deepEqual(
+  JSON.parse(migratedValues.get("gemma4.composerModelVisibleModels")),
+  ["gemma4:12b"],
+);
+assert.equal(migratedValues.get("gemma4.studentModelRoutingV1Migrated"), "true");
+assert.equal(migrationWrites.some(([key]) => key === "gemma4.model.chat"), false);
+assert.equal(migrationWrites.some(([key]) => key === "gemma4.model.translation"), false);
+assert.equal(
+  migrationContext.migrateStudentModelRoutingStorage(migrationStorage, safeSavedModel),
+  false,
+);
+const cleanMigrationValues = new Map([["gemma4.composerModel", "gemma4:12b"]]);
+const cleanMigrationStorage = {
+  getItem: (key) => cleanMigrationValues.has(key) ? cleanMigrationValues.get(key) : null,
+  setItem: (key, value) => cleanMigrationValues.set(key, String(value)),
+};
+assert.equal(
+  migrationContext.migrateStudentModelRoutingStorage(cleanMigrationStorage, safeSavedModel),
+  false,
+);
+assert.equal(cleanMigrationValues.has("gemma4.studentModelRoutingV1Migrated"), false);
 
 const noteArticleBudgetContext = {};
 vm.createContext(noteArticleBudgetContext);
@@ -712,6 +1293,52 @@ assert.doesNotMatch(serverSource, /"model": "Qwen\/Qwen3-4B-Instruct-2507"[\s\S]
 assert.match(serverSource, /"defaultContext": 8192/);
 assert.match(serverSource, /"maxContext": 32768/);
 assert.match(serverSource, /"advancedContext": 262144/);
+assert.deepEqual(
+  serverModelById.get(qwen2507) && {
+    role: serverModelById.get(qwen2507).role,
+    tier: serverModelById.get(qwen2507).tier,
+    defaultVisible: serverModelById.get(qwen2507).defaultVisible,
+    allowAutoSelect: serverModelById.get(qwen2507).allowAutoSelect,
+    defaultInstall: serverModelById.get(qwen2507).defaultInstall,
+  },
+  {
+    role: "core",
+    tier: "required",
+    defaultVisible: true,
+    allowAutoSelect: true,
+    defaultInstall: true,
+  },
+);
+assert.deepEqual(
+  serverModelById.get(coder) && {
+    role: serverModelById.get(coder).role,
+    tier: serverModelById.get(coder).tier,
+    defaultVisible: serverModelById.get(coder).defaultVisible,
+    allowAutoSelect: serverModelById.get(coder).allowAutoSelect,
+    defaultInstall: serverModelById.get(coder).defaultInstall,
+  },
+  {
+    role: "developer",
+    tier: "important",
+    defaultVisible: false,
+    allowAutoSelect: true,
+    defaultInstall: false,
+  },
+);
+for (const model of ["gemma4:12b", gemmaMlx]) {
+  assert.deepEqual(
+    serverModelById.get(model) && {
+      role: serverModelById.get(model).role,
+      tier: serverModelById.get(model).tier,
+      defaultInstall: serverModelById.get(model).defaultInstall,
+    },
+    { role: "high-performance", tier: "important", defaultInstall: false },
+  );
+}
+assert.equal(serverModelById.get(hauhauBalanced)?.role, "developer-hidden");
+assert.equal(serverModelById.get(huihuiAbliterated)?.role, "coding-experimental");
+assert.equal(serverModelById.get(hauhauBalanced)?.allowAutoSelect, false);
+assert.equal(serverModelById.get(huihuiAbliterated)?.allowAutoSelect, false);
 assert.match(serverSource, /PULLABLE_MODEL_NAMES = \{item\["model"\] for item in PULLABLE_MODELS if item\["model"\] and item\.get\("pullable"\) is not False\}/);
 assert.match(serverSource, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated-GGUF:Q4_K_M/);
 assert.match(serverSource, /"experimental": True/);
@@ -721,30 +1348,30 @@ assert.match(serverSource, /"safetyLevel": "low"/);
 assert.match(serverSource, /"external-send-check"/);
 assert.doesNotMatch(codingCandidatesBlock, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
 assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
-assert.match(indexSource, /\/i18n\.js\?v=0\.8\.222-note-pack-error/);
+assert.match(indexSource, /\/i18n\.js\?v=0\.8\.229-student-model-routing/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/models\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/settings\.js\?v=0\.8\.219-searchfix/);
+assert.match(indexSource, /\/models\.js\?v=0\.8\.229-student-model-routing/);
+assert.match(indexSource, /\/settings\.js\?v=0\.8\.229-student-model-routing/);
 assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(indexSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.226-note-complete/);
+assert.match(indexSource, /\/pwa\.js\?v=0\.8\.229-student-model-routing/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.229-student-model-routing/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.227-youtube-grounded"/);
-assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.222-note-pack-error/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.229-student-model-routing"/);
+assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.229-student-model-routing/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.219-searchfix/);
+assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.229-student-model-routing/);
+assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.229-student-model-routing/);
 assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.220-note-article/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.226-note-complete/);
+assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.229-student-model-routing/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.229-student-model-routing/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
@@ -760,6 +1387,26 @@ assert.match(stylesSource, /margin: 0/);
 
 const indexHtml = fs.readFileSync("web/index.html", "utf8");
 const i18nSource = fs.readFileSync("web/i18n.js", "utf8");
+const i18nContext = { window: {} };
+vm.createContext(i18nContext);
+vm.runInContext(i18nSource, i18nContext, { filename: "web/i18n.js" });
+const translations = i18nContext.window.GEMMA_I18N;
+assert.equal(translations.ja["chat.imageModelRequired"], "画像を読むには高性能AIを追加してください。");
+assert.equal(translations.en["chat.imageModelRequired"], "Add a high-performance AI model to read images.");
+assert.match(translations.ja["management.languageModelsNote"], /Qwen3 4Bは標準AIです。/);
+assert.match(translations.ja["management.languageModelsNote"], /Qwen 2\.5 3Bは低スペックPC・移行用の予備です。/);
+assert.match(translations.ja["settings.chatModelHelp"], /Qwen3 4Bを標準AI/);
+assert.match(translations.ja["settings.chatModelHelp"], /Qwen 2\.5 3Bは低スペックPC・移行用の予備/);
+assert.equal(translations.ja["model.gemmaStandard"], "高性能AI・画像理解");
+assert.equal(translations.ja["model.qwenFast"], "予備・軽量");
+assert.equal(translations.ja["model.qwenTranslation"], "予備・軽量");
+assert.equal(translations.en["model.gemmaStandard"], "high-performance AI and vision");
+assert.equal(translations.en["model.qwenFast"], "fallback, lightweight");
+assert.equal(translations.en["model.qwenTranslation"], "fallback, lightweight");
+assert.match(translations.en["management.languageModelsNote"], /Qwen3 4B is the standard AI/);
+assert.match(indexHtml, /Qwen3 4Bは標準AIです。/);
+assert.match(indexHtml, /Qwen 2\.5 3Bは低スペックPC・移行用の予備です。/);
+assert.doesNotMatch(indexHtml, /Gemma 4 12Bは標準モデルです。/);
 assert.match(indexHtml, /別のローカルAIを使う/);
 assert.match(indexHtml, /<details class="external-llm-details">/);
 assert.match(indexHtml, /TOMOS標準のローカルAIを使用中/);
@@ -771,6 +1418,8 @@ assert.match(i18nSource, /"settings\.externalLlmInvalidUrl": "URLの形式を確
 assert.match(i18nSource, /"settings\.externalLlmLocalOnly": "このPC内だけ利用可能です。localhost または 127\.0\.0\.1 を指定してください。"/);
 assert.match(i18nSource, /"settings\.externalLlmError": "接続できませんでした。別のローカルAIが起動中か確認してください。"/);
 assert.match(i18nSource, /"settings\.externalLlmSaved": "Saved the setting\. Check the connection before using it\."/);
+assert.match(i18nSource, /"settings\.studentModelRoutingMigrated": "以前のモデル設定を安全な自動選択へ切り替えました。"/);
+assert.match(i18nSource, /"settings\.studentModelRoutingMigrated": "Previous model settings were switched to safe automatic selection\."/);
 assert.match(i18nSource, /"settings\.externalLlmInvalidUrl": "Check the URL format\. Example: http:\/\/127\.0\.0\.1:11434"/);
 assert.match(i18nSource, /"settings\.externalLlmLocalOnly": "Only this computer can be used\. Specify localhost or 127\.0\.0\.1\."/);
 assert.match(i18nSource, /"settings\.externalLlmError": "Could not connect\. Check whether another local AI is running\."/);
@@ -794,11 +1443,11 @@ const experimentalPullable = [
   { model: "gemma4:12b", label: "Gemma 4 12B", purpose: "標準チャット・画像理解", family: "Gemma系" },
   { model: gemmaMlx, label: "Gemma 4 12B MLX 高速版", purpose: "Apple Silicon向け高速チャット・コード生成", family: "Gemma系" },
   { model: coder, label: "Gemma 4 Agentic Coder 12B Q4", purpose: "コード生成・修正・デバッグ", family: "Gemma系" },
-  { model: "qwen2.5:3b", label: "Qwen 2.5 3B", purpose: "高速チャット・翻訳", family: "Qwen系" },
+  { model: "qwen2.5:3b", label: "Qwen 2.5 3B", purpose: "低スペックPC・移行用の予備", family: "Qwen系" },
   {
     model: qwen2507,
     label: "Qwen3 4B Instruct 2507",
-    purpose: "軽量標準・資料検索・学習パック",
+    purpose: "標準AI・資料検索・学習パック",
     family: "Qwen系",
     note: "Qwen公式モデルのUnsloth GGUF量子化版です。既存の qwen3:4b とは別候補です。",
   },
@@ -814,6 +1463,16 @@ const experimentalPullable = [
     safetyLevel: "low",
     blockedFor: ["student-default", "company-documents", "external-send-check", "study-pack-default", "adult-mode-default"],
     warning: "通常の安全調整が弱い可能性があります。学生向け標準、社内文書、外部送信前チェックには推奨しません。",
+  },
+  {
+    model: enterpriseModel,
+    label: "Enterprise test model",
+    purpose: "社内向け連携",
+    family: "Enterprise",
+    role: "enterprise",
+    tier: "enterprise",
+    defaultVisible: false,
+    allowAutoSelect: false,
   },
 ];
 const renderInstaller = settingsContext.window.GEMMA_SETTINGS.renderModelInstaller;
@@ -840,21 +1499,23 @@ renderInstaller({
 });
 assert.doesNotMatch(hiddenInstaller.innerHTML, /Huihui Gemma 4 Coder 12B Abliterated[\s\S]{0,240}model-recommended-card/);
 assert.match(hiddenInstaller.innerHTML, /おすすめモデル/);
-assert.match(hiddenInstaller.innerHTML, /軽量AIモデル/);
-assert.match(hiddenInstaller.innerHTML, /Qwen 2.5 3B/);
-assert.match(hiddenInstaller.innerHTML, /高性能AIモデル/);
+assert.match(hiddenInstaller.innerHTML, /標準AI/);
+assert.match(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507/);
+assert.match(hiddenInstaller.innerHTML, /高性能AI/);
 assert.match(hiddenInstaller.innerHTML, /Gemma 4 12B MLX 高速版/);
-assert.match(hiddenInstaller.innerHTML, /プログラミング用AIモデル/);
+assert.match(hiddenInstaller.innerHTML, /コード作業/);
 assert.match(hiddenInstaller.innerHTML, /Gemma 4 Agentic Coder 12B Q4/);
-assert.match(hiddenInstaller.innerHTML, /翻訳AIモデル/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /翻訳AIモデル/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /HauhauCS/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /Huihui/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /Enterprise test model/);
 assert.match(hiddenInstaller.innerHTML, /ダウンロード済み/);
 assert.doesNotMatch(hiddenInstaller.innerHTML, /使用中/);
 assert.match(hiddenInstaller.innerHTML, /アンインストール/);
-assert.doesNotMatch(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507[\s\S]{0,240}model-recommended-card/);
 assert.match(hiddenInstaller.innerHTML, /詳細モデルを表示/);
 assert.match(hiddenInstaller.innerHTML, /実験モデルを表示/);
 assert.match(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507/);
-assert.match(hiddenInstaller.innerHTML, /軽量標準・資料検索・学習パック/);
+assert.match(hiddenInstaller.innerHTML, /チャット・資料検索・学習向け/);
 assert.match(hiddenInstaller.innerHTML, /Qwen公式モデルのUnsloth GGUF量子化版です。既存の qwen3:4b とは別候補です。/);
 assert.match(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507[\s\S]{0,500}ダウンロード/);
 
@@ -869,6 +1530,7 @@ renderInstaller({
 assert.match(visibleInstaller.innerHTML, /Huihui Gemma 4 Coder 12B Abliterated/);
 assert.match(visibleInstaller.innerHTML, /コード実験・制限弱め・上級者向け/);
 assert.match(visibleInstaller.innerHTML, /学生向け標準、社内文書、外部送信前チェックには推奨しません/);
+assert.doesNotMatch(visibleInstaller.innerHTML, /Enterprise test model/);
 
 const windowsInstaller = new FakeElement("section");
 renderInstaller({
@@ -884,7 +1546,7 @@ renderInstaller({
   },
   t: installerT,
 });
-assert.match(windowsInstaller.innerHTML, /高性能AIモデル/);
+assert.match(windowsInstaller.innerHTML, /高性能AI/);
 assert.match(windowsInstaller.innerHTML, /Gemma 4 12B/);
 const windowsRecommendedOnly = windowsInstaller.innerHTML.split("詳細モデルを表示")[0];
 assert.doesNotMatch(windowsRecommendedOnly, /MLX 高速版/);
@@ -919,7 +1581,7 @@ const visibleComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composer
   },
   modelIsInstalled: (model) => model === huihuiAbliterated || model === "gemma4:12b" || model === coder || model === "qwen2.5:3b",
 });
-assert.equal(visibleComposerCandidates.includes(huihuiAbliterated), true);
+assert.equal(visibleComposerCandidates.includes(huihuiAbliterated), false);
 assert.equal(visibleComposerCandidates.includes(qwen2507), false);
 assert.equal(composerModelLabel(gemmaMlx, { t: (key) => key }), "Gemma 4 MLX");
 assert.equal(composerModelLabel(huihuiAbliterated, { t: (key) => key }), "Huihui 実験");
@@ -979,4 +1641,9 @@ settingsContext.window.GEMMA_SETTINGS.renderModelSettingsSelects({
 });
 assert.equal(chatSelectWithQwen.children.some((option) => option.value === qwen2507), true);
 
-console.log("model selection tests passed");
+healthReadyTestsPromise
+  .then(() => console.log("model selection tests passed"))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

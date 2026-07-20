@@ -24,6 +24,48 @@ function loadComposerModelVisibleModels() {
   }
 }
 
+function migrateStudentModelRoutingStorage(storage = localStorage, safeSavedModel = window.GEMMA_MODELS?.safeSavedModel) {
+  if (typeof safeSavedModel !== "function") return false;
+  const migrationKey = "gemma4.studentModelRoutingV1Migrated";
+  const previouslyMigrated = storage.getItem(migrationKey) === "true";
+  const modelKeys = [
+    "gemma4.composerModel",
+    "gemma4.model.chat",
+    "gemma4.model.coding",
+    "gemma4.model.translation",
+  ];
+  let changed = false;
+  modelKeys.forEach((key) => {
+    const saved = storage.getItem(key);
+    if (saved === null) return;
+    const safe = safeSavedModel(saved);
+    if (safe === saved) return;
+    storage.setItem(key, safe);
+    changed = true;
+  });
+
+  const visibilityKey = "gemma4.composerModelVisibleModels";
+  const rawVisibility = storage.getItem(visibilityKey);
+  if (rawVisibility !== null) {
+    try {
+      const parsed = JSON.parse(rawVisibility);
+      if (Array.isArray(parsed)) {
+        const safeModels = parsed.map((model) => safeSavedModel(model)).filter(Boolean);
+        if (JSON.stringify(safeModels) !== JSON.stringify(parsed)) {
+          storage.setItem(visibilityKey, JSON.stringify(safeModels));
+          changed = true;
+        }
+      }
+    } catch {
+      // Existing invalid values are handled by the normal visibility loader.
+    }
+  }
+
+  if (changed && !previouslyMigrated) storage.setItem(migrationKey, "true");
+  return changed && !previouslyMigrated;
+}
+
+const studentModelRoutingMigrated = migrateStudentModelRoutingStorage();
 const initialComposerModelVisibility = loadComposerModelVisibleModels();
 const initialComposerModel = localStorage.getItem("gemma4.composerModel") || "";
 const storedComposerModel = initialComposerModelVisibility.saved
@@ -90,6 +132,7 @@ const state = {
   composerModel: storedComposerModel,
   composerModelVisibleModels: initialComposerModelVisibility.models,
   composerModelVisibleModelsSaved: initialComposerModelVisibility.saved,
+  studentModelRoutingMigrated,
   externalLlmUrl: localStorage.getItem("gemma4.externalLlmUrl") || "",
   externalLlmCheckId: 0,
   externalLlmStatus: "",
@@ -138,6 +181,9 @@ const state = {
 
 let stopMicLevelMonitor = null;
 let noticeTimer = null;
+let healthCheckPromise = null;
+let healthCheckCompleted = false;
+let modelRequestPreparing = false;
 
 const WORKSPACE_PLAN_TIMEOUT_MS = 120000;
 const WORKSPACE_FILE_TIMEOUT_MS = 300000;
@@ -4265,9 +4311,28 @@ function noteArticleTextForRequest(text, previousMessages = [], notePackSelected
 function shouldUseLongNoteArticlePipeline(text, requestOptions) {
   requestOptions = requestOptions || {};
   return String(text || "").length >= 6000
+    && requestOptions.hasImages !== true
     && requestOptions.codingMode === false
     && requestOptions.translationMode === false
     && requestOptions.isolateUserMessage === true;
+}
+
+function shouldUseWorkspaceTextShortcuts(hasAttachmentFiles, requestOptions = {}) {
+  return !hasAttachmentFiles && requestOptions.hasImages !== true;
+}
+
+function chatRequestMessages(sessionMessages, modelUserMessage, requestOptions = {}) {
+  return requestOptions.translationMode || requestOptions.fastModel || requestOptions.isolateUserMessage
+    ? [modelUserMessage]
+    : [...sessionMessages.slice(0, -1), modelUserMessage];
+}
+
+function canSendModelRequest(requestOptions = {}, requestModel = "") {
+  return requestOptions.hasImages !== true || Boolean(requestModel);
+}
+
+function chatModelRequestFields(model, messages) {
+  return { model, messages };
 }
 
 async function requestLongNoteArticleReconstruction(payload, signal) {
@@ -4367,7 +4432,7 @@ function isSimpleWorkspaceBuildRequest(text) {
 }
 
 function modelForWorkspaceBuild(text) {
-  if (state.composerModel) return state.composerModel;
+  if (state.composerModel) return modelForTask("coding", true);
   return isSimpleWorkspaceBuildRequest(text) ? fastChatModel() : modelForTask("coding");
 }
 
@@ -5254,6 +5319,7 @@ function buildWorkspaceResultMessage(savedFiles, validation, attempts, notes = [
 }
 
 async function handleWorkspaceBuild(text) {
+  if (state.busy || !(await prepareComposerMessageForSend(text))) return false;
   if (isTranslationRequest(text)) {
     await sendMessage(text);
     return;
@@ -5484,7 +5550,7 @@ async function handleWorkspaceBuild(text) {
   return true;
 }
 
-async function checkHealth() {
+async function performHealthCheck() {
   let data;
   try {
     let response = await fetch("/api/health", { cache: "no-store" });
@@ -5492,6 +5558,7 @@ async function checkHealth() {
       response = await fetch("http://127.0.0.1:54876/api/health", { cache: "no-store" });
     }
     data = await response.json();
+    if (!response.ok || data.ok !== true) throw new Error("Health check failed");
   } catch {
     state.appInfo.version = state.language === "en" ? "failed" : "取得失敗";
     state.appInfo.commit = "";
@@ -5499,7 +5566,7 @@ async function checkHealth() {
     els.statusText.textContent = t("status.offline");
     renderSettingsMeta();
     renderModelInstaller();
-    return;
+    return false;
   }
 
   state.appInfo.version = data.appVersion || state.appInfo.version;
@@ -5534,6 +5601,111 @@ async function checkHealth() {
   } catch (error) {
     console.warn("Health loaded, but rendering failed", error);
   }
+  return true;
+}
+
+function checkHealth() {
+  if (healthCheckPromise) return healthCheckPromise;
+  healthCheckPromise = performHealthCheck()
+    .then((ready) => {
+      healthCheckCompleted = ready === true;
+      return ready;
+    }, () => {
+      healthCheckCompleted = false;
+      return false;
+    })
+    .finally(() => {
+      healthCheckPromise = null;
+    });
+  return healthCheckPromise;
+}
+
+async function ensureModelListReady(options = {}) {
+  const isReady = typeof options.isReady === "function" ? options.isReady : () => healthCheckCompleted;
+  if (isReady()) return true;
+  const pending = typeof options.pending === "function" ? options.pending() : healthCheckPromise;
+  const refresh = typeof options.refresh === "function" ? options.refresh : checkHealth;
+  let operation;
+  try {
+    operation = pending || refresh();
+  } catch {
+    return false;
+  }
+  if (!operation || typeof operation.then !== "function") return isReady();
+
+  const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 5000;
+  const scheduleTimeout = typeof options.scheduleTimeout === "function"
+    ? options.scheduleTimeout
+    : (resolve, delay) => setTimeout(() => resolve(false), delay);
+  const cancelTimeout = typeof options.cancelTimeout === "function" ? options.cancelTimeout : clearTimeout;
+  let timeoutId;
+  try {
+    return await Promise.race([
+      Promise.resolve(operation).then((ready) => ready !== false, () => false),
+      new Promise((resolve) => {
+        timeoutId = scheduleTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) cancelTimeout(timeoutId);
+  }
+}
+
+async function prepareModelListForRequest(options = {}) {
+  const isPreparing = typeof options.isPreparing === "function" ? options.isPreparing : () => modelRequestPreparing;
+  const setPreparing = typeof options.setPreparing === "function"
+    ? options.setPreparing
+    : (value) => {
+        modelRequestPreparing = value;
+      };
+  const ensureReady = typeof options.ensureReady === "function" ? options.ensureReady : ensureModelListReady;
+  if (isPreparing()) return false;
+  setPreparing(true);
+  try {
+    return Boolean(await ensureReady());
+  } catch {
+    return false;
+  } finally {
+    setPreparing(false);
+  }
+}
+
+function shouldStartModelRequest(modelsReady, notify, language = "ja") {
+  if (modelsReady) return true;
+  const message = language === "en"
+    ? "Could not check the model list. Check the connection and send again."
+    : "モデル一覧を確認できませんでした。接続を確認して、もう一度送信してください。";
+  if (typeof notify === "function") notify(message);
+  return false;
+}
+
+async function prepareModelRequestForSend(options = {}) {
+  const prepare = typeof options.prepare === "function" ? options.prepare : prepareModelListForRequest;
+  const notify = typeof options.notify === "function" ? options.notify : showNotice;
+  const language = options.language || state.language;
+  let modelsReady = false;
+  try {
+    modelsReady = await prepare();
+  } catch {
+    modelsReady = false;
+  }
+  return shouldStartModelRequest(modelsReady, notify, language);
+}
+
+function clearComposerInputIfUnchanged(text, options = {}) {
+  const input = options.input || els.prompt;
+  const resize = typeof options.resize === "function" ? options.resize : resizePrompt;
+  if (!input || String(input.value || "").trim() !== String(text || "").trim()) return false;
+  input.value = "";
+  resize();
+  return true;
+}
+
+async function prepareComposerMessageForSend(text, options = {}) {
+  const prepare = typeof options.prepare === "function" ? options.prepare : prepareModelRequestForSend;
+  if (!(await prepare())) return false;
+  clearComposerInputIfUnchanged(text, options);
+  return true;
 }
 
 async function readChatStream(response, onEvent) {
@@ -5566,6 +5738,7 @@ async function readChatStream(response, onEvent) {
 }
 
 async function sendMessage(text) {
+  if (state.busy || !(await prepareComposerMessageForSend(text))) return false;
   let session = activeSession();
   if (!session) {
     newSession();
@@ -5582,7 +5755,10 @@ async function sendMessage(text) {
     sizeLabel: file.sizeLabel,
   }));
   const noteArticleText = noteArticleTextForRequest(text, session.messages, hasSelectedNoteArticlePack());
-  const requestOptions = chatRequestOptions(noteArticleText, images.length > 0);
+  const requestOptions = {
+    ...chatRequestOptions(noteArticleText, images.length > 0),
+    hasImages: images.length > 0,
+  };
   if (!confirmExternalResearchIfNeeded(requestOptions)) return;
   const appliedStudyPackSelections = requestOptions.useStudyPackContext ? selectedStudyPackModes() : [];
   const appliedStudyPackModeLabel = studyPackModesDisplayLabel(appliedStudyPackSelections);
@@ -5718,12 +5894,24 @@ async function sendMessage(text) {
       ? userMessage
       : { ...userMessage, content: noteArticleText };
     const modelUserMessage = messageWithAttachmentContext(modelRequestUserMessage, attachmentContext);
-    const requestMessages = requestOptions.translationMode || requestOptions.fastModel || requestOptions.isolateUserMessage
-      ? [modelUserMessage]
-      : [...session.messages.slice(0, -1), modelUserMessage];
+    const requestMessages = chatRequestMessages(session.messages, modelUserMessage, requestOptions);
     const stream = true;
     const requestTask = requestOptions.translationMode ? "translation" : requestOptions.codingMode ? "coding" : "chat";
     requestModel = modelForRequestTask(requestTask, requestOptions);
+    if (!canSendModelRequest(requestOptions, requestModel)) {
+      const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      pushAssistantReply(session, {
+        content: t("chat.imageModelRequired"),
+        durationSeconds,
+        runMeta: {
+          ...messageRunMeta(requestOptions, ""),
+          model: "",
+          modelLabel: "",
+          modelReason: "画像対応モデルが未取得",
+        },
+      });
+      return;
+    }
     if (shouldUseLongNoteArticlePipeline(noteArticleText, requestOptions)) {
       requestModel = modelForTask("chat") || requestModel;
       state.abortController = new AbortController();
@@ -5747,7 +5935,7 @@ async function sendMessage(text) {
       });
       return;
     }
-    const shouldUseWorkspaceShortcuts = !hasAttachmentFiles;
+    const shouldUseWorkspaceShortcuts = shouldUseWorkspaceTextShortcuts(hasAttachmentFiles, requestOptions);
     const shouldUseWorkspaceContext = shouldUseWorkspaceShortcuts && shouldUseWorkspaceContextForChat(text, requestOptions);
     const requestedFileKind = shouldUseWorkspaceContext ? workspaceFileKindFromText(text) : "";
     if (
@@ -5819,11 +6007,10 @@ async function sendMessage(text) {
     }
     const payload = {
       task: requestTask,
-      model: requestModel,
+      ...chatModelRequestFields(requestModel, requestMessages),
       llm_base_url: externalLlmBaseUrlForRequest(),
       stream,
       system: requestSystemWithTraining,
-      messages: requestMessages,
       temperature: requestOptions.temperature,
       top_p: requestOptions.topP,
       top_k: requestOptions.topK,
@@ -6484,8 +6671,6 @@ els.composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = els.prompt.value.trim();
   if ((!text && state.pendingImages.length === 0 && state.pendingFiles.length === 0) || state.busy) return;
-  els.prompt.value = "";
-  resizePrompt();
   const hasPendingMedia = state.pendingImages.length > 0 || state.pendingFiles.length > 0;
   if (hasPendingMedia) {
     sendMessage(text || (state.pendingFiles.length > 0 ? (state.language === "en" ? "Read the attached file." : "添付ファイルを読んでください。") : (state.language === "en" ? "Describe this image." : "この画像を説明してください。")));
@@ -6498,7 +6683,10 @@ els.composer.addEventListener("submit", async (event) => {
   const previousAttachment = lastReadableAttachment(activeSession());
   const previousAttachmentReference = previousAttachment || lastAttachmentReference(activeSession());
   const shouldPreferAttachmentFollowup = previousAttachmentReference && isAttachmentFollowupRequest(text, attachmentReplyOptions());
-  if (!shouldPreferAttachmentFollowup && await handleWorkspaceSourceFollowup(text)) return;
+  if (!shouldPreferAttachmentFollowup && await handleWorkspaceSourceFollowup(text)) {
+    clearComposerInputIfUnchanged(text);
+    return;
+  }
   const intent = window.GEMMA_ROUTER.classifySubmitIntent({
     text,
     hasImages: state.pendingImages.length > 0,
@@ -6513,18 +6701,31 @@ els.composer.addEventListener("submit", async (event) => {
     isSaveCommandRequest: (value) => Boolean(activeSession() && state.workspaceRoot && isSaveCommand(value)),
     isWorkspaceBuildRequest,
   });
-  if (intent === "local" && handleLocalUtilityRequest(text)) return;
-  if (intent === "weather" && (await handleWeatherRequest(text))) return;
+  if (intent === "local" && handleLocalUtilityRequest(text)) {
+    clearComposerInputIfUnchanged(text);
+    return;
+  }
+  if (intent === "weather" && (await handleWeatherRequest(text))) {
+    clearComposerInputIfUnchanged(text);
+    return;
+  }
   if (intent === "translation") {
     sendMessage(text);
     return;
   }
   if (intent === "image") {
+    clearComposerInputIfUnchanged(text);
     await generateImageFromChat(text);
     return;
   }
-  if (intent === "simple-save" && (await handleSimpleTextSave(text))) return;
-  if (intent === "save-command" && (await handleSaveCommand(text))) return;
+  if (intent === "simple-save" && (await handleSimpleTextSave(text))) {
+    clearComposerInputIfUnchanged(text);
+    return;
+  }
+  if (intent === "save-command" && (await handleSaveCommand(text))) {
+    clearComposerInputIfUnchanged(text);
+    return;
+  }
   if (intent === "workspace-build") {
     await handleWorkspaceBuild(text);
     return;

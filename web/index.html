@@ -227,17 +227,17 @@
             <label class="setting-field">
               <span data-i18n="settings.chatModel">通常チャットAIモデル</span>
               <select id="chat-model"></select>
-              <small data-i18n="settings.chatModelHelp">迷ったら自動（おすすめ）かGemma 4。自動はこのPC上で動くOllamaなどのローカルAI設定を使います。速さ優先ならQwenを選びます。</small>
+              <small data-i18n="settings.chatModelHelp">通常は自動（おすすめ）を使います。Qwen3 4Bを標準AIとして、チャット・翻訳・資料検索・教材パックへ使います。Qwen 2.5 3Bは低スペックPC・移行用の予備です。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.codingModel">プログラミング用AIモデル</span>
               <select id="coding-model"></select>
-              <small data-i18n="settings.codingModelHelp">フォルダー作業用です。複雑なコードはGemma 4 Coder推奨。要ダウンロード表示なら先に取得が必要です。</small>
+              <small data-i18n="settings.codingModelHelp">コード作業用です。複雑なコードはAgentic Coderを使い、未取得時は標準AIへ戻ります。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.translationModel">翻訳AIモデル</span>
               <select id="translation-model"></select>
-              <small data-i18n="settings.translationModelHelp">通常は自動（おすすめ）で十分です。速さはQwen、高品質はGemma 4です。</small>
+              <small data-i18n="settings.translationModelHelp">通常は自動（おすすめ）でQwen3 4Bを使います。Qwen 2.5 3Bは低スペックPC・移行用の予備です。</small>
             </label>
             <label class="setting-field">
               <span data-i18n="settings.temperature">温度</span>
@@ -492,11 +492,11 @@
           <div class="settings-header">
             <div>
               <strong data-i18n="management.languageModels">言語モデル</strong>
-              <span data-i18n="management.languageModelsHelp">Gemma以外のAIモデルを取得したり、別のローカル推論サーバーへ接続します。</span>
+              <span data-i18n="management.languageModelsHelp">標準AIのQwen3 4B、コード作業用、高性能AIを取得したり、別のローカル推論サーバーへ接続します。</span>
             </div>
             <button class="ghost-button" id="language-models-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
-          <div class="management-note" data-i18n="management.languageModelsNote">Gemma 4 12Bは標準モデルです。追加モデル、コード用モデル、別のローカルAIの接続はここでまとめて管理します。</div>
+          <div class="management-note" data-i18n="management.languageModelsNote">Qwen3 4Bは標準AIです。Qwen 2.5 3Bは低スペックPC・移行用の予備です。コード作業、高性能AI、別のローカルAIもここで管理します。</div>
           <div class="management-panel-body" id="language-models-body">
             <input class="language-model-tab-input" id="language-model-tab-download" name="language-model-tab" type="radio" checked />
             <input class="language-model-tab-input" id="language-model-tab-external" name="language-model-tab" type="radio" />
@@ -1336,7 +1336,7 @@
       </section>
     </div>
 
-    <script src="/i18n.js?v=0.8.222-note-pack-error"></script>
+    <script src="/i18n.js?v=0.8.229-student-model-routing"></script>
   <script src="/utils.js?v=0.8.209-tomos53"></script>
   <script src="/translation.js?v=0.8.209-tomos53"></script>
   <script src="/local-tools.js?v=0.8.209-tomos53"></script>
@@ -1352,14 +1352,14 @@
   <script src="/character.js?v=0.8.209-tomos53"></script>
   <script src="/person-name-fortune.js?v=0.8.209-tomos53"></script>
   <script src="/person-relationship.js?v=0.8.209-tomos53"></script>
-  <script src="/models.js?v=0.8.209-tomos53"></script>
+  <script src="/models.js?v=0.8.229-student-model-routing"></script>
   <script src="/messages.js?v=0.8.211-listground1"></script>
   <script src="/sidebar.js?v=0.8.219-searchfix"></script>
-  <script src="/settings.js?v=0.8.219-searchfix"></script>
+  <script src="/settings.js?v=0.8.229-student-model-routing"></script>
     <script src="/management.js?v=0.8.222-note-pack-error"></script>
   <script src="/router.js?v=0.8.209-tomos53"></script>
   <script src="/search.js?v=0.8.227-youtube-grounded"></script>
-  <script src="/pwa.js?v=0.8.220-note-article"></script>
-    <script src="/app.js?v=0.8.226-note-complete"></script>
+  <script src="/pwa.js?v=0.8.229-student-model-routing"></script>
+    <script src="/app.js?v=0.8.229-student-model-routing"></script>
 </body>
 </html>

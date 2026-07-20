@@ -968,35 +968,48 @@ def test_pc_diagnostics_recommendation_levels() -> None:
         "ollamaVersion": "0.31.1",
         "availableModels": [
             "gemma4:12b-mlx",
-            "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M",
+            server.QWEN3_2507_MODEL,
+            server.AGENTIC_CODER_MODEL,
             "qwen2.5:3b",
         ],
     })
     assert comfortable["level"] == "comfortable"
     assert comfortable["label"] == "快適"
-    assert comfortable["recommended"]["standard"] == "gemma4:12b-mlx"
-    assert comfortable["recommended"]["coding"].startswith("hf.co/yuxinlu1/gemma-4-12B-agentic")
+    assert comfortable["recommended"]["standard"] == server.QWEN3_2507_MODEL
+    assert comfortable["recommended"]["coding"] == server.AGENTIC_CODER_MODEL
+    assert comfortable["recommended"]["highPerformance"] == server.GEMMA_MLX_MODEL
+    assert "任意の高性能AI" in comfortable["summary"]
 
     heavy = server.pc_diagnostics_recommendation({
         "memoryGb": 16,
         "isAppleSilicon": False,
         "ollamaVersion": "0.31.1",
-        "availableModels": ["qwen2.5:3b"],
+        "availableModels": [server.QWEN3_2507_MODEL, "qwen2.5:3b"],
     })
     assert heavy["level"] == "heavy"
     assert heavy["label"] == "重い"
-    assert heavy["recommended"]["standard"] == "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
+    assert heavy["recommended"]["standard"] == server.QWEN3_2507_MODEL
+    assert heavy["recommended"]["coding"] == server.QWEN3_2507_MODEL
     assert "12B系" in " ".join(heavy["warnings"])
 
-    very_heavy = server.pc_diagnostics_recommendation({
+    low_memory_core_installed = server.pc_diagnostics_recommendation({
         "memoryGb": 8,
         "isAppleSilicon": False,
         "ollamaVersion": "",
-        "availableModels": [],
+        "availableModels": [server.QWEN3_2507_MODEL, "qwen2.5:3b"],
     })
-    assert very_heavy["level"] == "very-heavy"
-    assert very_heavy["label"] == "激重い"
-    assert very_heavy["recommended"]["standard"] == "qwen2.5:3b"
+    assert low_memory_core_installed["recommended"]["standard"] == server.QWEN3_2507_MODEL
+
+    low_memory_fallback = server.pc_diagnostics_recommendation({
+        "memoryGb": 8,
+        "isAppleSilicon": False,
+        "ollamaVersion": "",
+        "availableModels": ["qwen2.5:3b"],
+    })
+    assert low_memory_fallback["level"] == "very-heavy"
+    assert low_memory_fallback["label"] == "激重い"
+    assert low_memory_fallback["recommended"]["standard"] == "qwen2.5:3b"
+    assert low_memory_fallback["recommended"]["coding"] == "qwen2.5:3b"
 
 
 def test_pc_diagnostics_payload_shape() -> None:
@@ -3217,6 +3230,54 @@ def test_validate_model_remove_accepts_pullable_model() -> None:
     assert server.validate_model_remove("qwen2.5:3b") == "qwen2.5:3b"
 
 
+def test_validate_model_remove_accepts_existing_student_hidden_models() -> None:
+    for model_name in (
+        "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
+        "hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M",
+    ):
+        assert model_name not in server.PULLABLE_MODEL_NAMES
+        assert server.validate_model_remove(model_name) == model_name
+
+
+def test_pullable_model_classifications() -> None:
+    models = {item["model"]: item for item in server.PULLABLE_MODELS}
+    metadata_keys = {"role", "tier", "defaultVisible", "allowAutoSelect", "defaultInstall"}
+    for model in models.values():
+        assert metadata_keys.issubset(model)
+
+    qwen = models[server.QWEN3_2507_MODEL]
+    assert qwen["role"] == "core"
+    assert qwen["tier"] == "required"
+    assert qwen["defaultVisible"] is True
+    assert qwen["allowAutoSelect"] is True
+    assert qwen["defaultInstall"] is True
+
+    coder = models[server.AGENTIC_CODER_MODEL]
+    assert coder["role"] == "developer"
+    assert coder["tier"] == "important"
+    assert coder["defaultVisible"] is False
+    assert coder["allowAutoSelect"] is True
+    assert coder["defaultInstall"] is False
+
+    for model_name in (server.GEMMA_BASE_MODEL, server.GEMMA_MLX_MODEL):
+        assert models[model_name]["role"] == "high-performance"
+        assert models[model_name]["tier"] == "important"
+        assert models[model_name]["defaultInstall"] is False
+
+    hauhau = models["hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M"]
+    assert hauhau["role"] == "developer-hidden"
+    assert hauhau["defaultVisible"] is False
+    assert hauhau["allowAutoSelect"] is False
+    assert hauhau["pullable"] is False
+
+    huihui = models["hf.co/mradermacher/Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated-GGUF:Q4_K_M"]
+    assert huihui["role"] == "coding-experimental"
+    for model in (hauhau, huihui):
+        assert model["defaultVisible"] is False
+        assert model["allowAutoSelect"] is False
+        assert model["pullable"] is False
+
+
 if __name__ == "__main__":
     test_contract_pdf_import_status_payload_shape()
     test_contract_pdf_import_connection_test_payload_shape()
@@ -3379,4 +3440,6 @@ if __name__ == "__main__":
     test_external_research_diagnostics_reports_youtube_transcript_status()
     test_validate_model_remove_rejects_unknown_model()
     test_validate_model_remove_accepts_pullable_model()
+    test_validate_model_remove_accepts_existing_student_hidden_models()
+    test_pullable_model_classifications()
     print("server helper tests passed")

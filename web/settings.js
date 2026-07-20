@@ -100,6 +100,9 @@ function renderPcDiagnosticsPanel(deps) {
       || (ollamaVersionParts[0] === 0 && ollamaVersionParts[1] < 31)
     );
   const availableModels = new Set(Array.isArray(system.availableModels) ? system.availableModels : []);
+  const modelAvailability = (model) => Boolean(model) && availableModels.has(model);
+  const availableLabel = language === "en" ? "Available" : "利用可能";
+  const missingLabel = language === "en" ? "Not installed" : "未取得";
   const environmentChecks = [
     {
       label: "CPU",
@@ -129,19 +132,19 @@ function renderPcDiagnosticsPanel(deps) {
   ];
   const modelChecks = [
     {
-      label: "軽量AIモデル",
-      value: availableModels.has(recommended.light) || availableModels.has("qwen2.5:3b") ? "利用可能" : "未取得",
-      ok: availableModels.has(recommended.light) || availableModels.has("qwen2.5:3b"),
+      label: language === "en" ? "Standard AI" : "標準AI",
+      value: modelAvailability(recommended.standard) ? availableLabel : missingLabel,
+      ok: modelAvailability(recommended.standard),
     },
     {
-      label: "高性能AIモデル",
-      value: availableModels.has("gemma4:12b-mlx") || availableModels.has("gemma4:12b") ? "利用可能" : "未取得",
-      ok: availableModels.has("gemma4:12b-mlx") || availableModels.has("gemma4:12b"),
+      label: language === "en" ? "Code work" : "コード作業",
+      value: modelAvailability(recommended.coding) ? availableLabel : missingLabel,
+      ok: modelAvailability(recommended.coding),
     },
     {
-      label: "プログラミング用AIモデル",
-      value: availableModels.has(recommended.coding) ? "利用可能" : "未取得",
-      ok: availableModels.has(recommended.coding),
+      label: language === "en" ? "High-performance AI" : "高性能AI",
+      value: modelAvailability(recommended.highPerformance) ? availableLabel : missingLabel,
+      ok: modelAvailability(recommended.highPerformance),
     },
   ];
   const warnings = Array.isArray(recommendation.warnings) ? recommendation.warnings.filter(Boolean) : [];
@@ -217,45 +220,45 @@ function renderModelInstaller(deps) {
   title.append(titleStrong, titleHelp);
   els.modelInstaller.append(title);
 
+  if (state.studentModelRoutingMigrated === true) {
+    const migrationNotice = document.createElement("div");
+    migrationNotice.className = "model-experimental-warning";
+    migrationNotice.textContent = t("settings.studentModelRoutingMigrated");
+    els.modelInstaller.append(migrationNotice);
+  }
+
   const byModel = new Map(pullable.filter((item) => item?.model).map((item) => [item.model, item]));
   const findModel = (predicate) => pullable.find((item) => item?.model && predicate(item)) || null;
-  const qwenLight = byModel.get("qwen2.5:3b") || { model: "qwen2.5:3b", label: "Qwen 2.5 3B", purpose: language === "en" ? "Fast chat and translation" : "高速チャット・翻訳" };
+  const isEnterpriseModel = (item) => [item?.role, item?.tier, item?.family]
+    .some((value) => /enterprise/i.test(String(value || "")));
   const gemmaMlx = byModel.get("gemma4:12b-mlx") || null;
   const gemmaStandard = byModel.get("gemma4:12b") || null;
-  const qwen2507 = findModel((item) => item.model.includes("Qwen3-4B-Instruct-2507-GGUF"));
-  const agenticCoder = findModel((item) => item.model.includes("gemma-4-12B-agentic-fable5-composer2.5-v2"));
+  const qwen2507 = findModel((item) => item.role === "core")
+    || findModel((item) => item.model.includes("Qwen3-4B-Instruct-2507-GGUF"));
+  const agenticCoder = findModel((item) => item.role === "developer")
+    || findModel((item) => item.model.includes("gemma-4-12B-agentic-fable5-composer2.5-v2"));
   const isAppleSilicon = Boolean(state.appInfo?.pcDiagnostics?.system?.isAppleSilicon);
   const highPerformance = isAppleSilicon
-    ? (gemmaMlx || gemmaStandard || qwen2507)
-    : (gemmaStandard || qwen2507 || gemmaMlx);
-  const codingModel = agenticCoder || gemmaMlx || gemmaStandard;
+    ? (gemmaMlx || gemmaStandard)
+    : (gemmaStandard || gemmaMlx);
   const recommendedCards = [
     {
-      role: language === "en" ? "Light AI model" : "軽量AIモデル",
-      item: qwenLight,
-      fallbackModel: "qwen2.5:3b",
-      help: language === "en" ? "Fast chat and translation" : "高速チャット・翻訳向け",
+      role: language === "en" ? "Core AI" : "標準AI",
+      item: qwen2507,
+      help: language === "en" ? "Chat, document search, and study" : "チャット・資料検索・学習向け",
     },
     {
-      role: language === "en" ? "High-performance AI model" : "高性能AIモデル",
+      role: language === "en" ? "Code work" : "コード作業",
+      item: agenticCoder,
+      help: language === "en" ? "Add only when needed" : "必要な人だけ追加",
+    },
+    {
+      role: language === "en" ? "High-performance AI" : "高性能AI",
       item: highPerformance,
-      fallbackModel: highPerformance?.model || "",
-      help: language === "en" ? "Standard chat and document search" : "標準チャット・資料検索向け",
+      help: language === "en" ? "High-quality chat and image understanding" : "高品質会話・画像理解向け",
     },
-    {
-      role: language === "en" ? "Programming AI model" : "プログラミング用AIモデル",
-      item: codingModel,
-      fallbackModel: codingModel?.model || "",
-      help: language === "en" ? "Code generation, fixes, and debugging" : "コード生成・修正・デバッグ向け",
-    },
-    {
-      role: language === "en" ? "Translation AI model" : "翻訳AIモデル",
-      item: qwenLight,
-      fallbackModel: "qwen2.5:3b",
-      help: language === "en" ? "Fast translation and rewriting" : "翻訳・言い換え向け",
-    },
-  ].filter((card) => card.item?.model || card.fallbackModel);
-  const recommendedIds = new Set(recommendedCards.map((card) => card.item?.model || card.fallbackModel).filter(Boolean));
+  ].filter((card) => card.item?.model && !isEnterpriseModel(card.item));
+  const recommendedIds = new Set(recommendedCards.map((card) => card.item.model));
 
   const heading = document.createElement("div");
   heading.className = "model-section-heading";
@@ -266,9 +269,9 @@ function renderModelInstaller(deps) {
   for (const card of recommendedCards) {
     recommendedList.append(renderModelRow({
       item: card.item,
-      model: card.item?.model || card.fallbackModel,
+      model: card.item.model,
       title: card.role,
-      help: `${card.item?.label || composerModelLabel(card.fallbackModel)}\n${card.help}`,
+      help: `${card.item.label || composerModelLabel(card.item.model)}\n${card.help}`,
       recommended: true,
     }));
   }
@@ -277,6 +280,8 @@ function renderModelInstaller(deps) {
   const detailItems = pullable.filter((item) => (
     item?.model
     && !item.experimental
+    && item.defaultVisible !== false
+    && !isEnterpriseModel(item)
     && !recommendedIds.has(item.model)
   ));
   if (detailItems.length > 0) {
@@ -300,15 +305,41 @@ function renderModelInstaller(deps) {
     els.modelInstaller.append(details);
   }
 
-  const experimentalItems = pullable.filter((item) => item?.experimental);
+  const hiddenInstalledItems = pullable.filter((item) => (
+    item?.model
+    && item.defaultVisible === false
+    && !isEnterpriseModel(item)
+    && !recommendedIds.has(item.model)
+    && modelIsInstalled(item.model)
+  ));
+  const hiddenInstalledIds = new Set(hiddenInstalledItems.map((item) => item.model));
+  if (hiddenInstalledItems.length > 0) {
+    const details = document.createElement("details");
+    details.className = "model-details hidden-installed";
+    const summary = document.createElement("summary");
+    summary.textContent = language === "en" ? "Manage hidden installed models" : "インストール済みの非表示モデルを管理";
+    details.append(summary);
+    for (const item of hiddenInstalledItems) {
+      details.append(renderModelRow({ item, model: item.model, detail: true }));
+    }
+    els.modelInstaller.append(details);
+  }
+
+  const experimentalItems = pullable.filter((item) => (
+    item?.experimental
+    && !isEnterpriseModel(item)
+    && !hiddenInstalledIds.has(item.model)
+  ));
   if (experimentalItems.length > 0) {
     const details = document.createElement("details");
     details.className = "model-details experimental";
     const summary = document.createElement("summary");
     summary.textContent = language === "en" ? "Show experimental models" : "実験モデルを表示";
     details.append(summary);
-    for (const item of experimentalItems) {
-      details.append(renderModelRow({ item, model: item.model, experimental: true }));
+    if (state.showExperimentalModels) {
+      for (const item of experimentalItems) {
+        details.append(renderModelRow({ item, model: item.model, experimental: true }));
+      }
     }
     els.modelInstaller.append(details);
   }
@@ -340,7 +371,7 @@ function renderModelInstaller(deps) {
         : "このモデルは通常の安全調整が弱い可能性があります。学生向け標準、社内文書、外部送信前チェックには推奨しません。");
       info.append(warning);
     }
-    if (item.pullable === false) {
+    if (item.pullable === false && !installed) {
       const unavailable = document.createElement("small");
       unavailable.className = "model-experimental-warning";
       unavailable.textContent = language === "en"
@@ -493,11 +524,16 @@ function externalLlmCheckStatusKey(errorCode) {
   return "settings.externalLlmError";
 }
 
-function installedOrCurrentModels({ models, task, state, modelIsInstalled }) {
+function installedOrCurrentModels({ models, task, state, modelIsInstalled, allowExperimental = false }) {
   const current = state.modelOverrides?.[task] || "";
   const recommendedCoding = state.serverModels?.recommendedCoding || [];
   return models.filter((model) => (
-    model &&
+    model
+    && isStudentSettingsCandidate(model, state, {
+      explicit: model === current || model === state.composerModel,
+      allowExperimental,
+    })
+    &&
     (
       modelIsInstalled(model) ||
       model === current ||
@@ -507,8 +543,45 @@ function installedOrCurrentModels({ models, task, state, modelIsInstalled }) {
   ));
 }
 
+function isStudentSettingsCandidate(model, state, { explicit = false, allowExperimental = false } = {}) {
+  if (isStudentHiddenSettingsModel(model, state)) {
+    return allowExperimental && isExplicitExperimentalStudentModel(model, state);
+  }
+  if (explicit || isKnownStudentModel(model)) return true;
+  const item = (state.serverModels?.pullable || []).find((candidate) => candidate?.model === model);
+  return item?.allowAutoSelect === true;
+}
+
+function isKnownStudentModel(model) {
+  const value = String(model || "");
+  return value === "qwen2.5:3b"
+    || value === "gemma4:12b"
+    || value === "gemma4:12b-mlx"
+    || value.includes("Qwen3-4B-Instruct-2507-GGUF")
+    || value.includes("gemma-4-12B-agentic-fable5-composer2.5-v2");
+}
+
+function isStudentHiddenSettingsModel(model, state) {
+  const value = String(model || "");
+  const item = (state.serverModels?.pullable || []).find((candidate) => candidate?.model === value);
+  const category = [item?.role, item?.tier, item?.family]
+    .map((part) => String(part || ""))
+    .join(" ");
+  return value.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")
+    || value.includes("Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated")
+    || /(^|[/:._-])(enterprise|experimental|glm(?:[-_]?5)?|gpt-oss|deepseek)(?=$|[/:._-])/i.test(value)
+    || /(experimental|enterprise|hidden|adult|uncensored|abliterated)/i.test(category);
+}
+
+function isExplicitExperimentalStudentModel(model, state) {
+  const item = (state.serverModels?.pullable || []).find((candidate) => candidate?.model === model);
+  return item?.experimental === true
+    && item?.role === "coding-experimental"
+    && item?.allowAutoSelect === false
+    && String(model).includes("Huihui-gemma-4-12B-coder-fable5-composer2.5-v1-abliterated");
+}
+
 const COMPOSER_OPTIONAL_MODEL_IDS = [
-  "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
   "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL",
 ];
 
@@ -519,18 +592,8 @@ function isComposerModelCandidate(model) {
     model === "gemma4:12b-mlx" ||
     model === "qwen2.5:3b" ||
     model.includes("Qwen3-4B-Instruct-2507-GGUF") ||
-    model.includes("gemma-4-12B-agentic-fable5-composer2.5-v2") ||
-    model.includes("Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced")
+    model.includes("gemma-4-12B-agentic-fable5-composer2.5-v2")
   );
-}
-
-function experimentalComposerModelCandidates({ state }) {
-  if (!state.showExperimentalModels) return [];
-  const pullable = state.serverModels?.pullable || [];
-  return pullable
-    .filter((item) => item?.experimental && item?.allowAutoSelect === false && item?.role === "coding-experimental")
-    .map((item) => item.model)
-    .filter(Boolean);
 }
 
 function currentComposerModelVisibilityCandidates({ state }) {
@@ -555,12 +618,11 @@ function composerModelCandidates({ state, modelIsInstalled }) {
     state.serverModels.translation,
     ...state.serverModels.recommendedCoding,
     ...COMPOSER_OPTIONAL_MODEL_IDS,
-    ...experimentalComposerModelCandidates({ state }),
     "gemma4:12b-mlx",
     "gemma4:12b",
     "qwen2.5:3b",
     isComposerModelCandidate(state.composerModel) ? state.composerModel : "",
-  ].filter((model) => isComposerModelCandidate(model) || experimentalComposerModelCandidates({ state }).includes(model)), "chat");
+  ].filter((model) => isComposerModelCandidate(model)), "chat");
   const uniqueCandidates = [...new Set(candidates)];
   if (state.composerModelVisibleModelsSaved !== true) return uniqueCandidates;
   const visible = Array.isArray(state.composerModelVisibleModels) ? state.composerModelVisibleModels.filter(Boolean) : [];
@@ -623,6 +685,7 @@ function renderModelSettingsSelects({
     state,
     modelIsInstalled,
   });
+  const safeCurrent = (model) => isStudentHiddenSettingsModel(model, state) ? "" : model;
   renderModelSelect({
     select: els.chatModel,
     task: "chat",
@@ -633,7 +696,7 @@ function renderModelSettingsSelects({
       "qwen2.5:3b",
       "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL",
     ], "chat"),
-    current: state.modelOverrides.chat || "",
+    current: safeCurrent(state.modelOverrides.chat || ""),
     displayModelName,
     t,
   });
@@ -645,7 +708,7 @@ function renderModelSettingsSelects({
       ...state.serverModels.recommendedCoding,
       "gemma4:12b",
     ], "coding"),
-    current: state.modelOverrides.coding || "",
+    current: safeCurrent(state.modelOverrides.coding || ""),
     displayModelName,
     t,
   });
@@ -657,7 +720,7 @@ function renderModelSettingsSelects({
       "qwen2.5:3b",
       "gemma4:12b",
     ], "translation"),
-    current: state.modelOverrides.translation || "",
+    current: safeCurrent(state.modelOverrides.translation || ""),
     displayModelName,
     t,
   });
@@ -669,7 +732,7 @@ function renderModelSettingsSelects({
   renderComposerModelSelect({
     select: els.composerModel,
     models: composerModels,
-    current: state.composerModel,
+    current: safeCurrent(state.composerModel),
     composerModelLabel,
     displayModelName,
     language: state.language,

@@ -103,9 +103,11 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.218")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.219")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
+QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
+AGENTIC_CODER_MODEL = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M"
 MODEL = os.environ.get("GEMMA_MODEL", GEMMA_MLX_MODEL)
 CODING_MODEL = os.environ.get("GEMMA_CODING_MODEL", "")
 TRANSLATION_MODEL = os.environ.get("GEMMA_TRANSLATION_MODEL", "")
@@ -116,7 +118,7 @@ TRANSLATION_MODEL_CANDIDATES = [
 ]
 CODING_MODEL_CANDIDATES = [
     GEMMA_MLX_MODEL,
-    "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M",
+    AGENTIC_CODER_MODEL,
 ]
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -240,35 +242,75 @@ DEFAULT_SYSTEM_PROMPT = (
     "箇条書きは、比較・手順・整理が必要な場合だけ使ってください。"
 )
 PULLABLE_MODELS = [
-    {"model": GEMMA_BASE_MODEL, "label": "Gemma 4 12B", "purpose": "標準チャット・画像理解", "family": "Gemma系"},
+    {
+        "model": GEMMA_BASE_MODEL,
+        "label": "Gemma 4 12B",
+        "purpose": "標準チャット・画像理解",
+        "family": "Gemma系",
+        "role": "high-performance",
+        "tier": "important",
+        "defaultVisible": True,
+        "allowAutoSelect": True,
+        "defaultInstall": False,
+    },
     {
         "model": GEMMA_MLX_MODEL,
         "label": "Gemma 4 12B MLX 高速版",
         "purpose": "Apple Silicon向け高速チャット・コード生成",
         "family": "Gemma系",
+        "role": "high-performance",
+        "tier": "important",
+        "defaultVisible": True,
+        "allowAutoSelect": True,
+        "defaultInstall": False,
         "runtime": "MLX",
         "requiresOllama": "0.31.0",
         "note": "Ollama 0.31以降でMTP高速化が有効になります。Apple Silicon向けの推奨高速版です。",
     },
     {
-        "model": "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M",
-        "label": "Gemma 4 Agentic Coder 12B Q4",
-        "purpose": "コード生成・修正・デバッグ",
-        "family": "Gemma系",
+        "model": AGENTIC_CODER_MODEL,
+        "label": "Agentic Coder v2",
+        "purpose": "コード生成・修正・レビュー",
+        "family": "Developer AI",
+        "role": "developer",
+        "tier": "important",
+        "defaultVisible": False,
+        "allowAutoSelect": True,
+        "defaultInstall": False,
     },
     {
         "model": "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
         "label": "HauhauCS Balanced 12B Q4",
         "purpose": "強化型チャット・制限弱め・PC負荷強",
         "family": "Gemma系",
+        "role": "developer-hidden",
+        "tier": "optional",
+        "defaultVisible": False,
+        "allowAutoSelect": False,
+        "defaultInstall": False,
+        "pullable": False,
     },
-    {"model": "qwen2.5:3b", "label": "Qwen 2.5 3B", "purpose": "高速チャット・翻訳", "family": "Qwen系"},
     {
-        "model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL",
-        "label": "Qwen3 4B Instruct 2507",
-        "purpose": "軽量標準・資料検索・学習パック",
+        "model": "qwen2.5:3b",
+        "label": "Qwen 2.5 3B",
+        "purpose": "低スペックPC・移行用の予備",
         "family": "Qwen系",
-        "role": "lightweight-standard",
+        "role": "lightweight",
+        "tier": "optional",
+        "defaultVisible": True,
+        "allowAutoSelect": True,
+        "defaultInstall": False,
+    },
+    {
+        "model": QWEN3_2507_MODEL,
+        "label": "Qwen3 4B Instruct 2507",
+        "purpose": "標準チャット・資料検索・学習パック",
+        "family": "Qwen系",
+        "role": "core",
+        "tier": "required",
+        "defaultVisible": True,
+        "allowAutoSelect": True,
+        "defaultInstall": True,
         "defaultContext": 8192,
         "maxContext": 32768,
         "advancedContext": 262144,
@@ -280,9 +322,12 @@ PULLABLE_MODELS = [
         "purpose": "コード実験・制限弱め・上級者向け",
         "family": "実験モデル",
         "role": "coding-experimental",
+        "tier": "optional",
         "experimental": True,
         "defaultVisible": False,
         "allowAutoSelect": False,
+        "defaultInstall": False,
+        "pullable": False,
         "safetyLevel": "low",
         "blockedFor": [
             "student-default",
@@ -295,6 +340,7 @@ PULLABLE_MODELS = [
     },
 ]
 PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"] and item.get("pullable") is not False}
+REMOVABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"]}
 MODEL_PULL_JOBS: dict[str, dict[str, object]] = {}
 MODEL_PULL_LOCK = threading.Lock()
 ASR_SETUP_JOB: dict[str, object] = {}
@@ -3519,10 +3565,6 @@ def sanitize_chat_messages(messages: list[dict]) -> list[dict]:
     return cleaned
 
 
-QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
-AGENTIC_CODER_MODEL = "hf.co/yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF:Q4_K_M"
-
-
 def run_sysctl_value(name: str) -> str:
     if sys.platform != "darwin":
         return ""
@@ -3580,30 +3622,35 @@ def pc_diagnostics_recommendation(system_info: dict[str, object]) -> dict[str, o
     memory_gb = int(system_info.get("memoryGb") or 0)
     is_apple_silicon = bool(system_info.get("isAppleSilicon"))
     available = {str(model) for model in system_info.get("availableModels") or []}
-    has_mlx = "gemma4:12b-mlx" in available
+    has_core = QWEN3_2507_MODEL in available
     has_agentic = AGENTIC_CODER_MODEL in available
 
-    if memory_gb >= 24 and (is_apple_silicon or has_mlx):
+    if memory_gb >= 24:
         level = "comfortable"
         label = "快適"
-        summary = "このPCでは12B系も使いやすいです。標準はGemma 4 MLX、コードはAgentic Coderを優先できます。"
-        standard = "gemma4:12b-mlx"
-        coding = AGENTIC_CODER_MODEL if has_agentic else "gemma4:12b-mlx"
+        summary = "標準AIはQwen3 4Bです。Gemma 4 12Bは任意の高性能AIとして、画像理解や高品質な会話が必要な時に追加できます。"
+        standard = QWEN3_2507_MODEL
+        high_performance = GEMMA_MLX_MODEL if is_apple_silicon else GEMMA_BASE_MODEL
         warnings: list[str] = []
     elif memory_gb >= 12:
         level = "heavy"
         label = "重い"
-        summary = "軽量モデル中心がおすすめです。12B系は必要な時だけ使うと安定します。"
+        summary = "標準AIはQwen3 4Bがおすすめです。12B系は必要な時だけ高性能AIとして使うと安定します。"
         standard = QWEN3_2507_MODEL
-        coding = AGENTIC_CODER_MODEL if has_agentic else "gemma4:12b-mlx"
+        high_performance = ""
         warnings = ["12B系は応答が重くなる可能性があります。"]
     else:
         level = "very-heavy"
         label = "激重い"
-        summary = "軽いモデル中心がおすすめです。12B系や実験モデルは避ける方が安定します。"
-        standard = "qwen2.5:3b"
-        coding = QWEN3_2507_MODEL
+        standard = QWEN3_2507_MODEL if has_core else "qwen2.5:3b"
+        if has_core:
+            summary = "標準AIはQwen3 4Bがおすすめです。12B系や実験モデルは避ける方が安定します。"
+        else:
+            summary = "Qwen3 4Bを取得するまで、Qwen 2.5 3Bを予備の軽量AIとして使えます。12B系や実験モデルは避ける方が安定します。"
+        high_performance = ""
         warnings = ["12B系、HauhauCS、実験モデルはこのPCでは非推奨です。"]
+
+    coding = AGENTIC_CODER_MODEL if has_agentic else standard
 
     return {
         "level": level,
@@ -3612,8 +3659,9 @@ def pc_diagnostics_recommendation(system_info: dict[str, object]) -> dict[str, o
         "recommended": {
             "standard": standard,
             "coding": coding,
-            "light": QWEN3_2507_MODEL,
-            "translation": "qwen2.5:3b",
+            "light": standard,
+            "translation": standard,
+            "highPerformance": high_performance,
         },
         "warnings": warnings,
     }
@@ -5886,7 +5934,7 @@ def start_model_pull(model: str) -> dict:
 
 def validate_model_remove(model: str) -> str:
     normalized = str(model or "").strip()
-    if normalized not in PULLABLE_MODEL_NAMES:
+    if normalized not in REMOVABLE_MODEL_NAMES:
         raise ValueError("このモデルはUIからアンインストールできません。")
     return normalized
 
