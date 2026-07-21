@@ -56,7 +56,6 @@ copy_common() {
   copy_if_exists "docs/study-pack-import-guide.ja.md" "$target/docs/"
 
   copy_if_exists "scripts/setup-mac.sh" "$target/scripts/"
-  copy_if_exists "scripts/macos-app-launcher.sh" "$target/scripts/"
   copy_if_exists "scripts/setup-windows.ps1" "$target/scripts/"
   copy_if_exists "scripts/start-dev.sh" "$target/scripts/"
   copy_if_exists "scripts/start-comfyui.sh" "$target/scripts/"
@@ -71,6 +70,7 @@ copy_common() {
 copy_common "$MAC_ROOT"
 copy_common "$WIN_ROOT"
 
+copy_if_exists "scripts/macos-app-launcher.sh" "$MAC_ROOT/scripts/"
 copy_if_exists "Gemma4_12B_全部起動.command" "$MAC_ROOT/"
 copy_if_exists "Gemma4_12B_Web.command" "$MAC_ROOT/"
 copy_if_exists "Gemma4_12B_重い処理を停止.command" "$MAC_ROOT/"
