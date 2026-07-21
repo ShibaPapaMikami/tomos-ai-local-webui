@@ -17,6 +17,7 @@ STARTED_PROCESS_PID=""
 STARTED_PROCESS_PGID=""
 STARTED_PROCESS_TOKEN=""
 STARTED_PROCESS_FINGERPRINT=""
+STARTED_PROCESS_COMMAND=""
 PROCESS_OWNER_FILE="$LOG_DIR/started-process.owner"
 PROCESS_RELEASE_FILE="$LOG_DIR/started-process.release"
 STARTUP_SUCCEEDED=0
@@ -104,6 +105,9 @@ wait_for_launcher() {
         exit 1
         ;;
     esac
+    if lock_is_owned_by_live_launcher; then
+      continue
+    fi
     if tcp_port_is_occupied; then
       show_different_app_error
       exit 1
@@ -122,6 +126,10 @@ process_fingerprint() {
   ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
+process_command() {
+  ps -ww -p "$1" -o command= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
 read_lock_owner() {
   LOCK_OWNER_PID=""
   LOCK_OWNER_FINGERPRINT=""
@@ -131,6 +139,14 @@ read_lock_owner() {
     ''|*[!0-9]*) return 1 ;;
   esac
   [ -n "$LOCK_OWNER_FINGERPRINT" ]
+}
+
+lock_is_owned_by_live_launcher() {
+  local current_fingerprint
+  read_lock_owner || return 1
+  kill -0 "$LOCK_OWNER_PID" 2>/dev/null || return 1
+  current_fingerprint="$(process_fingerprint "$LOCK_OWNER_PID")"
+  [ -n "$current_fingerprint" ] && [ "$current_fingerprint" = "$LOCK_OWNER_FINGERPRINT" ]
 }
 
 lock_has_expired() {
@@ -188,14 +204,14 @@ if [ "$INITIAL_HEALTH_STATE" = "different-app" ]; then
   show_different_app_error
   exit 1
 fi
-if tcp_port_is_occupied; then
-  show_different_app_error
-  exit 1
-fi
 
 mkdir -p "$LOG_DIR"
 if ! acquire_lock; then
   wait_for_launcher
+fi
+if tcp_port_is_occupied; then
+  show_different_app_error
+  exit 1
 fi
 
 read_started_process_owner() {
@@ -213,41 +229,49 @@ read_started_process_owner() {
 }
 
 started_process_owner_matches() {
-  local current_pgid
-  local current_fingerprint
   read_started_process_owner || return 1
-  current_pgid="$(ps -p "$STARTED_PROCESS_PID" -o pgid= 2>/dev/null | tr -d ' ')"
-  current_fingerprint="$(process_fingerprint "$STARTED_PROCESS_PID")"
-  [ "$current_pgid" = "$STARTED_PROCESS_PGID" ] || return 1
   [ "$STARTED_PROCESS_PGID" = "$STARTED_PROCESS_PID" ] || return 1
-  [ -n "$STARTED_PROCESS_FINGERPRINT" ] || return 1
-  [ "$current_fingerprint" = "$STARTED_PROCESS_FINGERPRINT" ]
+  started_process_group_matches
+}
+
+started_process_direct_wrapper_matches() {
+  local current_command
+  local current_fingerprint
+  [ -n "$STARTED_PROCESS_FINGERPRINT" ] && [ -n "$STARTED_PROCESS_COMMAND" ] || return 1
+  current_fingerprint="$(process_fingerprint "$STARTED_PROCESS_PID")"
+  current_command="$(process_command "$STARTED_PROCESS_PID")"
+  [ -n "$current_fingerprint" ] && [ "$current_fingerprint" = "$STARTED_PROCESS_FINGERPRINT" ] && \
+    [ -n "$current_command" ] && [ "$current_command" = "$STARTED_PROCESS_COMMAND" ]
+}
+
+started_process_group_matches() {
+  local current_pgid
+  started_process_direct_wrapper_matches || return 1
+  current_pgid="$(ps -p "$STARTED_PROCESS_PID" -o pgid= 2>/dev/null | tr -d ' ')"
+  [ "$current_pgid" = "$STARTED_PROCESS_PID" ]
 }
 
 register_started_process() {
-  local owner_fingerprint
-  for _ in $(seq 1 40); do
-    if read_started_process_owner; then
-      owner_fingerprint="$(process_fingerprint "$STARTED_PROCESS_PID")"
-      if [ -n "$owner_fingerprint" ]; then
-        STARTED_PROCESS_FINGERPRINT="$owner_fingerprint"
-        return 0
-      fi
-    fi
-    /bin/sleep 0.01
-  done
-  return 1
+  STARTED_PROCESS_FINGERPRINT="$(process_fingerprint "$STARTED_PROCESS_PID")"
+  STARTED_PROCESS_COMMAND="$(process_command "$STARTED_PROCESS_PID")"
+  [ -n "$STARTED_PROCESS_FINGERPRINT" ] && [ -n "$STARTED_PROCESS_COMMAND" ]
 }
 
 terminate_started_process() {
   if started_process_owner_matches; then
     kill -TERM -- "-$STARTED_PROCESS_PGID" 2>/dev/null || true
     wait "$STARTED_PROCESS_PID" 2>/dev/null || true
+  elif started_process_group_matches; then
+    kill -TERM -- "-$STARTED_PROCESS_PID" 2>/dev/null || true
+    wait "$STARTED_PROCESS_PID" 2>/dev/null || true
+  elif started_process_direct_wrapper_matches; then
+    kill -TERM "$STARTED_PROCESS_PID" 2>/dev/null || true
+    wait "$STARTED_PROCESS_PID" 2>/dev/null || true
   fi
 }
 
 release_started_process() {
-  if started_process_owner_matches; then
+  if started_process_owner_matches || started_process_direct_wrapper_matches; then
     : > "$PROCESS_RELEASE_FILE"
     wait "$STARTED_PROCESS_PID" 2>/dev/null || true
   fi
@@ -315,8 +339,14 @@ start_command = sys.argv[1]
 owner_file = Path(sys.argv[2])
 release_file = Path(sys.argv[3])
 token = sys.argv[4]
-owner_file.write_text(f"{os.getpid()}|{os.getpgrp()}|{token}\n", encoding="utf-8")
 subprocess.Popen(["/bin/bash", start_command])
+try:
+    owner_delay_seconds = float(os.environ.get("TOMOS_OWNER_REGISTER_DELAY_SECONDS", "0"))
+except ValueError:
+    owner_delay_seconds = 0
+if owner_delay_seconds > 0:
+    time.sleep(owner_delay_seconds)
+owner_file.write_text(f"{os.getpid()}|{os.getpgrp()}|{token}\n", encoding="utf-8")
 while not release_file.exists():
     time.sleep(0.05)
 owner_file.unlink(missing_ok=True)

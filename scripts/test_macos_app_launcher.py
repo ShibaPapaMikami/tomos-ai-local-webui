@@ -435,6 +435,71 @@ printf '%s' "$line"
             self.assertNotEqual(completed.returncode, 0)
             self.assertEqual(events.count("start"), 0)
 
+    def test_concurrent_launch_waits_for_locked_listener_until_health_is_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            health_file = temp / "health-sequence"
+            health_file.write_text(f"fail\nfail\n{HEALTHY_TOMOS}\n", encoding="utf-8")
+            event_log = temp / "events.log"
+            dialog_file = temp / "dialog.txt"
+            log_dir = temp / "logs"
+            lock_dir = log_dir / "launcher.lock"
+            lock_dir.mkdir(parents=True)
+            (lock_dir / "owner").write_text(
+                f"{os.getpid()}|test-fingerprint\n", encoding="utf-8"
+            )
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\nprintf 'start\\n' >> \"$TOMOS_TEST_EVENT_LOG\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            try:
+                self.write_command(
+                    bin_dir / "curl",
+                    "#!/usr/bin/env bash\n"
+                    "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                    "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                    "[ \"$line\" != fail ] && printf '%s' \"$line\"\n"
+                    "[ \"$line\" != fail ]\n",
+                )
+                self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\n/bin/sleep 0.01\n")
+                self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
+                self.write_command(
+                    bin_dir / "osascript",
+                    "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > \"$TOMOS_TEST_DIALOG_FILE\"\n",
+                )
+                open_command = bin_dir / "open-browser"
+                self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+                environment = os.environ.copy()
+                environment.update({
+                    "PATH": f"{bin_dir}:{environment['PATH']}",
+                    "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                    "TOMOS_WEB_URL": f"http://127.0.0.1:{port}",
+                    "TOMOS_START_COMMAND": str(start_command),
+                    "TOMOS_OPEN_COMMAND": str(open_command),
+                    "TOMOS_LOG_DIR": str(log_dir),
+                    "TOMOS_TEST_EVENT_LOG": str(event_log),
+                    "TOMOS_TEST_DIALOG_FILE": str(dialog_file),
+                    "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+                })
+                completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+            finally:
+                listener.close()
+
+            self.assertEqual(completed.returncode, 0)
+            self.assertFalse(event_log.exists())
+            self.assertFalse(dialog_file.exists())
+
     def test_concurrent_successful_launches_start_and_open_once(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
@@ -556,6 +621,9 @@ printf '%s' "$line"
         self.assertIn("STARTED_PROCESS_PID=$!", script)
         self.assertIn("os.setsid()", script)
         self.assertIn('kill -TERM -- "-$STARTED_PROCESS_PGID"', script)
+        self.assertIn("TOMOS_OWNER_REGISTER_DELAY_SECONDS", script)
+        self.assertIn("started_process_direct_wrapper_matches", script)
+        self.assertIn("STARTED_PROCESS_COMMAND", script)
         self.assertNotIn("pkill", script)
 
     def test_timeout_cleans_started_process_group_without_touching_unrelated_process(self) -> None:
@@ -672,6 +740,67 @@ printf '%s' "$line"
             else:
                 os.kill(child_pid, 15)
                 self.fail("親終了後に残った子プロセスをcleanupできませんでした")
+
+    def test_timeout_cleans_wrapper_group_when_owner_registration_is_delayed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            health_file = temp / "health-sequence"
+            health_file.write_text("fail\n" * 40, encoding="utf-8")
+            child_pid_file = temp / "child.pid"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "/bin/sleep 60 &\n"
+                "printf '%s\\n' \"$!\" > \"$TOMOS_TEST_CHILD_PID\"\n"
+                "wait\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                "[ \"$line\" != fail ] && printf '%s' \"$line\"\n"
+                "[ \"$line\" != fail ]\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\n/bin/sleep 0.01\n")
+            self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+            unrelated = subprocess.Popen(["/bin/sleep", "60"])
+            try:
+                environment = os.environ.copy()
+                environment.update({
+                    "PATH": f"{bin_dir}:{environment['PATH']}",
+                    "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                    "TOMOS_START_COMMAND": str(start_command),
+                    "TOMOS_OPEN_COMMAND": str(open_command),
+                    "TOMOS_LOG_DIR": str(temp / "logs"),
+                    "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_CHILD_PID": str(child_pid_file),
+                    "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+                    "TOMOS_OWNER_REGISTER_DELAY_SECONDS": "1",
+                })
+                completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+                self.assertNotEqual(completed.returncode, 0)
+                child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                for _ in range(50):
+                    try:
+                        os.kill(child_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("owner未登録中に開始した子プロセスが残っています")
+                self.assertIsNone(unrelated.poll())
+            finally:
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
 
     def test_launcher_migrates_legacy_variable_data_before_starting(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -25,6 +25,9 @@
 - `python3 scripts/test_mac_pkg_signing.py` : PASS
 - `node scripts/test-pwa-assets.js` : PASS
 - `python3 scripts/test-agent-reach-routing-smoke.py` : PASS
+- `bash -n scripts/macos-app-launcher.sh scripts/make-release-archives.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh Gemma4_12B_Web.command` : PASS
+- `PYTHONPYCACHEPREFIX=/tmp/tomos-pycache python3 -m py_compile server.py` : PASS
+- `git diff --check` : PASS
 - `bash -n scripts/macos-app-launcher.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh` : PASS
 - `python3 -m py_compile server.py` : PASS
 - `git diff --check` : PASS
@@ -70,3 +73,17 @@
 - 構文、`py_compile`、`git diff --check` : PASS
 
 `python3 scripts/test_server_helpers.py` のOCR仮想環境不足による既存失敗は継続している。
+
+## 追加残Important修正
+
+1. 有効なランチャーロックの所有PIDと開始時刻が一致する間は、health未readyでもTCPポート占有を別サービス競合として扱わず、health成功まで待機する。ロック所有者が無効な場合のTCP競合停止は維持した。
+2. 監視ラッパーはownerファイル登録を待たず、直接起動したPIDの開始時刻を直ちに記録する。owner未登録時でもPIDと開始時刻、専用PGIDを照合して自分のグループだけを終了し、専用PGID化前はラッパーPIDだけを終了する。
+
+### 追加残Important検証
+
+- `python3 scripts/test_macos_app_launcher.py` : PASS（有効ロック＋TCP確保＋health待機、owner未登録1秒遅延中の子プロセスcleanup、無関係プロセス生存を含む）
+- `python3 scripts/test_macos_app_bundle.py` : PASS
+- `python3 scripts/test_tomos_app_data.py` : PASS
+- `python3 scripts/test_mac_pkg_signing.py` : PASS
+- `node scripts/test-pwa-assets.js` : PASS
+- `python3 scripts/test-agent-reach-routing-smoke.py` : PASS
