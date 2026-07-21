@@ -123,3 +123,21 @@
 - `bash -n scripts/macos-app-launcher.sh scripts/make-release-archives.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh Gemma4_12B_Web.command` : PASS
 - `PYTHONPYCACHEPREFIX=/tmp/tomos-pycache python3 -m py_compile server.py` : PASS
 - `git diff --check` : PASS
+
+## 残Important修正（ready後クラッシュ）
+
+1. 監視プロセスはready後と実子起動後も、正常なreleaseを受けるまで親ランチャーPIDと開始時刻を監視するようにした。
+2. 親がSIGKILLまたはクラッシュで消えた場合は、監視プロセスが専用PGID全体を終了し、固有handshakeファイルを削除して自終了する。
+
+### 残Important検証（ready後クラッシュ）
+
+- テスト先行で、ready後・health成功前に親ランチャーをSIGKILLして再起動するfixtureを追加した。旧監視・旧子プロセスの消滅、再起動側の起動コマンド1回、無関係プロセス生存を確認した。
+- `python3 scripts/test_macos_app_launcher.py` : PASS（22 tests）
+- `python3 scripts/test_macos_app_bundle.py` : PASS（14 tests）
+- `python3 scripts/test_tomos_app_data.py` : PASS
+- `python3 scripts/test_mac_pkg_signing.py` : PASS
+- `node scripts/test-pwa-assets.js` : PASS
+- `python3 scripts/test-agent-reach-routing-smoke.py` : PASS
+- `bash -n scripts/macos-app-launcher.sh scripts/make-release-archives.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh Gemma4_12B_Web.command` : PASS
+- `PYTHONPYCACHEPREFIX=/tmp/tomos-pycache python3 -m py_compile server.py` : PASS
+- `git diff --check` : PASS

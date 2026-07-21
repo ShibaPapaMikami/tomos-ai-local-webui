@@ -344,6 +344,7 @@ rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE"
 GEMMA_SKIP_BROWSER_OPEN=1 nohup python3 -B -c '
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -401,6 +402,10 @@ if release_requested():
     raise SystemExit(0)
 subprocess.Popen(["/bin/bash", start_command])
 while not release_requested():
+    if not parent_is_current():
+        cleanup_handshake()
+        os.killpg(os.getpgrp(), signal.SIGTERM)
+        raise SystemExit(0)
     time.sleep(0.05)
 cleanup_handshake()
 ' "$START_COMMAND" "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE" "$STARTED_PROCESS_TOKEN" "$PARENT_LAUNCHER_PID" "$PARENT_LAUNCHER_FINGERPRINT" >"$LOG_DIR/launcher.log" 2>&1 &

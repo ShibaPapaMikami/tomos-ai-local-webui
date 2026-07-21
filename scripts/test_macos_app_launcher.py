@@ -626,6 +626,7 @@ printf '%s' "$line"
         self.assertIn("wait_for_started_process_owner", script)
         self.assertIn("HANDSHAKE_ID", script)
         self.assertIn("parent_is_current", script)
+        self.assertIn("os.killpg", script)
         self.assertNotIn('PROCESS_READY_FILE="$LOG_DIR/started-process.ready"', script)
         self.assertNotIn("process_command", script)
         self.assertNotIn("pkill", script)
@@ -980,6 +981,117 @@ printf '%s' "$line"
                         os.kill(old_monitor_pid, 15)
                     except ProcessLookupError:
                         pass
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+
+    def test_killed_parent_after_ready_cleans_old_child_before_next_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            event_log = temp / "events.log"
+            monitor_pid_file = temp / "monitor-pids"
+            old_child_pid_file = temp / "old-child.pid"
+            server_ready_file = temp / "server-ready"
+            old_start_command = temp / "old-start.command"
+            old_start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "/bin/sleep 60 &\n"
+                "printf '%s\\n' \"$!\" > \"$TOMOS_TEST_OLD_CHILD_PID\"\n"
+                "wait\n",
+                encoding="utf-8",
+            )
+            old_start_command.chmod(0o755)
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf 'start\\n' >> \"$TOMOS_TEST_EVENT_LOG\"\n"
+                "touch \"$TOMOS_TEST_SERVER_READY\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "[ -f \"$TOMOS_TEST_SERVER_READY\" ] || exit 1\n"
+                "printf '%s' \"$TOMOS_TEST_HEALTHY\"\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\n/bin/sleep 0.01\n")
+            self.write_command(
+                bin_dir / "nohup",
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$$\" >> \"$TOMOS_TEST_MONITOR_PIDS\"\n"
+                "exec \"$@\"\n",
+            )
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+            unrelated = subprocess.Popen(["/bin/sleep", "60"])
+            first: subprocess.Popen[str] | None = None
+            old_monitor_pid: int | None = None
+            old_child_pid: int | None = None
+            try:
+                environment = os.environ.copy()
+                environment.update({
+                    "PATH": f"{bin_dir}:{environment['PATH']}",
+                    "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                    "TOMOS_START_COMMAND": str(old_start_command),
+                    "TOMOS_OPEN_COMMAND": str(open_command),
+                    "TOMOS_LOG_DIR": str(temp / "logs"),
+                    "TOMOS_TEST_EVENT_LOG": str(event_log),
+                    "TOMOS_TEST_MONITOR_PIDS": str(monitor_pid_file),
+                    "TOMOS_TEST_OLD_CHILD_PID": str(old_child_pid_file),
+                    "TOMOS_TEST_SERVER_READY": str(server_ready_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
+                    "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+                    "TOMOS_MONITOR_READY_TIMEOUT_SECONDS": "8",
+                })
+                first = subprocess.Popen(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+                for _ in range(100):
+                    if old_child_pid_file.exists() and monitor_pid_file.exists():
+                        break
+                    time.sleep(0.01)
+                self.assertTrue(old_child_pid_file.exists())
+                self.assertTrue(monitor_pid_file.exists())
+                old_child_pid = int(old_child_pid_file.read_text(encoding="utf-8"))
+                old_monitor_pid = int(monitor_pid_file.read_text(encoding="utf-8").splitlines()[0])
+                first.kill()
+                self.assertNotEqual(first.wait(timeout=5), 0)
+                for _ in range(200):
+                    monitor_alive = child_alive = True
+                    try:
+                        os.kill(old_monitor_pid, 0)
+                    except ProcessLookupError:
+                        monitor_alive = False
+                    try:
+                        os.kill(old_child_pid, 0)
+                    except ProcessLookupError:
+                        child_alive = False
+                    if not monitor_alive and not child_alive:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("ready後に親を失った旧監視または旧子プロセスが残っています")
+                self.assertEqual(list((temp / "logs").glob("started-process.*")), [])
+
+                second_environment = environment.copy()
+                second_environment["TOMOS_START_COMMAND"] = str(start_command)
+                second = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=second_environment)
+                self.assertEqual(second.returncode, 0)
+                events = event_log.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(events.count("start"), 1)
+                self.assertIsNone(unrelated.poll())
+            finally:
+                if first is not None and first.poll() is None:
+                    first.kill()
+                    first.wait(timeout=5)
+                for process_id in (old_monitor_pid, old_child_pid):
+                    if process_id is not None:
+                        try:
+                            os.kill(process_id, 15)
+                        except ProcessLookupError:
+                            pass
                 unrelated.terminate()
                 unrelated.wait(timeout=5)
 
