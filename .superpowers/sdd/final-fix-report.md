@@ -53,3 +53,20 @@
 - `git diff --check` : PASS
 
 `python3 scripts/test_server_helpers.py` は前回と同じOCR仮想環境不足による既存失敗であり、今回の変更とは無関係。
+
+## 残Important修正
+
+1. 起動監視ラッパーを専用プロセスグループの所有者として残し、トークン、PID、PGID、開始時刻を照合してから失敗時にそのグループだけを終了するようにした。開始シェルが先に終了しても子プロセスをcleanupする。
+2. healthの`curl`へconnect/max timeoutを指定し、healthが確認できない場合は短いTCP接続確認を行う。非HTTP・無応答のリスナーも競合として起動を停止する。
+
+### 残Important検証
+
+- `python3 scripts/test_macos_app_bundle.py` : PASS
+- `python3 scripts/test_macos_app_launcher.py` : PASS（親先行終了、非HTTP、無応答を含む）
+- `python3 scripts/test_tomos_app_data.py` : PASS
+- `python3 scripts/test_mac_pkg_signing.py` : PASS
+- `node scripts/test-pwa-assets.js` : PASS
+- `python3 scripts/test-agent-reach-routing-smoke.py` : PASS
+- 構文、`py_compile`、`git diff --check` : PASS
+
+`python3 scripts/test_server_helpers.py` のOCR仮想環境不足による既存失敗は継続している。

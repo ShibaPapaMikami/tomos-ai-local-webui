@@ -14,13 +14,18 @@ EXPECTED_APP_VERSION="${TOMOS_APP_VERSION:-0.8.220}"
 APP_SUPPORT_DIR="${TOMOS_APP_SUPPORT_DIR:-$HOME/Library/Application Support/TOMOS AI}"
 LEGACY_ROOT="${TOMOS_LEGACY_ROOT:-/Applications/Gemma4_12B}"
 STARTED_PROCESS_PID=""
+STARTED_PROCESS_PGID=""
+STARTED_PROCESS_TOKEN=""
+STARTED_PROCESS_FINGERPRINT=""
+PROCESS_OWNER_FILE="$LOG_DIR/started-process.owner"
+PROCESS_RELEASE_FILE="$LOG_DIR/started-process.release"
 STARTUP_SUCCEEDED=0
 
 health_state() {
   local response
   local status_code
   local payload
-  if ! response="$(curl -sS -i "$WEB_URL/api/health" 2>/dev/null)"; then
+  if ! response="$(curl -sS -i --connect-timeout "${TOMOS_CURL_CONNECT_TIMEOUT:-1}" --max-time "${TOMOS_CURL_MAX_TIME:-2}" "$WEB_URL/api/health" 2>/dev/null)"; then
     printf '%s\n' "unreachable"
     return
   fi
@@ -56,6 +61,25 @@ health_ok() {
   [ "$(health_state)" = "ready" ]
 }
 
+tcp_port_is_occupied() {
+  python3 -B - "$WEB_URL" "${TOMOS_TCP_CONNECT_TIMEOUT:-0.25}" <<'PY'
+import socket
+import sys
+from urllib.parse import urlparse
+
+parsed = urlparse(sys.argv[1])
+host = parsed.hostname
+port = parsed.port
+if not host or not port:
+    raise SystemExit(1)
+try:
+    with socket.create_connection((host, port), timeout=float(sys.argv[2])):
+        raise SystemExit(0)
+except OSError:
+    raise SystemExit(1)
+PY
+}
+
 show_start_error() {
   osascript -e 'display dialog "TOMOS AIを起動できませんでした。Ollamaが起動しているか確認してください。" buttons {"OK"} default button "OK" with icon caution' >/dev/null 2>&1 || true
 }
@@ -80,6 +104,10 @@ wait_for_launcher() {
         exit 1
         ;;
     esac
+    if tcp_port_is_occupied; then
+      show_different_app_error
+      exit 1
+    fi
     if [ ! -d "$LOCK_DIR" ]; then
       show_start_error
       exit 1
@@ -160,15 +188,67 @@ if [ "$INITIAL_HEALTH_STATE" = "different-app" ]; then
   show_different_app_error
   exit 1
 fi
+if tcp_port_is_occupied; then
+  show_different_app_error
+  exit 1
+fi
 
 mkdir -p "$LOG_DIR"
 if ! acquire_lock; then
   wait_for_launcher
 fi
 
+read_started_process_owner() {
+  local owner_pid
+  local owner_pgid
+  local owner_token
+  [ -r "$PROCESS_OWNER_FILE" ] || return 1
+  IFS='|' read -r owner_pid owner_pgid owner_token < "$PROCESS_OWNER_FILE" || true
+  case "$owner_pid:$owner_pgid" in
+    *[!0-9:]*|:*) return 1 ;;
+  esac
+  [ "$owner_pid" = "$STARTED_PROCESS_PID" ] || return 1
+  [ "$owner_token" = "$STARTED_PROCESS_TOKEN" ] || return 1
+  STARTED_PROCESS_PGID="$owner_pgid"
+}
+
+started_process_owner_matches() {
+  local current_pgid
+  local current_fingerprint
+  read_started_process_owner || return 1
+  current_pgid="$(ps -p "$STARTED_PROCESS_PID" -o pgid= 2>/dev/null | tr -d ' ')"
+  current_fingerprint="$(process_fingerprint "$STARTED_PROCESS_PID")"
+  [ "$current_pgid" = "$STARTED_PROCESS_PGID" ] || return 1
+  [ "$STARTED_PROCESS_PGID" = "$STARTED_PROCESS_PID" ] || return 1
+  [ -n "$STARTED_PROCESS_FINGERPRINT" ] || return 1
+  [ "$current_fingerprint" = "$STARTED_PROCESS_FINGERPRINT" ]
+}
+
+register_started_process() {
+  local owner_fingerprint
+  for _ in $(seq 1 40); do
+    if read_started_process_owner; then
+      owner_fingerprint="$(process_fingerprint "$STARTED_PROCESS_PID")"
+      if [ -n "$owner_fingerprint" ]; then
+        STARTED_PROCESS_FINGERPRINT="$owner_fingerprint"
+        return 0
+      fi
+    fi
+    /bin/sleep 0.01
+  done
+  return 1
+}
+
 terminate_started_process() {
-  if [ -n "$STARTED_PROCESS_PID" ] && kill -0 "$STARTED_PROCESS_PID" 2>/dev/null; then
-    kill -TERM -- "-$STARTED_PROCESS_PID" 2>/dev/null || true
+  if started_process_owner_matches; then
+    kill -TERM -- "-$STARTED_PROCESS_PGID" 2>/dev/null || true
+    wait "$STARTED_PROCESS_PID" 2>/dev/null || true
+  fi
+}
+
+release_started_process() {
+  if started_process_owner_matches; then
+    : > "$PROCESS_RELEASE_FILE"
     wait "$STARTED_PROCESS_PID" 2>/dev/null || true
   fi
 }
@@ -176,7 +256,10 @@ terminate_started_process() {
 cleanup_launcher() {
   if [ "$STARTUP_SUCCEEDED" -ne 1 ]; then
     terminate_started_process
+  else
+    release_started_process
   fi
+  rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" 2>/dev/null || true
   rm -f "$LOCK_OWNER_FILE" 2>/dev/null || true
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
@@ -188,6 +271,10 @@ if [ "$LOCK_HEALTH_STATE" = "ready" ]; then
   exit 0
 fi
 if [ "$LOCK_HEALTH_STATE" = "different-app" ]; then
+  show_different_app_error
+  exit 1
+fi
+if tcp_port_is_occupied; then
   show_different_app_error
   exit 1
 fi
@@ -213,14 +300,32 @@ migrate_legacy_data() {
 
 migrate_legacy_data
 export TOMOS_APP_SUPPORT_DIR="$APP_SUPPORT_DIR"
+STARTED_PROCESS_TOKEN="$(python3 -B -c 'import secrets; print(secrets.token_hex(24))')"
+rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE"
 
 GEMMA_SKIP_BROWSER_OPEN=1 nohup python3 -B -c '
 import os
+from pathlib import Path
+import subprocess
 import sys
+import time
+
 os.setsid()
-os.execv("/bin/bash", ["/bin/bash", sys.argv[1]])
-' "$START_COMMAND" >"$LOG_DIR/launcher.log" 2>&1 &
+start_command = sys.argv[1]
+owner_file = Path(sys.argv[2])
+release_file = Path(sys.argv[3])
+token = sys.argv[4]
+owner_file.write_text(f"{os.getpid()}|{os.getpgrp()}|{token}\n", encoding="utf-8")
+subprocess.Popen(["/bin/bash", start_command])
+while not release_file.exists():
+    time.sleep(0.05)
+owner_file.unlink(missing_ok=True)
+' "$START_COMMAND" "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$STARTED_PROCESS_TOKEN" >"$LOG_DIR/launcher.log" 2>&1 &
 STARTED_PROCESS_PID=$!
+if ! register_started_process; then
+  show_start_error
+  exit 1
+fi
 
 for _ in $(seq 1 30); do
   sleep 1

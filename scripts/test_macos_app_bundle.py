@@ -255,7 +255,13 @@ class MacosAppBundleTests(unittest.TestCase):
                 "sleep": "#!/usr/bin/env bash\nexit 0\n",
                 "nohup": "#!/usr/bin/env bash\nexec \"$@\"\n",
                 "osascript": "#!/usr/bin/env bash\nexit 0\n",
-                "ps": "#!/usr/bin/env bash\nprintf 'bundle-test\\n'\n",
+                "ps": (
+                    "#!/usr/bin/env bash\n"
+                    "case \"$*\" in\n"
+                    "  *pgid=*) printf '%s\\n' \"$2\" ;;\n"
+                    "  *) printf 'bundle-test\\n' ;;\n"
+                    "esac\n"
+                ),
                 "open-browser": "#!/usr/bin/env bash\nprintf 'open\\n' >> \"$TOMOS_TEST_EVENTS\"\n",
             }.items():
                 command = bin_dir / name
