@@ -14,6 +14,12 @@ def test_pkg_build_requires_developer_id_installer() -> None:
     assert 'pkgutil --check-signature "$OUT_PKG"' in script
 
 
+def test_pkg_contains_signed_app_bundle_instead_of_legacy_folder() -> None:
+    script = (ROOT / "scripts" / "make-mac-pkg.sh").read_text(encoding="utf-8")
+    assert 'make-mac-app.sh" "$APP_VERSION" "$WORK_DIR/pkgroot/Applications/TOMOS AI.app"' in script
+    assert 'pkgroot/Applications/Gemma4_12B' not in script
+
+
 def test_notarization_script_verifies_every_release_gate() -> None:
     script = (ROOT / "scripts" / "notarize-mac-pkg.sh").read_text(encoding="utf-8")
     assert 'pkgutil --check-signature "$PKG_PATH"' in script
@@ -27,5 +33,6 @@ def test_notarization_script_verifies_every_release_gate() -> None:
 
 if __name__ == "__main__":
     test_pkg_build_requires_developer_id_installer()
+    test_pkg_contains_signed_app_bundle_instead_of_legacy_folder()
     test_notarization_script_verifies_every_release_gate()
     print("macOS PKG signing tests: OK")

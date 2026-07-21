@@ -21,7 +21,6 @@ fi
 
 TAG="v${APP_VERSION#v}"
 DIST_DIR="$ROOT_DIR/dist"
-MAC_ZIP="$DIST_DIR/TOMOS_AI-${TAG}-mac.zip"
 OUT_PKG="$DIST_DIR/TOMOS_AI-${TAG}-mac.pkg"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemma4-pkg.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -52,20 +51,8 @@ if [ -z "$SIGNING_IDENTITY" ]; then
   fi
 fi
 
-if [ ! -f "$MAC_ZIP" ]; then
-  bash "$ROOT_DIR/scripts/make-release-archives.sh" "$APP_VERSION"
-fi
-
-mkdir -p "$WORK_DIR/unzip" "$WORK_DIR/pkgroot/Applications"
-unzip -q "$MAC_ZIP" -d "$WORK_DIR/unzip"
-
-PAYLOAD_DIR="$(find "$WORK_DIR/unzip" -maxdepth 1 -type d -name "Gemma4_12B-${TAG}-mac" -print -quit)"
-if [ -z "$PAYLOAD_DIR" ]; then
-  echo "Mac用ZIPの中に Gemma4_12B-${TAG}-mac が見つかりません。" >&2
-  exit 1
-fi
-
-cp -R "$PAYLOAD_DIR" "$WORK_DIR/pkgroot/Applications/Gemma4_12B"
+mkdir -p "$WORK_DIR/pkgroot/Applications"
+bash "$ROOT_DIR/scripts/make-mac-app.sh" "$APP_VERSION" "$WORK_DIR/pkgroot/Applications/TOMOS AI.app"
 
 pkgbuild \
   --root "$WORK_DIR/pkgroot" \
