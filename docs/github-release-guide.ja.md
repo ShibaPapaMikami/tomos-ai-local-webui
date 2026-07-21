@@ -28,7 +28,7 @@ bash scripts/make-release-archives.sh 0.8.190
 
 ## ネイティブインストーラーを作る
 
-macOS の `.pkg` はローカルで作れます。
+macOS の `.pkg` は、Developer ID Installer証明書が登録されたMacで署名して作ります。
 
 ```sh
 bash scripts/make-mac-pkg.sh
@@ -37,6 +37,14 @@ bash scripts/make-mac-pkg.sh
 作成されるファイル:
 
 - `dist/TOMOS_AI-vX.X.X-mac.pkg`
+
+公開前にApple公証を行います。
+
+```sh
+bash scripts/notarize-mac-pkg.sh dist/TOMOS_AI-vX.X.X-mac.pkg
+```
+
+この処理は署名確認、公証、チケット添付、Gatekeeper確認のいずれかが失敗すると停止します。
 
 Windows の `.msi` は GitHub Actions の Windows runner で作る想定です。ローカルでは WiX 定義だけ確認できます。
 
@@ -89,8 +97,8 @@ gh release create v0.8.190 \
 
 実行前に `docs/release-checklist.ja.md` を確認します。
 
-## 明日の授業向けの現実的な配布
+## 学生向け配布
 
-ZIP はフォールバックとして必ず残します。`.pkg` と `.msi` は導入しやすい配布物ですが、現時点では未署名のため OS の警告が出る可能性があります。
+macOSでは、Developer ID Installer署名とApple公証を通し、`spctl`で受け入れられたPKGだけを公開します。Gatekeeperの回避操作を学生へ案内しません。
 
-次の段階で、Tauri/Electron を使った独自デスクトップアプリ化、署名付きインストーラー、自動更新へ進めます。
+Windows MSIの署名と自動更新は別の段階で整備します。

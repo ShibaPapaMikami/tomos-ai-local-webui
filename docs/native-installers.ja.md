@@ -10,9 +10,9 @@ Gemma4_12B は、既存の ZIP 配布を残したまま、macOS 用 `.pkg` と W
 - モデルはアプリ内の「言語モデル」から取得します。
 - 古いバージョンは GitHub Releases の古いタグに残します。
 
-## macOS PKGを作る
+## macOS PKGを署名して作る
 
-macOS では Xcode Command Line Tools の `pkgbuild` を使います。
+macOS では、キーチェーンに登録した `Developer ID Installer` を使って署名します。証明書が見つからない場合、未署名PKGは作成しません。
 
 ```sh
 bash scripts/make-mac-pkg.sh
@@ -27,7 +27,13 @@ dist/TOMOS_AI-vX.X.X-mac.pkg
 中身を確認する例:
 
 ```sh
-pkgutil --payload-files dist/TOMOS_AI-vX.X.X-mac.pkg
+pkgutil --check-signature dist/TOMOS_AI-vX.X.X-mac.pkg
+```
+
+Apple公証用の認証情報をキーチェーンへ`tomos-notary`として登録したMacでは、次のコマンドで公証、チケット添付、Gatekeeper確認まで実行します。
+
+```sh
+bash scripts/notarize-mac-pkg.sh dist/TOMOS_AI-vX.X.X-mac.pkg
 ```
 
 インストール先は `/Applications/Gemma4_12B` です。
@@ -69,7 +75,7 @@ ZIP 版は従来どおり `.bat` を直接起動する予備配布です。
 
 ## GitHub Actionsで作る
 
-`.github/workflows/build-installers.yml` を手動実行すると、以下の artifact ができます。
+`.github/workflows/build-installers.yml` を手動実行すると、以下のartifactを作れます。ただし、macOS runnerに署名証明書がない場合は、安全のためMac用PKGの作成を失敗させます。公開用Mac PKGは当面、署名証明書を登録したMacで作成・公証します。
 手動実行時は `version` に `0.8.190` のようなアプリ版を入れてください。Actions の実行名、artifact 名、ジョブ概要に同じバージョンが表示されます。
 
 - `tomos-ai-mac-pkg-X.X.X`
@@ -84,8 +90,8 @@ Release に添付する基本セット:
 
 ## 注意
 
-- 現時点の `.pkg` / `.msi` は未署名です。macOS や Windows で警告が出る可能性があります。
-- 販売版では署名、公証、自動更新を別途整備します。
+- macOS PKGはDeveloper ID Installer署名とApple公証を通したものだけを公開します。
+- Windows MSIの署名は別途整備が必要です。Windowsで警告が出る可能性があります。
 - モデルを同梱しないため、初回起動後に必要なモデルをアプリ内で取得します。
 
 ## 将来フェーズ: 内部名とインストール先の移行

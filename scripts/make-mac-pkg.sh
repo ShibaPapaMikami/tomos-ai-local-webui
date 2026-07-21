@@ -25,10 +25,31 @@ MAC_ZIP="$DIST_DIR/TOMOS_AI-${TAG}-mac.zip"
 OUT_PKG="$DIST_DIR/TOMOS_AI-${TAG}-mac.pkg"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemma4-pkg.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
+SIGNING_IDENTITY="${TOMOS_MAC_INSTALLER_IDENTITY:-}"
 
 if ! command -v pkgbuild >/dev/null 2>&1; then
   echo "pkgbuild が見つかりません。Xcode Command Line Tools を入れてください。" >&2
   exit 1
+fi
+
+if [ -z "$SIGNING_IDENTITY" ]; then
+  INSTALLER_IDENTITIES="$(
+    security find-identity -v -p basic 2>/dev/null \
+      | sed -n 's/.*"\(Developer ID Installer:.*\)"/\1/p' \
+      | sort -u
+  )"
+  IDENTITY_COUNT="$(printf '%s\n' "$INSTALLER_IDENTITIES" | sed '/^$/d' | wc -l | tr -d ' ')"
+  if [ "$IDENTITY_COUNT" -eq 1 ]; then
+    SIGNING_IDENTITY="$INSTALLER_IDENTITIES"
+  elif [ "$IDENTITY_COUNT" -eq 0 ]; then
+    echo "Developer ID Installer証明書が見つかりません。未署名PKGは作成しません。" >&2
+    exit 1
+  else
+    echo "Developer ID Installer証明書が複数あります。次のように署名者を指定してください。" >&2
+    echo 'TOMOS_MAC_INSTALLER_IDENTITY="Developer ID Installer: ..." bash scripts/make-mac-pkg.sh' >&2
+    printf '%s\n' "$INSTALLER_IDENTITIES" >&2
+    exit 1
+  fi
 fi
 
 if [ ! -f "$MAC_ZIP" ]; then
@@ -51,12 +72,21 @@ pkgbuild \
   --identifier "jp.local.gemma4-12b" \
   --version "$APP_VERSION" \
   --install-location "/" \
+  --sign "$SIGNING_IDENTITY" \
   "$OUT_PKG"
+
+SIGNATURE_OUTPUT="$(pkgutil --check-signature "$OUT_PKG" 2>&1)"
+printf '%s\n' "$SIGNATURE_OUTPUT"
+if ! printf '%s\n' "$SIGNATURE_OUTPUT" | grep -Fq "$SIGNING_IDENTITY"; then
+  echo "PKGの署名者を確認できませんでした。公開しないでください。" >&2
+  exit 1
+fi
 
 cat <<EOF
 作成しました:
 - $OUT_PKG
 
 確認:
-pkgutil --payload-files "$OUT_PKG" | sed -n '1,40p'
+pkgutil --check-signature "$OUT_PKG"
+bash scripts/notarize-mac-pkg.sh "$OUT_PKG"
 EOF
