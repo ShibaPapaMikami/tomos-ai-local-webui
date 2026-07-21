@@ -56,6 +56,7 @@ copy_common() {
   copy_if_exists "docs/study-pack-import-guide.ja.md" "$target/docs/"
 
   copy_if_exists "scripts/setup-mac.sh" "$target/scripts/"
+  copy_if_exists "scripts/macos-app-launcher.sh" "$target/scripts/"
   copy_if_exists "scripts/setup-windows.ps1" "$target/scripts/"
   copy_if_exists "scripts/start-dev.sh" "$target/scripts/"
   copy_if_exists "scripts/start-comfyui.sh" "$target/scripts/"
