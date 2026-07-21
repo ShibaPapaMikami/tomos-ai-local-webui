@@ -93,5 +93,7 @@ if ! curl -s http://127.0.0.1:11434/api/version >/dev/null; then
   exit 1
 fi
 
-(sleep 1; open -a Safari "$WEB_URL" >/dev/null 2>&1 || true) &
+if [ "${GEMMA_SKIP_BROWSER_OPEN:-0}" != "1" ]; then
+  (sleep 1; open "$WEB_URL" >/dev/null 2>&1 || true) &
+fi
 python3 server.py --host "$WEB_HOST" --port "$WEB_PORT"
