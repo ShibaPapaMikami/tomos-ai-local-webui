@@ -68,6 +68,7 @@ fi
 if [ "$line" = "fail" ] || [ -z "$line" ]; then
   exit 1
 fi
+[ "$line" = "http-404" ] && { printf 'HTTP/1.1 404 Not Found\\r\\n\\r\\n{}'; exit 0; }
 [ "$line" = "ok" ] && line="$TOMOS_TEST_HEALTHY"
 printf '%s' "$line"
 """,
@@ -439,11 +440,86 @@ printf '%s' "$line"
         self.assertEqual(result.open_count, 0)
         self.assertIn("別のTOMOS", result.dialog_text)
 
+    def test_reachable_404_is_not_reused_or_started(self) -> None:
+        result = self.run_launcher(health_sequence=["http-404"])
+        self.assertNotEqual(result.return_code, 0)
+        self.assertEqual(result.start_count, 0)
+        self.assertEqual(result.open_count, 0)
+        self.assertIn("別のTOMOS", result.dialog_text)
+
+    def test_reachable_invalid_json_is_not_reused_or_started(self) -> None:
+        result = self.run_launcher(health_sequence=["not-json"])
+        self.assertNotEqual(result.return_code, 0)
+        self.assertEqual(result.start_count, 0)
+        self.assertEqual(result.open_count, 0)
+        self.assertIn("別のTOMOS", result.dialog_text)
+
     def test_timeout_terminates_only_the_process_started_by_launcher(self) -> None:
         script = LAUNCHER.read_text(encoding="utf-8")
         self.assertIn("STARTED_PROCESS_PID=$!", script)
-        self.assertIn('kill "$STARTED_PROCESS_PID"', script)
+        self.assertIn("os.setsid()", script)
+        self.assertIn('kill -TERM -- "-$STARTED_PROCESS_PID"', script)
         self.assertNotIn("pkill", script)
+
+    def test_timeout_cleans_started_process_group_without_touching_unrelated_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            health_file = temp / "health-sequence"
+            health_file.write_text("fail\n" * 40, encoding="utf-8")
+            child_pid_file = temp / "child.pid"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "/bin/sleep 60 &\n"
+                "printf '%s\\n' \"$!\" > \"$TOMOS_TEST_CHILD_PID\"\n"
+                "wait\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                "[ \"$line\" != fail ] && printf '%s' \"$line\"\n"
+                "[ \"$line\" != fail ]\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\n/bin/sleep 0.01\n")
+            self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+            unrelated = subprocess.Popen(["/bin/sleep", "60"])
+            try:
+                environment = os.environ.copy()
+                environment.update({
+                    "PATH": f"{bin_dir}:{environment['PATH']}",
+                    "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                    "TOMOS_START_COMMAND": str(start_command),
+                    "TOMOS_OPEN_COMMAND": str(open_command),
+                    "TOMOS_LOG_DIR": str(temp / "logs"),
+                    "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_CHILD_PID": str(child_pid_file),
+                    "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+                })
+                completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+                self.assertNotEqual(completed.returncode, 0)
+                child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                for _ in range(50):
+                    try:
+                        os.kill(child_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("ランチャーが開始した子プロセスが残っています")
+                self.assertIsNone(unrelated.poll())
+            finally:
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
 
     def test_launcher_migrates_legacy_variable_data_before_starting(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

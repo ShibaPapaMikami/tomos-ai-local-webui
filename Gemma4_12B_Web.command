@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 cd "$(dirname "$0")"
 
@@ -96,4 +97,4 @@ fi
 if [ "${GEMMA_SKIP_BROWSER_OPEN:-0}" != "1" ]; then
   (sleep 1; open "$WEB_URL" >/dev/null 2>&1 || true) &
 fi
-python3 server.py --host "$WEB_HOST" --port "$WEB_PORT"
+python3 -B server.py --host "$WEB_HOST" --port "$WEB_PORT"

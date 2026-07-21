@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 RESOURCE_ROOT="${TOMOS_RESOURCE_ROOT:-$(cd "$(dirname "$0")/../Resources/Gemma4_12B" && pwd)}"
 WEB_URL="${TOMOS_WEB_URL:-http://127.0.0.1:54876}"
@@ -16,24 +17,39 @@ STARTED_PROCESS_PID=""
 STARTUP_SUCCEEDED=0
 
 health_state() {
+  local response
+  local status_code
   local payload
-  if ! payload="$(curl -fsS "$WEB_URL/api/health" 2>/dev/null)"; then
+  if ! response="$(curl -sS -i "$WEB_URL/api/health" 2>/dev/null)"; then
     printf '%s\n' "unreachable"
     return
   fi
-  python3 -c '
+  payload="$response"
+  if [[ "$response" == HTTP/* ]]; then
+    status_code="$(printf '%s\n' "$response" | sed -n '1s/HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p')"
+    if [[ "$response" == *$'\r\n\r\n'* ]]; then
+      payload="${response#*$'\r\n\r\n'}"
+    else
+      payload="${response#*$'\n\n'}"
+    fi
+    if [ "$status_code" != "200" ]; then
+      printf '%s\n' "different-app"
+      return
+    fi
+  fi
+  python3 -B -c '
 import json
 import sys
 try:
     payload = json.load(sys.stdin)
 except json.JSONDecodeError:
-    print("invalid")
+    print("different-app")
     raise SystemExit(0)
 if payload.get("appVersion") == sys.argv[1]:
     print("ready")
 else:
     print("different-app")
-' "$EXPECTED_APP_VERSION" <<< "$payload" 2>/dev/null || printf '%s\n' "invalid"
+' "$EXPECTED_APP_VERSION" <<< "$payload" 2>/dev/null || printf '%s\n' "different-app"
 }
 
 health_ok() {
@@ -152,7 +168,7 @@ fi
 
 terminate_started_process() {
   if [ -n "$STARTED_PROCESS_PID" ] && kill -0 "$STARTED_PROCESS_PID" 2>/dev/null; then
-    kill "$STARTED_PROCESS_PID" 2>/dev/null || true
+    kill -TERM -- "-$STARTED_PROCESS_PID" 2>/dev/null || true
     wait "$STARTED_PROCESS_PID" 2>/dev/null || true
   fi
 }
@@ -198,7 +214,12 @@ migrate_legacy_data() {
 migrate_legacy_data
 export TOMOS_APP_SUPPORT_DIR="$APP_SUPPORT_DIR"
 
-GEMMA_SKIP_BROWSER_OPEN=1 nohup /bin/bash "$START_COMMAND" >"$LOG_DIR/launcher.log" 2>&1 &
+GEMMA_SKIP_BROWSER_OPEN=1 nohup python3 -B -c '
+import os
+import sys
+os.setsid()
+os.execv("/bin/bash", ["/bin/bash", sys.argv[1]])
+' "$START_COMMAND" >"$LOG_DIR/launcher.log" 2>&1 &
 STARTED_PROCESS_PID=$!
 
 for _ in $(seq 1 30); do

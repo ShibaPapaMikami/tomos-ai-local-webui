@@ -22,12 +22,21 @@ fi
 TAG="v${APP_VERSION#v}"
 DIST_DIR="$ROOT_DIR/dist"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemma4-release.XXXXXX")"
-trap 'rm -rf "$WORK_DIR"' EXIT
-
 MAC_ROOT="$WORK_DIR/Gemma4_12B-${TAG}-mac"
 WIN_ROOT="$WORK_DIR/Gemma4_12B-${TAG}-windows"
 
 mkdir -p "$DIST_DIR" "$MAC_ROOT" "$WIN_ROOT"
+MAC_ZIP="$DIST_DIR/TOMOS_AI-${TAG}-mac.zip"
+WIN_ZIP="$DIST_DIR/TOMOS_AI-${TAG}-windows.zip"
+ARCHIVE_TMP_DIR="$(mktemp -d "$DIST_DIR/.tomos-archive.XXXXXX")"
+MAC_ZIP_TMP="$ARCHIVE_TMP_DIR/TOMOS_AI-${TAG}-mac.zip"
+WIN_ZIP_TMP="$ARCHIVE_TMP_DIR/TOMOS_AI-${TAG}-windows.zip"
+
+cleanup() {
+  rm -rf "$WORK_DIR"
+  rm -rf "$ARCHIVE_TMP_DIR"
+}
+trap cleanup EXIT
 
 copy_if_exists() {
   local source="$1"
@@ -95,13 +104,18 @@ find "$MAC_ROOT" -name "*.command" -o -name "*.sh" | while read -r file; do
   chmod +x "$file"
 done
 
-(cd "$WORK_DIR" && zip -qr "$DIST_DIR/TOMOS_AI-${TAG}-mac.zip" "$(basename "$MAC_ROOT")")
-(cd "$WORK_DIR" && zip -qr "$DIST_DIR/TOMOS_AI-${TAG}-windows.zip" "$(basename "$WIN_ROOT")")
+find "$MAC_ROOT" "$WIN_ROOT" -type d -name "__pycache__" -prune -exec rm -rf {} +
+find "$MAC_ROOT" "$WIN_ROOT" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+
+(cd "$WORK_DIR" && zip -qr "$MAC_ZIP_TMP" "$(basename "$MAC_ROOT")")
+(cd "$WORK_DIR" && zip -qr "$WIN_ZIP_TMP" "$(basename "$WIN_ROOT")")
+mv -f "$MAC_ZIP_TMP" "$MAC_ZIP"
+mv -f "$WIN_ZIP_TMP" "$WIN_ZIP"
 
 cat <<EOF
 作成しました:
-- $DIST_DIR/TOMOS_AI-${TAG}-mac.zip
-- $DIST_DIR/TOMOS_AI-${TAG}-windows.zip
+- $MAC_ZIP
+- $WIN_ZIP
 
 GitHub Release には、この2つのZIPを添付してください。
 ネイティブインストーラーを使う場合は、別途 .pkg / .msi も添付してください。

@@ -71,6 +71,56 @@ class MacosAppBundleTests(unittest.TestCase):
             any(name.endswith("/scripts/macos-app-launcher.sh") for name in windows_files)
         )
 
+    def test_failed_archive_build_keeps_existing_archives(self) -> None:
+        version = f"0.0.atomic-{os.getpid()}"
+        tag = f"v{version}"
+        mac_archive = ROOT / "dist" / f"TOMOS_AI-{tag}-mac.zip"
+        windows_archive = ROOT / "dist" / f"TOMOS_AI-{tag}-windows.zip"
+        mac_archive.write_text("stale-mac", encoding="utf-8")
+        windows_archive.write_text("stale-windows", encoding="utf-8")
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                fake_zip = Path(temp_dir) / "zip"
+                fake_zip.write_text(
+                    "#!/usr/bin/env bash\n"
+                    "output=\"$2\"\n"
+                    "case \"$output\" in\n"
+                    "  *windows*) exit 1 ;;\n"
+                    "esac\n"
+                    "printf 'replacement' > \"$output\"\n",
+                    encoding="utf-8",
+                )
+                fake_zip.chmod(0o755)
+                environment = os.environ.copy()
+                environment["PATH"] = f"{temp_dir}:{environment['PATH']}"
+                completed = subprocess.run(
+                    ["/bin/bash", str(MAKE_ARCHIVES), version],
+                    cwd=ROOT,
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertEqual(mac_archive.read_text(encoding="utf-8"), "stale-mac")
+            self.assertEqual(windows_archive.read_text(encoding="utf-8"), "stale-windows")
+        finally:
+            mac_archive.unlink(missing_ok=True)
+            windows_archive.unlink(missing_ok=True)
+
+    def test_release_archive_excludes_python_bytecode(self) -> None:
+        with zipfile.ZipFile(self.mac_zip) as archive:
+            names = archive.namelist()
+        self.assertFalse(any("/__pycache__/" in name or name.endswith((".pyc", ".pyo")) for name in names))
+
+    def test_launch_paths_disable_python_bytecode_writes(self) -> None:
+        app_launcher = (ROOT / "scripts" / "macos-app-launcher.sh").read_text(encoding="utf-8")
+        web_launcher = (ROOT / "Gemma4_12B_Web.command").read_text(encoding="utf-8")
+        self.assertIn("PYTHONDONTWRITEBYTECODE=1", app_launcher)
+        self.assertIn("python3 -B", app_launcher)
+        self.assertIn("PYTHONDONTWRITEBYTECODE=1", web_launcher)
+        self.assertIn("python3 -B server.py", web_launcher)
+
     def test_release_archive_contains_all_local_server_dependencies(self) -> None:
         tree = ast.parse((ROOT / "server.py").read_text(encoding="utf-8"))
         local_modules = {
@@ -176,6 +226,70 @@ class MacosAppBundleTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_generated_app_launch_keeps_signature_and_bundle_clean(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            health_file = temp / "health"
+            health_file.write_text(
+                f"fail\nfail\n{{\"ok\": true, \"appVersion\": \"{self.version}\"}}\n",
+                encoding="utf-8",
+            )
+            events = temp / "events"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\nprintf 'start\\n' >> \"$TOMOS_TEST_EVENTS\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            for name, content in {
+                "curl": (
+                    "#!/usr/bin/env bash\n"
+                    "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                    "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                    "[ \"$line\" != fail ] || exit 1\n"
+                    "printf '%s' \"$line\"\n"
+                ),
+                "sleep": "#!/usr/bin/env bash\nexit 0\n",
+                "nohup": "#!/usr/bin/env bash\nexec \"$@\"\n",
+                "osascript": "#!/usr/bin/env bash\nexit 0\n",
+                "ps": "#!/usr/bin/env bash\nprintf 'bundle-test\\n'\n",
+                "open-browser": "#!/usr/bin/env bash\nprintf 'open\\n' >> \"$TOMOS_TEST_EVENTS\"\n",
+            }.items():
+                command = bin_dir / name
+                command.write_text(content, encoding="utf-8")
+                command.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": f"{bin_dir}:{environment['PATH']}",
+                "TOMOS_START_COMMAND": str(start_command),
+                "TOMOS_OPEN_COMMAND": str(bin_dir / "open-browser"),
+                "TOMOS_LOG_DIR": str(temp / "logs"),
+                "TOMOS_APP_SUPPORT_DIR": str(temp / "Application Support" / "TOMOS AI"),
+                "TOMOS_TEST_EVENTS": str(events),
+                "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                "TOMOS_APP_VERSION": self.version,
+            })
+            completed = subprocess.run(
+                [str(self.app_path / "Contents" / "MacOS" / "TOMOS AI")],
+                cwd=ROOT,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(events.read_text(encoding="utf-8").splitlines(), ["start", "open"])
+            self.assertFalse(any(path.name == "__pycache__" for path in self.app_path.rglob("__pycache__")))
+            verified = subprocess.run(
+                ["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(self.app_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(verified.returncode, 0, verified.stderr)
 
     def run_with_security_output(self, output: str) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temp_dir:
