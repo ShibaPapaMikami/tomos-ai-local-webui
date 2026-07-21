@@ -28,7 +28,7 @@ bash scripts/make-release-archives.sh 0.8.190
 
 ## ネイティブインストーラーを作る
 
-macOS の `.pkg` は、Developer ID Installer証明書が登録されたMacで署名して作ります。
+macOS版は、`TOMOS AI.app`を`Developer ID Application`証明書で署名し、`.pkg`を`Developer ID Installer`証明書で署名して作ります。
 
 ```sh
 bash scripts/make-mac-pkg.sh
@@ -45,6 +45,15 @@ bash scripts/notarize-mac-pkg.sh dist/TOMOS_AI-vX.X.X-mac.pkg
 ```
 
 この処理は署名確認、公証、チケット添付、Gatekeeper確認のいずれかが失敗すると停止します。
+
+公開前に、アプリとPKGを確認します。
+
+```sh
+codesign --verify --deep --strict --verbose=2 "/Applications/TOMOS AI.app"
+pkgutil --check-signature dist/TOMOS_AI-vX.X.X-mac.pkg
+xcrun stapler validate dist/TOMOS_AI-vX.X.X-mac.pkg
+spctl -a -vv -t install dist/TOMOS_AI-vX.X.X-mac.pkg
+```
 
 Windows の `.msi` は GitHub Actions の Windows runner で作る想定です。ローカルでは WiX 定義だけ確認できます。
 
