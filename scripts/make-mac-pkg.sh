@@ -25,6 +25,12 @@ OUT_PKG="$DIST_DIR/TOMOS_AI-${TAG}-mac.pkg"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gemma4-pkg.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 SIGNING_IDENTITY="${TOMOS_MAC_INSTALLER_IDENTITY:-}"
+APPLICATION_IDENTITY="${TOMOS_MAC_APPLICATION_IDENTITY:-}"
+
+if [ "$APPLICATION_IDENTITY" = "-" ] || { [ -n "$APPLICATION_IDENTITY" ] && [[ "$APPLICATION_IDENTITY" != Developer\ ID\ Application:* ]]; }; then
+  echo "TOMOS_MAC_APPLICATION_IDENTITY には Developer ID Application 証明書を指定してください。ad-hoc署名の.appはPKGにできません。" >&2
+  exit 1
+fi
 
 if ! command -v pkgbuild >/dev/null 2>&1; then
   echo "pkgbuild が見つかりません。Xcode Command Line Tools を入れてください。" >&2
@@ -52,7 +58,18 @@ if [ -z "$SIGNING_IDENTITY" ]; then
 fi
 
 mkdir -p "$WORK_DIR/pkgroot/Applications"
-bash "$ROOT_DIR/scripts/make-mac-app.sh" "$APP_VERSION" "$WORK_DIR/pkgroot/Applications/TOMOS AI.app"
+APP_PATH="$WORK_DIR/pkgroot/Applications/TOMOS AI.app"
+bash "$ROOT_DIR/scripts/make-mac-app.sh" "$APP_VERSION" "$APP_PATH"
+
+if ! codesign --verify --deep --strict --verbose=2 "$APP_PATH"; then
+  echo "TOMOS AI.appの署名を検証できませんでした。PKGを作成しません。" >&2
+  exit 1
+fi
+APPLICATION_SIGNATURE="$(codesign -dv --verbose=4 "$APP_PATH" 2>&1 || true)"
+if ! printf '%s\n' "$APPLICATION_SIGNATURE" | grep -Fq "Authority=Developer ID Application:"; then
+  echo "TOMOS AI.appはDeveloper ID Applicationで署名されていません。PKGを作成しません。" >&2
+  exit 1
+fi
 
 pkgbuild \
   --root "$WORK_DIR/pkgroot" \

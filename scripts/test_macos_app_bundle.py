@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import plistlib
+import socket
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -65,6 +70,74 @@ class MacosAppBundleTests(unittest.TestCase):
         self.assertFalse(
             any(name.endswith("/scripts/macos-app-launcher.sh") for name in windows_files)
         )
+
+    def test_release_archive_contains_all_local_server_dependencies(self) -> None:
+        tree = ast.parse((ROOT / "server.py").read_text(encoding="utf-8"))
+        local_modules = {
+            node.module.split(".", 1)[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module
+            and (ROOT / f"{node.module.split('.', 1)[0]}.py").is_file()
+        }
+
+        with zipfile.ZipFile(self.mac_zip) as archive:
+            archived_names = set(archive.namelist())
+
+        for module in local_modules:
+            self.assertTrue(
+                any(name.endswith(f"/{module}.py") for name in archived_names),
+                module,
+            )
+        self.assertTrue(
+            any(name.endswith("/packages/local_context_core/__init__.py") for name in archived_names)
+        )
+
+    def test_release_archive_smoke_starts_packaged_server(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            with zipfile.ZipFile(self.mac_zip) as archive:
+                archive.extractall(temp)
+            release_root = temp / f"Gemma4_12B-{self.tag}-mac"
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            environment = os.environ.copy()
+            environment.update({
+                "HOME": str(temp / "home"),
+                "PYTHONPATH": "",
+                "GEMMA_APP_VERSION": self.version,
+            })
+            process = subprocess.Popen(
+                [sys.executable, "server.py", "--host", "127.0.0.1", "--port", str(port)],
+                cwd=release_root,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                for _ in range(40):
+                    if process.poll() is not None:
+                        break
+                    try:
+                        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=0.2) as response:
+                            payload = response.read().decode("utf-8")
+                        self.assertIn(self.version, payload)
+                        return
+                    except OSError:
+                        time.sleep(0.05)
+                stdout, stderr = process.communicate(timeout=1)
+                self.fail(f"配布アーカイブのserver.pyを起動できませんでした\nstdout:\n{stdout}\nstderr:\n{stderr}")
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.communicate(timeout=5)
+
+    def test_make_app_rebuilds_archive_from_current_source(self) -> None:
+        script = MAKE_APP.read_text(encoding="utf-8")
+        self.assertIn('bash "$ROOT_DIR/scripts/make-release-archives.sh" "$APP_VERSION"', script)
+        self.assertNotIn('if [ ! -f "$MAC_ZIP" ]', script)
 
     def test_generated_bundle_has_required_structure(self) -> None:
         executable = self.app_path / "Contents" / "MacOS" / "TOMOS AI"

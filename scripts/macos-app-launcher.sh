@@ -9,21 +9,61 @@ LOG_DIR="${TOMOS_LOG_DIR:-$HOME/Library/Logs/TOMOS AI}"
 LOCK_DIR="${TOMOS_LAUNCH_LOCK_DIR:-$LOG_DIR/launcher.lock}"
 LOCK_OWNER_FILE="$LOCK_DIR/owner"
 LOCK_STALE_SECONDS="${TOMOS_LOCK_STALE_SECONDS:-300}"
+EXPECTED_APP_VERSION="${TOMOS_APP_VERSION:-0.8.220}"
+APP_SUPPORT_DIR="${TOMOS_APP_SUPPORT_DIR:-$HOME/Library/Application Support/TOMOS AI}"
+LEGACY_ROOT="${TOMOS_LEGACY_ROOT:-/Applications/Gemma4_12B}"
+STARTED_PROCESS_PID=""
+STARTUP_SUCCEEDED=0
+
+health_state() {
+  local payload
+  if ! payload="$(curl -fsS "$WEB_URL/api/health" 2>/dev/null)"; then
+    printf '%s\n' "unreachable"
+    return
+  fi
+  python3 -c '
+import json
+import sys
+try:
+    payload = json.load(sys.stdin)
+except json.JSONDecodeError:
+    print("invalid")
+    raise SystemExit(0)
+if payload.get("appVersion") == sys.argv[1]:
+    print("ready")
+else:
+    print("different-app")
+' "$EXPECTED_APP_VERSION" <<< "$payload" 2>/dev/null || printf '%s\n' "invalid"
+}
 
 health_ok() {
-  curl -fsS "$WEB_URL/api/health" >/dev/null 2>&1
+  [ "$(health_state)" = "ready" ]
 }
 
 show_start_error() {
   osascript -e 'display dialog "TOMOS AIを起動できませんでした。Ollamaが起動しているか確認してください。" buttons {"OK"} default button "OK" with icon caution' >/dev/null 2>&1 || true
 }
 
+show_different_app_error() {
+  osascript -e 'display dialog "別のTOMOSまたは古いバージョンのサーバーがこのポートで動作しています。終了してからTOMOS AIを開き直してください。" buttons {"OK"} default button "OK" with icon caution' >/dev/null 2>&1 || true
+}
+
+show_missing_start_command_error() {
+  osascript -e 'display dialog "TOMOS AIの起動ファイルが見つかりません。アプリを入れ直してください。" buttons {"OK"} default button "OK" with icon caution' >/dev/null 2>&1 || true
+}
+
 wait_for_launcher() {
   for _ in $(seq 1 30); do
     sleep 1
-    if health_ok; then
-      exit 0
-    fi
+    case "$(health_state)" in
+      ready)
+        exit 0
+        ;;
+      different-app)
+        show_different_app_error
+        exit 1
+        ;;
+    esac
     if [ ! -d "$LOCK_DIR" ]; then
       show_start_error
       exit 1
@@ -95,9 +135,14 @@ acquire_lock() {
   printf '%s|%s\n' "$$" "$owner_fingerprint" > "$LOCK_OWNER_FILE"
 }
 
-if health_ok; then
+INITIAL_HEALTH_STATE="$(health_state)"
+if [ "$INITIAL_HEALTH_STATE" = "ready" ]; then
   "$OPEN_COMMAND" "$WEB_URL"
   exit 0
+fi
+if [ "$INITIAL_HEALTH_STATE" = "different-app" ]; then
+  show_different_app_error
+  exit 1
 fi
 
 mkdir -p "$LOG_DIR"
@@ -105,24 +150,68 @@ if ! acquire_lock; then
   wait_for_launcher
 fi
 
-cleanup_lock() {
+terminate_started_process() {
+  if [ -n "$STARTED_PROCESS_PID" ] && kill -0 "$STARTED_PROCESS_PID" 2>/dev/null; then
+    kill "$STARTED_PROCESS_PID" 2>/dev/null || true
+    wait "$STARTED_PROCESS_PID" 2>/dev/null || true
+  fi
+}
+
+cleanup_launcher() {
+  if [ "$STARTUP_SUCCEEDED" -ne 1 ]; then
+    terminate_started_process
+  fi
   rm -f "$LOCK_OWNER_FILE" 2>/dev/null || true
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
-trap cleanup_lock EXIT HUP INT TERM
+trap cleanup_launcher EXIT HUP INT TERM
 
-if health_ok; then
+LOCK_HEALTH_STATE="$(health_state)"
+if [ "$LOCK_HEALTH_STATE" = "ready" ]; then
   "$OPEN_COMMAND" "$WEB_URL"
   exit 0
 fi
+if [ "$LOCK_HEALTH_STATE" = "different-app" ]; then
+  show_different_app_error
+  exit 1
+fi
+
+if [ ! -x "$START_COMMAND" ]; then
+  show_missing_start_command_error
+  exit 1
+fi
+
+migrate_legacy_data() {
+  local relative_path
+  local source_path
+  local destination_path
+  mkdir -p "$APP_SUPPORT_DIR"
+  for relative_path in ".gemma4-data" "data/person-photos"; do
+    source_path="$LEGACY_ROOT/$relative_path"
+    destination_path="$APP_SUPPORT_DIR/$relative_path"
+    if [ -d "$source_path" ] && [ ! -e "$destination_path" ]; then
+      cp -R "$source_path" "$destination_path"
+    fi
+  done
+}
+
+migrate_legacy_data
+export TOMOS_APP_SUPPORT_DIR="$APP_SUPPORT_DIR"
 
 GEMMA_SKIP_BROWSER_OPEN=1 nohup /bin/bash "$START_COMMAND" >"$LOG_DIR/launcher.log" 2>&1 &
+STARTED_PROCESS_PID=$!
 
 for _ in $(seq 1 30); do
   sleep 1
-  if health_ok; then
+  POLL_HEALTH_STATE="$(health_state)"
+  if [ "$POLL_HEALTH_STATE" = "ready" ]; then
+    STARTUP_SUCCEEDED=1
     "$OPEN_COMMAND" "$WEB_URL"
     exit 0
+  fi
+  if [ "$POLL_HEALTH_STATE" = "different-app" ]; then
+    show_different_app_error
+    exit 1
   fi
 done
 

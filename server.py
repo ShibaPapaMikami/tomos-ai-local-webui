@@ -83,11 +83,13 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-KNOWLEDGE_DB_PATH = default_db_path(ROOT)
-CONTEXT_DB_PATH = context_db_path(ROOT)
-CONTRACT_DB_PATH = default_contract_db_path(ROOT)
-PERSON_PHOTO_DIR = ROOT / "data" / "person-photos"
-STUDY_PACK_INSTALL_ROOT = ROOT / ".gemma4-data" / "study-packs"
+APP_SUPPORT_DIR = os.environ.get("TOMOS_APP_SUPPORT_DIR", "").strip()
+PERSISTENT_ROOT = Path(APP_SUPPORT_DIR).expanduser() if APP_SUPPORT_DIR else ROOT
+KNOWLEDGE_DB_PATH = default_db_path(PERSISTENT_ROOT)
+CONTEXT_DB_PATH = context_db_path(PERSISTENT_ROOT)
+CONTRACT_DB_PATH = default_contract_db_path(PERSISTENT_ROOT)
+PERSON_PHOTO_DIR = PERSISTENT_ROOT / "data" / "person-photos"
+STUDY_PACK_INSTALL_ROOT = PERSISTENT_ROOT / ".gemma4-data" / "study-packs"
 NOTE_ARTICLE_PACK_VERSION = "0.1.0"
 NOTE_ARTICLE_PACK_RELEASE_URL = (
     "https://github.com/ShibaPapaMikami/tomos-ai-local-webui/releases/download/"
@@ -394,7 +396,7 @@ IGNORED_DIRS = {
 }
 CODEGRAPH_DIR_NAME = ".codegraph"
 CODEGRAPH_SUMMARY_FILE = "summary.json"
-CODEGRAPH_APP_CACHE_DIR = ROOT / ".gemma4-data" / "codegraph"
+CODEGRAPH_APP_CACHE_DIR = PERSISTENT_ROOT / ".gemma4-data" / "codegraph"
 CODEGRAPH_MAX_FILES = 350
 CODEGRAPH_MAX_FILE_BYTES = 220_000
 CODEGRAPH_MAX_SYMBOLS_PER_FILE = 24

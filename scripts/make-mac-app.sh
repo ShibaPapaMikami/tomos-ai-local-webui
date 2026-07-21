@@ -71,14 +71,12 @@ if [ "$SIGNING_IDENTITY" != "-" ] && [[ "$SIGNING_IDENTITY" != Developer\ ID\ Ap
   exit 1
 fi
 
-if [ ! -f "$MAC_ZIP" ]; then
-  bash "$ROOT_DIR/scripts/make-release-archives.sh" "$APP_VERSION"
-fi
-
 if [ -e "$OUTPUT_APP" ]; then
   echo "出力先が既に存在します: $OUTPUT_APP" >&2
   exit 1
 fi
+
+bash "$ROOT_DIR/scripts/make-release-archives.sh" "$APP_VERSION"
 
 mkdir -p "$WORK_DIR/unzip" "$WORK_DIR/TOMOS.iconset" "$(dirname "$OUTPUT_APP")"
 unzip -q "$MAC_ZIP" -d "$WORK_DIR/unzip"

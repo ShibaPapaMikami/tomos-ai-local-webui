@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "scripts" / "macos-app-launcher.sh"
+HEALTHY_TOMOS = '{"ok": true, "appVersion": "0.8.220"}'
 
 
 @dataclass
@@ -25,7 +26,19 @@ class LauncherResult:
 
 
 class MacosAppLauncherTests(unittest.TestCase):
-    def run_launcher(self, health_sequence: list[bool]) -> LauncherResult:
+    def setUp(self) -> None:
+        self.app_support_dir = tempfile.TemporaryDirectory()
+        self._original_app_support_dir = os.environ.get("TOMOS_APP_SUPPORT_DIR")
+        os.environ["TOMOS_APP_SUPPORT_DIR"] = self.app_support_dir.name
+
+    def tearDown(self) -> None:
+        if self._original_app_support_dir is None:
+            os.environ.pop("TOMOS_APP_SUPPORT_DIR", None)
+        else:
+            os.environ["TOMOS_APP_SUPPORT_DIR"] = self._original_app_support_dir
+        self.app_support_dir.cleanup()
+
+    def run_launcher(self, health_sequence: list[bool | str]) -> LauncherResult:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             bin_dir = temp / "bin"
@@ -33,7 +46,7 @@ class MacosAppLauncherTests(unittest.TestCase):
             self.write_process_fingerprint_command(bin_dir)
             health_file = temp / "health-sequence"
             health_file.write_text(
-                "\n".join("ok" if value else "fail" for value in health_sequence),
+                "\n".join(HEALTHY_TOMOS if value is True else "fail" if value is False else value for value in health_sequence),
                 encoding="utf-8",
             )
             event_log = temp / "events.log"
@@ -52,7 +65,11 @@ line=$(sed -n '1p' "$TOMOS_TEST_HEALTH_FILE")
 if [ -s "$TOMOS_TEST_HEALTH_FILE" ]; then
   sed -i '' '1d' "$TOMOS_TEST_HEALTH_FILE"
 fi
-[ "$line" = "ok" ]
+if [ "$line" = "fail" ] || [ -z "$line" ]; then
+  exit 1
+fi
+[ "$line" = "ok" ] && line="$TOMOS_TEST_HEALTHY"
+printf '%s' "$line"
 """,
             )
             self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
@@ -81,6 +98,7 @@ fi
                     "TOMOS_TEST_DIALOG_FILE": str(dialog_file),
                     "TOMOS_TEST_EVENT_LOG": str(event_log),
                     "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
                     "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
                 }
             )
@@ -135,7 +153,8 @@ fi
                 "#!/usr/bin/env bash\n"
                 "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
                 "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
-                "[ \"$line\" = \"ok\" ]\n",
+                "[ \"$line\" != fail ] && printf '%s' \"$TOMOS_TEST_HEALTHY\"\n"
+                "[ \"$line\" != fail ]\n",
             )
             self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
             self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
@@ -156,6 +175,7 @@ fi
                     "TOMOS_LOG_DIR": str(log_dir),
                     "TOMOS_TEST_EVENT_LOG": str(event_log),
                     "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
                     "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
                 }
             )
@@ -191,7 +211,8 @@ fi
                 "#!/usr/bin/env bash\n"
                 "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
                 "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
-                "[ \"$line\" = \"ok\" ]\n",
+                "[ \"$line\" != fail ] && printf '%s' \"$TOMOS_TEST_HEALTHY\"\n"
+                "[ \"$line\" != fail ]\n",
             )
             self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
             self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
@@ -212,6 +233,7 @@ fi
                     "TOMOS_LOG_DIR": str(log_dir),
                     "TOMOS_TEST_EVENT_LOG": str(event_log),
                     "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
                     "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
                 }
             )
@@ -247,7 +269,8 @@ fi
                 "#!/usr/bin/env bash\n"
                 "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
                 "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
-                "[ \"$line\" = \"ok\" ]\n",
+                "[ \"$line\" != fail ] && printf '%s' \"$TOMOS_TEST_HEALTHY\"\n"
+                "[ \"$line\" != fail ]\n",
             )
             self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
             self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
@@ -267,6 +290,7 @@ fi
                     "TOMOS_LOCK_STALE_SECONDS": "0",
                     "TOMOS_TEST_EVENT_LOG": str(event_log),
                     "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
                 }
             )
             completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
@@ -299,7 +323,8 @@ fi
                 "#!/usr/bin/env bash\n"
                 "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
                 "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
-                "[ \"$line\" = \"ok\" ]\n",
+                "[ \"$line\" != fail ] && printf '%s' \"$TOMOS_TEST_HEALTHY\"\n"
+                "[ \"$line\" != fail ]\n",
             )
             self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
             self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
@@ -317,6 +342,7 @@ fi
                     "TOMOS_LOG_DIR": str(log_dir),
                     "TOMOS_TEST_EVENT_LOG": str(event_log),
                     "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
                 }
             )
             completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
@@ -345,7 +371,9 @@ fi
 
             self.write_command(
                 bin_dir / "curl",
-                "#!/usr/bin/env bash\n[ -f \"$TOMOS_TEST_READY_FILE\" ]\n",
+                "#!/usr/bin/env bash\n"
+                "[ -f \"$TOMOS_TEST_READY_FILE\" ] || exit 1\n"
+                "printf '%s' \"$TOMOS_TEST_HEALTHY\"\n",
             )
             self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\n/bin/sleep 0.01\n")
             self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
@@ -366,6 +394,7 @@ fi
                     "TOMOS_LOG_DIR": str(temp / "logs"),
                     "TOMOS_TEST_EVENT_LOG": str(event_log),
                     "TOMOS_TEST_READY_FILE": str(ready_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
                     "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
                 }
             )
@@ -400,6 +429,74 @@ fi
         self.assertNotEqual(result.return_code, 0)
         self.assertEqual(result.open_count, 0)
         self.assertIn("TOMOS AIを起動できませんでした", result.dialog_text)
+
+    def test_old_server_is_not_reused_as_tomos(self) -> None:
+        result = self.run_launcher(
+            health_sequence=['{"ok": true, "appVersion": "0.8.219"}', HEALTHY_TOMOS]
+        )
+        self.assertNotEqual(result.return_code, 0)
+        self.assertEqual(result.start_count, 0)
+        self.assertEqual(result.open_count, 0)
+        self.assertIn("別のTOMOS", result.dialog_text)
+
+    def test_timeout_terminates_only_the_process_started_by_launcher(self) -> None:
+        script = LAUNCHER.read_text(encoding="utf-8")
+        self.assertIn("STARTED_PROCESS_PID=$!", script)
+        self.assertIn('kill "$STARTED_PROCESS_PID"', script)
+        self.assertNotIn("pkill", script)
+
+    def test_launcher_migrates_legacy_variable_data_before_starting(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            health_file = temp / "health-sequence"
+            health_file.write_text(f"fail\nfail\n{HEALTHY_TOMOS}\n", encoding="utf-8")
+            legacy_root = temp / "legacy"
+            legacy_data = legacy_root / ".gemma4-data" / "context"
+            legacy_data.mkdir(parents=True)
+            (legacy_data / "context.sqlite").write_text("legacy", encoding="utf-8")
+            support_root = temp / "Application Support" / "TOMOS AI"
+            event_log = temp / "events.log"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "test -f \"$TOMOS_APP_SUPPORT_DIR/.gemma4-data/context/context.sqlite\"\n"
+                "printf 'migrated\\n' >> \"$TOMOS_TEST_EVENT_LOG\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                "[ \"$line\" != fail ] && printf '%s' \"$line\"\n"
+                "[ \"$line\" != fail ]\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
+            self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": f"{bin_dir}:{environment['PATH']}",
+                "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                "TOMOS_START_COMMAND": str(start_command),
+                "TOMOS_OPEN_COMMAND": str(open_command),
+                "TOMOS_LOG_DIR": str(temp / "logs"),
+                "TOMOS_LEGACY_ROOT": str(legacy_root),
+                "TOMOS_APP_SUPPORT_DIR": str(support_root),
+                "TOMOS_TEST_EVENT_LOG": str(event_log),
+                "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+            })
+            completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+            events = event_log.read_text(encoding="utf-8").splitlines() if event_log.exists() else []
+            self.assertEqual(completed.returncode, 0)
+            self.assertEqual(events, ["migrated"])
 
 
 if __name__ == "__main__":
