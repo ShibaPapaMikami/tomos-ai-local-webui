@@ -34,22 +34,19 @@ wait_for_launcher() {
   exit 1
 }
 
-lock_owner_is_alive() {
-  local lock_owner_pid
-  lock_owner_pid="$(sed -n '1{s/ .*//;p;}' "$LOCK_OWNER_FILE" 2>/dev/null || true)"
-  case "$lock_owner_pid" in
-    ''|*[!0-9]*) return 1 ;;
-  esac
-  kill -0 "$lock_owner_pid" 2>/dev/null
+process_fingerprint() {
+  ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-lock_owner_is_dead() {
-  local lock_owner_pid
-  lock_owner_pid="$(sed -n '1{s/ .*//;p;}' "$LOCK_OWNER_FILE" 2>/dev/null || true)"
-  case "$lock_owner_pid" in
+read_lock_owner() {
+  LOCK_OWNER_PID=""
+  LOCK_OWNER_FINGERPRINT=""
+  [ -r "$LOCK_OWNER_FILE" ] || return 1
+  IFS='|' read -r LOCK_OWNER_PID LOCK_OWNER_FINGERPRINT < "$LOCK_OWNER_FILE" || true
+  case "$LOCK_OWNER_PID" in
     ''|*[!0-9]*) return 1 ;;
   esac
-  ! kill -0 "$lock_owner_pid" 2>/dev/null
+  [ -n "$LOCK_OWNER_FINGERPRINT" ]
 }
 
 lock_has_expired() {
@@ -64,24 +61,38 @@ lock_has_expired() {
 }
 
 recover_stale_lock() {
-  if lock_has_expired || lock_owner_is_dead; then
-    rm -f "$LOCK_OWNER_FILE" 2>/dev/null || true
-    rmdir "$LOCK_DIR" 2>/dev/null
-    return $?
+  local current_fingerprint
+  if ! read_lock_owner; then
+    if ! lock_has_expired; then
+      return 1
+    fi
+  elif ! kill -0 "$LOCK_OWNER_PID" 2>/dev/null; then
+    :
+  else
+    current_fingerprint="$(process_fingerprint "$LOCK_OWNER_PID")"
+    if [ -z "$current_fingerprint" ] || [ "$current_fingerprint" = "$LOCK_OWNER_FINGERPRINT" ]; then
+      return 1
+    fi
   fi
-  if lock_owner_is_alive; then
-    return 1
-  fi
-  return 1
+
+  rm -f "$LOCK_OWNER_FILE" 2>/dev/null || true
+  rmdir "$LOCK_DIR" 2>/dev/null
 }
 
 acquire_lock() {
+  local owner_fingerprint
   while ! mkdir "$LOCK_DIR" 2>/dev/null; do
     if ! recover_stale_lock; then
       return 1
     fi
   done
-  printf '%s\n' "$$" > "$LOCK_OWNER_FILE"
+  owner_fingerprint="$(process_fingerprint "$$")"
+  if [ -z "$owner_fingerprint" ]; then
+    rm -f "$LOCK_OWNER_FILE" 2>/dev/null || true
+    rmdir "$LOCK_DIR" 2>/dev/null
+    return 1
+  fi
+  printf '%s|%s\n' "$$" "$owner_fingerprint" > "$LOCK_OWNER_FILE"
 }
 
 if health_ok; then
