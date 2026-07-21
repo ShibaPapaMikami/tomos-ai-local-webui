@@ -156,6 +156,61 @@ fi
             self.assertEqual(events.count("start"), 1)
             self.assertEqual(events.count("open"), 1)
 
+    def test_expired_lock_with_reused_live_pid_starts_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            health_file = temp / "health-sequence"
+            health_file.write_text("fail\nfail\nok\n", encoding="utf-8")
+            event_log = temp / "events.log"
+            log_dir = temp / "logs"
+            lock_dir = log_dir / "launcher.lock"
+            lock_dir.mkdir(parents=True)
+            (lock_dir / "owner").write_text(f"{os.getpid()}\n", encoding="utf-8")
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\nprintf 'start\\n' >> \"$TOMOS_TEST_EVENT_LOG\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                "[ \"$line\" = \"ok\" ]\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
+            self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(
+                open_command,
+                "#!/usr/bin/env bash\nprintf 'open\\n' >> \"$TOMOS_TEST_EVENT_LOG\"\n",
+            )
+
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "PATH": f"{bin_dir}:{environment['PATH']}",
+                    "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                    "TOMOS_START_COMMAND": str(start_command),
+                    "TOMOS_OPEN_COMMAND": str(open_command),
+                    "TOMOS_LOG_DIR": str(log_dir),
+                    "TOMOS_LOCK_STALE_SECONDS": "0",
+                    "TOMOS_TEST_EVENT_LOG": str(event_log),
+                    "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                }
+            )
+            completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+            events = event_log.read_text(encoding="utf-8").splitlines() if event_log.exists() else []
+
+            self.assertEqual(completed.returncode, 0)
+            self.assertEqual(events.count("start"), 1)
+            self.assertEqual(events.count("open"), 1)
+
     def test_recent_invalid_owner_lock_does_not_start_launcher(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)

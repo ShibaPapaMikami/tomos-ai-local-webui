@@ -64,13 +64,13 @@ lock_has_expired() {
 }
 
 recover_stale_lock() {
-  if lock_owner_is_alive; then
-    return 1
-  fi
-  if lock_owner_is_dead || lock_has_expired; then
+  if lock_has_expired || lock_owner_is_dead; then
     rm -f "$LOCK_OWNER_FILE" 2>/dev/null || true
     rmdir "$LOCK_DIR" 2>/dev/null
     return $?
+  fi
+  if lock_owner_is_alive; then
+    return 1
   fi
   return 1
 }
