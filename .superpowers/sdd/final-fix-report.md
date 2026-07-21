@@ -105,3 +105,21 @@
 - `python3 scripts/test_mac_pkg_signing.py` : PASS
 - `node scripts/test-pwa-assets.js` : PASS
 - `python3 scripts/test-agent-reach-routing-smoke.py` : PASS
+
+## 残Important修正（親クラッシュ）
+
+1. 起動ごとに親PIDとランダムトークンから固有のowner・release・readyファイル名を生成するようにした。旧監視プロセスは次回起動のreadyを参照できない。
+2. ready受信前の監視プロセスは、親ランチャーPIDと開始時刻を定期照合する。親がSIGKILLまたはクラッシュで消えた場合、監視プロセスは実子を開始せず、固有の一時ファイルを削除して終了する。
+
+### 残Important検証（親クラッシュ）
+
+- テスト先行で、ready前に親ランチャーをSIGKILLして再起動するfixtureを追加した。旧監視プロセスと固有一時ファイルの消滅、起動コマンド1回、無関係プロセス生存を確認した。
+- `python3 scripts/test_macos_app_launcher.py` : PASS（21 tests）
+- `python3 scripts/test_macos_app_bundle.py` : PASS（14 tests）
+- `python3 scripts/test_tomos_app_data.py` : PASS
+- `python3 scripts/test_mac_pkg_signing.py` : PASS
+- `node scripts/test-pwa-assets.js` : PASS
+- `python3 scripts/test-agent-reach-routing-smoke.py` : PASS
+- `bash -n scripts/macos-app-launcher.sh scripts/make-release-archives.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh Gemma4_12B_Web.command` : PASS
+- `PYTHONPYCACHEPREFIX=/tmp/tomos-pycache python3 -m py_compile server.py` : PASS
+- `git diff --check` : PASS

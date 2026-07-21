@@ -17,9 +17,12 @@ STARTED_PROCESS_PID=""
 STARTED_PROCESS_PGID=""
 STARTED_PROCESS_TOKEN=""
 STARTED_PROCESS_FINGERPRINT=""
-PROCESS_OWNER_FILE="$LOG_DIR/started-process.owner"
-PROCESS_RELEASE_FILE="$LOG_DIR/started-process.release"
-PROCESS_READY_FILE="$LOG_DIR/started-process.ready"
+PARENT_LAUNCHER_PID="$$"
+PARENT_LAUNCHER_FINGERPRINT=""
+HANDSHAKE_ID=""
+PROCESS_OWNER_FILE=""
+PROCESS_RELEASE_FILE=""
+PROCESS_READY_FILE=""
 MONITOR_READY_TIMEOUT_SECONDS="${TOMOS_MONITOR_READY_TIMEOUT_SECONDS:-15}"
 STARTUP_SUCCEEDED=0
 
@@ -326,7 +329,16 @@ migrate_legacy_data() {
 
 migrate_legacy_data
 export TOMOS_APP_SUPPORT_DIR="$APP_SUPPORT_DIR"
+PARENT_LAUNCHER_FINGERPRINT="$(process_fingerprint "$PARENT_LAUNCHER_PID")"
+if [ -z "$PARENT_LAUNCHER_FINGERPRINT" ]; then
+  show_start_error
+  exit 1
+fi
 STARTED_PROCESS_TOKEN="$(python3 -B -c 'import secrets; print(secrets.token_hex(24))')"
+HANDSHAKE_ID="$PARENT_LAUNCHER_PID-$STARTED_PROCESS_TOKEN"
+PROCESS_OWNER_FILE="$LOG_DIR/started-process.$HANDSHAKE_ID.owner"
+PROCESS_RELEASE_FILE="$LOG_DIR/started-process.$HANDSHAKE_ID.release"
+PROCESS_READY_FILE="$LOG_DIR/started-process.$HANDSHAKE_ID.ready"
 rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE"
 
 GEMMA_SKIP_BROWSER_OPEN=1 nohup python3 -B -c '
@@ -342,9 +354,27 @@ owner_file = Path(sys.argv[2])
 release_file = Path(sys.argv[3])
 ready_file = Path(sys.argv[4])
 token = sys.argv[5]
+parent_pid = int(sys.argv[6])
+parent_fingerprint = sys.argv[7]
 
 def release_requested():
     return release_file.exists()
+
+def cleanup_handshake():
+    for path in (owner_file, release_file, ready_file):
+        path.unlink(missing_ok=True)
+
+def parent_is_current():
+    try:
+        os.kill(parent_pid, 0)
+        fingerprint = subprocess.check_output(
+            ["ps", "-p", str(parent_pid), "-o", "lstart="],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return fingerprint == parent_fingerprint
 
 try:
     owner_delay_seconds = float(os.environ.get("TOMOS_OWNER_REGISTER_DELAY_SECONDS", "0"))
@@ -352,26 +382,28 @@ except ValueError:
     owner_delay_seconds = 0
 deadline = time.monotonic() + max(owner_delay_seconds, 0)
 while time.monotonic() < deadline:
-    if release_requested():
+    if release_requested() or not parent_is_current():
+        cleanup_handshake()
         raise SystemExit(0)
     time.sleep(0.05)
 try:
     owner_file.write_text(f"{os.getpid()}|{os.getpgrp()}|{token}\n", encoding="utf-8")
 except OSError:
+    cleanup_handshake()
     raise SystemExit(1)
 while not ready_file.exists():
-    if release_requested():
-        owner_file.unlink(missing_ok=True)
+    if release_requested() or not parent_is_current():
+        cleanup_handshake()
         raise SystemExit(0)
     time.sleep(0.05)
 if release_requested():
-    owner_file.unlink(missing_ok=True)
+    cleanup_handshake()
     raise SystemExit(0)
 subprocess.Popen(["/bin/bash", start_command])
 while not release_requested():
     time.sleep(0.05)
-owner_file.unlink(missing_ok=True)
-' "$START_COMMAND" "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE" "$STARTED_PROCESS_TOKEN" >"$LOG_DIR/launcher.log" 2>&1 &
+cleanup_handshake()
+' "$START_COMMAND" "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE" "$STARTED_PROCESS_TOKEN" "$PARENT_LAUNCHER_PID" "$PARENT_LAUNCHER_FINGERPRINT" >"$LOG_DIR/launcher.log" 2>&1 &
 STARTED_PROCESS_PID=$!
 if ! wait_for_started_process_owner; then
   show_start_error

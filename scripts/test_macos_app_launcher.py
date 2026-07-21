@@ -624,6 +624,9 @@ printf '%s' "$line"
         self.assertIn("TOMOS_OWNER_REGISTER_DELAY_SECONDS", script)
         self.assertIn("PROCESS_READY_FILE", script)
         self.assertIn("wait_for_started_process_owner", script)
+        self.assertIn("HANDSHAKE_ID", script)
+        self.assertIn("parent_is_current", script)
+        self.assertNotIn('PROCESS_READY_FILE="$LOG_DIR/started-process.ready"', script)
         self.assertNotIn("process_command", script)
         self.assertNotIn("pkill", script)
 
@@ -885,6 +888,96 @@ printf '%s' "$line"
                 if child_pid is not None:
                     try:
                         os.kill(child_pid, 15)
+                    except ProcessLookupError:
+                        pass
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+
+    def test_killed_parent_before_ready_cleans_old_monitor_before_next_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            event_log = temp / "events.log"
+            monitor_pid_file = temp / "monitor-pids"
+            server_ready_file = temp / "server-ready"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf 'start\\n' >> \"$TOMOS_TEST_EVENT_LOG\"\n"
+                "touch \"$TOMOS_TEST_SERVER_READY\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "[ -f \"$TOMOS_TEST_SERVER_READY\" ] || exit 1\n"
+                "printf '%s' \"$TOMOS_TEST_HEALTHY\"\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\n/bin/sleep 0.01\n")
+            self.write_command(
+                bin_dir / "nohup",
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$$\" >> \"$TOMOS_TEST_MONITOR_PIDS\"\n"
+                "exec \"$@\"\n",
+            )
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+            unrelated = subprocess.Popen(["/bin/sleep", "60"])
+            first: subprocess.Popen[str] | None = None
+            old_monitor_pid: int | None = None
+            try:
+                environment = os.environ.copy()
+                environment.update({
+                    "PATH": f"{bin_dir}:{environment['PATH']}",
+                    "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                    "TOMOS_START_COMMAND": str(start_command),
+                    "TOMOS_OPEN_COMMAND": str(open_command),
+                    "TOMOS_LOG_DIR": str(temp / "logs"),
+                    "TOMOS_TEST_EVENT_LOG": str(event_log),
+                    "TOMOS_TEST_MONITOR_PIDS": str(monitor_pid_file),
+                    "TOMOS_TEST_SERVER_READY": str(server_ready_file),
+                    "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
+                    "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+                    "TOMOS_OWNER_REGISTER_DELAY_SECONDS": "5",
+                    "TOMOS_MONITOR_READY_TIMEOUT_SECONDS": "8",
+                })
+                first = subprocess.Popen(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+                for _ in range(100):
+                    if monitor_pid_file.exists():
+                        break
+                    time.sleep(0.01)
+                self.assertTrue(monitor_pid_file.exists())
+                old_monitor_pid = int(monitor_pid_file.read_text(encoding="utf-8").splitlines()[0])
+                first.kill()
+                self.assertNotEqual(first.wait(timeout=5), 0)
+                for _ in range(200):
+                    try:
+                        os.kill(old_monitor_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("SIGKILL後の旧監視プロセスが残っています")
+                self.assertEqual(list((temp / "logs").glob("started-process.*")), [])
+
+                second_environment = environment.copy()
+                second_environment["TOMOS_OWNER_REGISTER_DELAY_SECONDS"] = "0"
+                second = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=second_environment)
+                self.assertEqual(second.returncode, 0)
+                events = event_log.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(events.count("start"), 1)
+                self.assertIsNone(unrelated.poll())
+            finally:
+                if first is not None and first.poll() is None:
+                    first.kill()
+                    first.wait(timeout=5)
+                if old_monitor_pid is not None:
+                    try:
+                        os.kill(old_monitor_pid, 15)
                     except ProcessLookupError:
                         pass
                 unrelated.terminate()
