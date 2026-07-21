@@ -622,8 +622,9 @@ printf '%s' "$line"
         self.assertIn("os.setsid()", script)
         self.assertIn('kill -TERM -- "-$STARTED_PROCESS_PGID"', script)
         self.assertIn("TOMOS_OWNER_REGISTER_DELAY_SECONDS", script)
-        self.assertIn("started_process_direct_wrapper_matches", script)
-        self.assertIn("STARTED_PROCESS_COMMAND", script)
+        self.assertIn("PROCESS_READY_FILE", script)
+        self.assertIn("wait_for_started_process_owner", script)
+        self.assertNotIn("process_command", script)
         self.assertNotIn("pkill", script)
 
     def test_timeout_cleans_started_process_group_without_touching_unrelated_process(self) -> None:
@@ -799,6 +800,93 @@ printf '%s' "$line"
                     self.fail("owner未登録中に開始した子プロセスが残っています")
                 self.assertIsNone(unrelated.poll())
             finally:
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+
+    def test_nohup_exec_transition_with_delayed_owner_cleans_only_started_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            health_file = temp / "health-sequence"
+            health_file.write_text("fail\n" * 40, encoding="utf-8")
+            child_pid_file = temp / "child.pid"
+            nohup_log = temp / "nohup.log"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "/bin/sleep 60 &\n"
+                "printf '%s\\n' \"$!\" > \"$TOMOS_TEST_CHILD_PID\"\n"
+                "wait\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                "[ \"$line\" != fail ] && printf '%s' \"$line\"\n"
+                "[ \"$line\" != fail ]\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\n/bin/sleep 0.01\n")
+            self.write_command(
+                bin_dir / "nohup",
+                "#!/usr/bin/env bash\n"
+                "printf 'nohup\\n' >> \"$TOMOS_TEST_NOHUP_LOG\"\n"
+                "/bin/sleep 0.2\n"
+                "exec \"$@\"\n",
+            )
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+            unrelated = subprocess.Popen(["/bin/sleep", "60"])
+            child_pid: int | None = None
+            try:
+                environment = os.environ.copy()
+                environment.update({
+                    "PATH": f"{bin_dir}:{environment['PATH']}",
+                    "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                    "TOMOS_START_COMMAND": str(start_command),
+                    "TOMOS_OPEN_COMMAND": str(open_command),
+                    "TOMOS_LOG_DIR": str(temp / "logs"),
+                    "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                    "TOMOS_TEST_CHILD_PID": str(child_pid_file),
+                    "TOMOS_TEST_NOHUP_LOG": str(nohup_log),
+                    "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+                    "TOMOS_OWNER_REGISTER_DELAY_SECONDS": "2",
+                    "TOMOS_MONITOR_READY_TIMEOUT_SECONDS": "5",
+                })
+                completed = subprocess.run(
+                    ["/bin/bash", str(LAUNCHER)],
+                    cwd=ROOT,
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertTrue(nohup_log.exists(), completed.stderr)
+                self.assertEqual(nohup_log.read_text(encoding="utf-8").splitlines(), ["nohup"])
+                child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                for _ in range(50):
+                    try:
+                        os.kill(child_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("nohup exec後に開始した子プロセスが残っています")
+                self.assertIsNone(unrelated.poll())
+            finally:
+                if child_pid is None and child_pid_file.exists():
+                    child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+                if child_pid is not None:
+                    try:
+                        os.kill(child_pid, 15)
+                    except ProcessLookupError:
+                        pass
                 unrelated.terminate()
                 unrelated.wait(timeout=5)
 

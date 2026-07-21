@@ -28,6 +28,24 @@
 - `bash -n scripts/macos-app-launcher.sh scripts/make-release-archives.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh Gemma4_12B_Web.command` : PASS
 - `PYTHONPYCACHEPREFIX=/tmp/tomos-pycache python3 -m py_compile server.py` : PASS
 - `git diff --check` : PASS
+
+## 最後Important修正
+
+1. 起動監視プロセスは専用PGIDのリーダーとして残り、ownerファイルへPID・PGID・トークンを登録した後、親ランチャーのready handshakeを受けてから実際の起動コマンドを開始するようにした。
+2. 所有判定から`ps`のcommand文字列比較を削除した。登録済みownerのPID・PGID・トークン・開始時刻だけを照合し、登録前に失敗した場合はrelease合図で監視プロセスを終了させるため、無関係プロセスへsignalを送らない。
+
+### 最後Important検証
+
+- テスト先行で、`nohup`がPythonへexec遷移し、owner登録を2秒遅延するfixtureを追加した。開始子プロセスのcleanupと無関係プロセス生存を確認した。
+- `python3 scripts/test_macos_app_launcher.py` : PASS（20 tests）
+- `python3 scripts/test_macos_app_bundle.py` : PASS（14 tests）
+- `python3 scripts/test_tomos_app_data.py` : PASS
+- `python3 scripts/test_mac_pkg_signing.py` : PASS
+- `node scripts/test-pwa-assets.js` : PASS
+- `python3 scripts/test-agent-reach-routing-smoke.py` : PASS
+- `bash -n scripts/macos-app-launcher.sh scripts/make-release-archives.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh Gemma4_12B_Web.command` : PASS
+- `PYTHONPYCACHEPREFIX=/tmp/tomos-pycache python3 -m py_compile server.py` : PASS
+- `git diff --check` : PASS
 - `bash -n scripts/macos-app-launcher.sh scripts/make-mac-app.sh scripts/make-mac-pkg.sh scripts/notarize-mac-pkg.sh` : PASS
 - `python3 -m py_compile server.py` : PASS
 - `git diff --check` : PASS

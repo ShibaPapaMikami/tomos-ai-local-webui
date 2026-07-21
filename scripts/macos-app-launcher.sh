@@ -17,9 +17,10 @@ STARTED_PROCESS_PID=""
 STARTED_PROCESS_PGID=""
 STARTED_PROCESS_TOKEN=""
 STARTED_PROCESS_FINGERPRINT=""
-STARTED_PROCESS_COMMAND=""
 PROCESS_OWNER_FILE="$LOG_DIR/started-process.owner"
 PROCESS_RELEASE_FILE="$LOG_DIR/started-process.release"
+PROCESS_READY_FILE="$LOG_DIR/started-process.ready"
+MONITOR_READY_TIMEOUT_SECONDS="${TOMOS_MONITOR_READY_TIMEOUT_SECONDS:-15}"
 STARTUP_SUCCEEDED=0
 
 health_state() {
@@ -126,10 +127,6 @@ process_fingerprint() {
   ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-process_command() {
-  ps -ww -p "$1" -o command= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
-}
-
 read_lock_owner() {
   LOCK_OWNER_PID=""
   LOCK_OWNER_FINGERPRINT=""
@@ -229,49 +226,54 @@ read_started_process_owner() {
 }
 
 started_process_owner_matches() {
+  local current_fingerprint
+  local current_pgid
   read_started_process_owner || return 1
   [ "$STARTED_PROCESS_PGID" = "$STARTED_PROCESS_PID" ] || return 1
-  started_process_group_matches
-}
-
-started_process_direct_wrapper_matches() {
-  local current_command
-  local current_fingerprint
-  [ -n "$STARTED_PROCESS_FINGERPRINT" ] && [ -n "$STARTED_PROCESS_COMMAND" ] || return 1
   current_fingerprint="$(process_fingerprint "$STARTED_PROCESS_PID")"
-  current_command="$(process_command "$STARTED_PROCESS_PID")"
-  [ -n "$current_fingerprint" ] && [ "$current_fingerprint" = "$STARTED_PROCESS_FINGERPRINT" ] && \
-    [ -n "$current_command" ] && [ "$current_command" = "$STARTED_PROCESS_COMMAND" ]
-}
-
-started_process_group_matches() {
-  local current_pgid
-  started_process_direct_wrapper_matches || return 1
   current_pgid="$(ps -p "$STARTED_PROCESS_PID" -o pgid= 2>/dev/null | tr -d ' ')"
-  [ "$current_pgid" = "$STARTED_PROCESS_PID" ]
+  [ "$current_pgid" = "$STARTED_PROCESS_PID" ] || return 1
+  [ -n "$STARTED_PROCESS_FINGERPRINT" ] && [ "$current_fingerprint" = "$STARTED_PROCESS_FINGERPRINT" ]
 }
 
-register_started_process() {
-  STARTED_PROCESS_FINGERPRINT="$(process_fingerprint "$STARTED_PROCESS_PID")"
-  STARTED_PROCESS_COMMAND="$(process_command "$STARTED_PROCESS_PID")"
-  [ -n "$STARTED_PROCESS_FINGERPRINT" ] && [ -n "$STARTED_PROCESS_COMMAND" ]
+wait_for_started_process_owner() {
+  local deadline
+  local now
+  local owner_fingerprint
+  deadline=$(( $(date +%s) + MONITOR_READY_TIMEOUT_SECONDS ))
+  while :; do
+    if read_started_process_owner; then
+      owner_fingerprint="$(process_fingerprint "$STARTED_PROCESS_PID")"
+      if [ -n "$owner_fingerprint" ] && [ "$STARTED_PROCESS_PGID" = "$STARTED_PROCESS_PID" ]; then
+        STARTED_PROCESS_FINGERPRINT="$owner_fingerprint"
+        if started_process_owner_matches; then
+          return 0
+        fi
+      fi
+    fi
+    if ! kill -0 "$STARTED_PROCESS_PID" 2>/dev/null; then
+      return 1
+    fi
+    now="$(date +%s)"
+    if [ "$now" -ge "$deadline" ]; then
+      return 1
+    fi
+    /bin/sleep 0.05
+  done
 }
 
 terminate_started_process() {
   if started_process_owner_matches; then
     kill -TERM -- "-$STARTED_PROCESS_PGID" 2>/dev/null || true
     wait "$STARTED_PROCESS_PID" 2>/dev/null || true
-  elif started_process_group_matches; then
-    kill -TERM -- "-$STARTED_PROCESS_PID" 2>/dev/null || true
-    wait "$STARTED_PROCESS_PID" 2>/dev/null || true
-  elif started_process_direct_wrapper_matches; then
-    kill -TERM "$STARTED_PROCESS_PID" 2>/dev/null || true
+  elif [ -n "$STARTED_PROCESS_PID" ]; then
+    : > "$PROCESS_RELEASE_FILE"
     wait "$STARTED_PROCESS_PID" 2>/dev/null || true
   fi
 }
 
 release_started_process() {
-  if started_process_owner_matches || started_process_direct_wrapper_matches; then
+  if [ -n "$STARTED_PROCESS_PID" ]; then
     : > "$PROCESS_RELEASE_FILE"
     wait "$STARTED_PROCESS_PID" 2>/dev/null || true
   fi
@@ -283,7 +285,7 @@ cleanup_launcher() {
   else
     release_started_process
   fi
-  rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" 2>/dev/null || true
+  rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE" 2>/dev/null || true
   rm -f "$LOCK_OWNER_FILE" 2>/dev/null || true
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
@@ -325,7 +327,7 @@ migrate_legacy_data() {
 migrate_legacy_data
 export TOMOS_APP_SUPPORT_DIR="$APP_SUPPORT_DIR"
 STARTED_PROCESS_TOKEN="$(python3 -B -c 'import secrets; print(secrets.token_hex(24))')"
-rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE"
+rm -f "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE"
 
 GEMMA_SKIP_BROWSER_OPEN=1 nohup python3 -B -c '
 import os
@@ -338,24 +340,44 @@ os.setsid()
 start_command = sys.argv[1]
 owner_file = Path(sys.argv[2])
 release_file = Path(sys.argv[3])
-token = sys.argv[4]
-subprocess.Popen(["/bin/bash", start_command])
+ready_file = Path(sys.argv[4])
+token = sys.argv[5]
+
+def release_requested():
+    return release_file.exists()
+
 try:
     owner_delay_seconds = float(os.environ.get("TOMOS_OWNER_REGISTER_DELAY_SECONDS", "0"))
 except ValueError:
     owner_delay_seconds = 0
-if owner_delay_seconds > 0:
-    time.sleep(owner_delay_seconds)
-owner_file.write_text(f"{os.getpid()}|{os.getpgrp()}|{token}\n", encoding="utf-8")
-while not release_file.exists():
+deadline = time.monotonic() + max(owner_delay_seconds, 0)
+while time.monotonic() < deadline:
+    if release_requested():
+        raise SystemExit(0)
+    time.sleep(0.05)
+try:
+    owner_file.write_text(f"{os.getpid()}|{os.getpgrp()}|{token}\n", encoding="utf-8")
+except OSError:
+    raise SystemExit(1)
+while not ready_file.exists():
+    if release_requested():
+        owner_file.unlink(missing_ok=True)
+        raise SystemExit(0)
+    time.sleep(0.05)
+if release_requested():
+    owner_file.unlink(missing_ok=True)
+    raise SystemExit(0)
+subprocess.Popen(["/bin/bash", start_command])
+while not release_requested():
     time.sleep(0.05)
 owner_file.unlink(missing_ok=True)
-' "$START_COMMAND" "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$STARTED_PROCESS_TOKEN" >"$LOG_DIR/launcher.log" 2>&1 &
+' "$START_COMMAND" "$PROCESS_OWNER_FILE" "$PROCESS_RELEASE_FILE" "$PROCESS_READY_FILE" "$STARTED_PROCESS_TOKEN" >"$LOG_DIR/launcher.log" 2>&1 &
 STARTED_PROCESS_PID=$!
-if ! register_started_process; then
+if ! wait_for_started_process_owner; then
   show_start_error
   exit 1
 fi
+: > "$PROCESS_READY_FILE"
 
 for _ in $(seq 1 30); do
   sleep 1
