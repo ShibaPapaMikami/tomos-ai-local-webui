@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "scripts" / "macos-app-launcher.sh"
-HEALTHY_TOMOS = '{"ok": true, "appVersion": "0.8.223"}'
+HEALTHY_TOMOS = '{"ok": true, "appVersion": "0.8.224"}'
 
 
 @dataclass
