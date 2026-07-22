@@ -14,9 +14,11 @@ LOG_DIR="${TOMOS_LOG_DIR:-$HOME/Library/Logs/TOMOS AI}"
 LOCK_DIR="${TOMOS_LAUNCH_LOCK_DIR:-$LOG_DIR/launcher.lock}"
 LOCK_OWNER_FILE="$LOCK_DIR/owner"
 LOCK_STALE_SECONDS="${TOMOS_LOCK_STALE_SECONDS:-300}"
-EXPECTED_APP_VERSION="${TOMOS_APP_VERSION:-0.8.222}"
+EXPECTED_APP_VERSION="${TOMOS_APP_VERSION:-0.8.223}"
 APP_SUPPORT_DIR="${TOMOS_APP_SUPPORT_DIR:-$HOME/Library/Application Support/TOMOS AI}"
 LEGACY_ROOT="${TOMOS_LEGACY_ROOT:-/Applications/Gemma4_12B}"
+MANAGED_SERVER_ROOT="${TOMOS_MANAGED_SERVER_ROOT:-$RESOURCE_ROOT}"
+TERMINATE_COMMAND="${TOMOS_TERMINATE_COMMAND:-/bin/kill}"
 STARTED_PROCESS_PID=""
 STARTED_PROCESS_PGID=""
 STARTED_PROCESS_TOKEN=""
@@ -59,8 +61,18 @@ try:
 except json.JSONDecodeError:
     print("different-app")
     raise SystemExit(0)
-if payload.get("appVersion") == sys.argv[1]:
+actual = str(payload.get("appVersion") or "")
+expected = sys.argv[1]
+if actual == expected:
     print("ready")
+elif payload.get("ok") is True:
+    try:
+        actual_parts = tuple(int(part) for part in actual.split("."))
+        expected_parts = tuple(int(part) for part in expected.split("."))
+    except ValueError:
+        print("different-app")
+    else:
+        print("outdated-tomos" if actual_parts < expected_parts else "different-app")
 else:
     print("different-app")
 ' "$EXPECTED_APP_VERSION" <<< "$payload" 2>/dev/null || printf '%s\n' "different-app"
@@ -87,6 +99,42 @@ try:
 except OSError:
     raise SystemExit(1)
 PY
+}
+
+managed_outdated_tomos_pid() {
+  local port
+  local listener_pid
+  local listener_cwd
+  command -v lsof >/dev/null 2>&1 || return 1
+  port="$(python3 -B - "$WEB_URL" <<'PY'
+import sys
+from urllib.parse import urlparse
+print(urlparse(sys.argv[1]).port or "")
+PY
+)"
+  case "$port" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  listener_pid="$(lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1)"
+  case "$listener_pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  listener_cwd="$(lsof -a -p "$listener_pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)"
+  [ "$listener_cwd" = "$MANAGED_SERVER_ROOT" ] || return 1
+  printf '%s\n' "$listener_pid"
+}
+
+stop_managed_outdated_tomos() {
+  local listener_pid
+  listener_pid="$(managed_outdated_tomos_pid)" || return 1
+  "$TERMINATE_COMMAND" -TERM "$listener_pid" 2>/dev/null || return 1
+  for _ in $(seq 1 30); do
+    if ! tcp_port_is_occupied; then
+      return 0
+    fi
+    /bin/sleep 0.1
+  done
+  return 1
 }
 
 show_start_error() {
@@ -211,6 +259,14 @@ INITIAL_HEALTH_STATE="$(health_state)"
 if [ "$INITIAL_HEALTH_STATE" = "ready" ]; then
   "$OPEN_COMMAND" "$WEB_URL"
   exit 0
+fi
+if [ "$INITIAL_HEALTH_STATE" = "outdated-tomos" ]; then
+  if stop_managed_outdated_tomos; then
+    INITIAL_HEALTH_STATE="unreachable"
+  else
+    show_different_app_error
+    exit 1
+  fi
 fi
 if [ "$INITIAL_HEALTH_STATE" = "different-app" ]; then
   show_different_app_error

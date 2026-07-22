@@ -16,13 +16,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "scripts" / "macos-app-launcher.sh"
-HEALTHY_TOMOS = '{"ok": true, "appVersion": "0.8.222"}'
+HEALTHY_TOMOS = '{"ok": true, "appVersion": "0.8.223"}'
 
 
 @dataclass
 class LauncherResult:
     open_count: int
     start_count: int
+    terminate_count: int
     dialog_text: str
     return_code: int
 
@@ -46,7 +47,12 @@ class MacosAppLauncherTests(unittest.TestCase):
             os.environ["TOMOS_REQUIRE_OLLAMA"] = self._original_require_ollama
         self.app_support_dir.cleanup()
 
-    def run_launcher(self, health_sequence: list[bool | str]) -> LauncherResult:
+    def run_launcher(
+        self,
+        health_sequence: list[bool | str],
+        *,
+        managed_server: tuple[str, str] | None = None,
+    ) -> LauncherResult:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
             bin_dir = temp / "bin"
@@ -86,6 +92,22 @@ printf '%s' "$line"
                 bin_dir / "nohup",
                 "#!/usr/bin/env bash\nexec \"$@\"\n",
             )
+            terminate_command = bin_dir / "terminate-server"
+            self.write_command(
+                terminate_command,
+                "#!/usr/bin/env bash\nprintf 'terminate:%s\\n' \"$2\" >> \"$TOMOS_TEST_EVENT_LOG\"\n",
+            )
+            if managed_server:
+                managed_pid, managed_cwd = managed_server
+                self.write_command(
+                    bin_dir / "lsof",
+                    f'''#!/usr/bin/env bash
+case "$*" in
+  *-iTCP*) printf '%s\\n' "{managed_pid}" ;;
+  *"-p {managed_pid}"*) printf 'p%s\\nfcwd\\nn%s\\n' "{managed_pid}" "{managed_cwd}" ;;
+esac
+''',
+                )
             self.write_command(
                 bin_dir / "osascript",
                 "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" > \"$TOMOS_TEST_DIALOG_FILE\"\n",
@@ -109,8 +131,11 @@ printf '%s' "$line"
                     "TOMOS_TEST_HEALTH_FILE": str(health_file),
                     "TOMOS_TEST_HEALTHY": HEALTHY_TOMOS,
                     "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+                    "TOMOS_TERMINATE_COMMAND": str(terminate_command),
                 }
             )
+            if managed_server:
+                environment["TOMOS_MANAGED_SERVER_ROOT"] = managed_server[1]
             completed = subprocess.run(
                 ["/bin/bash", str(LAUNCHER)],
                 cwd=ROOT,
@@ -123,6 +148,7 @@ printf '%s' "$line"
             return LauncherResult(
                 open_count=events.count("open"),
                 start_count=events.count("start"),
+                terminate_count=sum(event.startswith("terminate:") for event in events),
                 dialog_text=dialog_file.read_text(encoding="utf-8") if dialog_file.exists() else "",
                 return_code=completed.returncode,
             )
@@ -214,6 +240,7 @@ printf '%s' "$line"
             return LauncherResult(
                 open_count=events.count("open"),
                 start_count=events.count("start"),
+                terminate_count=0,
                 dialog_text=dialog_file.read_text(encoding="utf-8") if dialog_file.exists() else "",
                 return_code=completed.returncode,
             )
@@ -590,6 +617,34 @@ printf '%s' "$line"
             health_sequence=['{"ok": true, "appVersion": "0.8.219"}', HEALTHY_TOMOS]
         )
         self.assertNotEqual(result.return_code, 0)
+        self.assertEqual(result.start_count, 0)
+        self.assertEqual(result.open_count, 0)
+        self.assertIn("別のTOMOS", result.dialog_text)
+
+    def test_old_installed_tomos_is_stopped_then_restarted_for_upgrade(self) -> None:
+        managed_root = "/Applications/TOMOS AI.app/Contents/Resources/Gemma4_12B"
+        result = self.run_launcher(
+            health_sequence=[
+                '{"ok": true, "appVersion": "0.8.221"}',
+                False,
+                False,
+                True,
+            ],
+            managed_server=("4242", managed_root),
+        )
+        self.assertEqual(result.return_code, 0)
+        self.assertEqual(result.terminate_count, 1)
+        self.assertEqual(result.start_count, 1)
+        self.assertEqual(result.open_count, 1)
+
+    def test_newer_installed_tomos_is_not_stopped(self) -> None:
+        managed_root = "/Applications/TOMOS AI.app/Contents/Resources/Gemma4_12B"
+        result = self.run_launcher(
+            health_sequence=['{"ok": true, "appVersion": "0.9.0"}'],
+            managed_server=("4242", managed_root),
+        )
+        self.assertNotEqual(result.return_code, 0)
+        self.assertEqual(result.terminate_count, 0)
         self.assertEqual(result.start_count, 0)
         self.assertEqual(result.open_count, 0)
         self.assertIn("別のTOMOS", result.dialog_text)

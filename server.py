@@ -105,7 +105,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.222")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.223")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
