@@ -1,5 +1,5 @@
-name: Build native installers
-run-name: Build native installers (${{ inputs.version || github.ref_name }})
+name: Build Windows installer
+run-name: Build Windows installer (${{ inputs.version || github.ref_name }})
 
 on:
   workflow_dispatch:
@@ -13,32 +13,6 @@ on:
       - "v*"
 
 jobs:
-  mac-pkg:
-    name: macOS PKG
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build PKG
-        shell: bash
-        run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            bash scripts/make-mac-pkg.sh "${{ github.event.inputs.version }}"
-          else
-            bash scripts/make-mac-pkg.sh
-          fi
-      - name: Write PKG summary
-        shell: bash
-        run: |
-          VERSION="${{ inputs.version || github.ref_name }}"
-          VERSION="${VERSION#v}"
-          echo "## TOMOS AI v${VERSION}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- macOS artifact: TOMOS_AI-v${VERSION}-mac.pkg" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload PKG
-        uses: actions/upload-artifact@v4
-        with:
-          name: tomos-ai-mac-pkg-${{ inputs.version || github.ref_name }}
-          path: dist/*.pkg
-
   windows-msi:
     name: Windows MSI
     runs-on: windows-2022

@@ -81,10 +81,9 @@ ZIP 版は従来どおり `.bat` を直接起動する予備配布です。
 
 ## GitHub Actionsで作る
 
-`.github/workflows/build-installers.yml` を手動実行すると、以下のartifactを作れます。ただし、macOS runnerに署名証明書がない場合は、安全のためMac用PKGの作成を失敗させます。公開用Mac PKGは当面、署名証明書を登録したMacで作成・公証します。
+`.github/workflows/build-installers.yml` を手動実行すると、Windows用MSIのartifactを作れます。公開用Mac PKGは、署名証明書を登録したMacで作成・公証します。
 手動実行時は `version` に `0.8.190` のようなアプリ版を入れてください。Actions の実行名、artifact 名、ジョブ概要に同じバージョンが表示されます。
 
-- `tomos-ai-mac-pkg-X.X.X`
 - `tomos-ai-windows-msi-X.X.X`
 
 Release に添付する基本セット:

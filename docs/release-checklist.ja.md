@@ -21,7 +21,7 @@
 - [ ] `bash scripts/make-release-archives.sh` でMac/Windows ZIPを作成できる
 - [ ] `dist/TOMOS_AI-vX.X.X-mac.zip` が作成される
 - [ ] `dist/TOMOS_AI-vX.X.X-windows.zip` が作成される
-- [ ] GitHub Actionsで `TOMOS_AI-vX.X.X-mac.pkg` が作成される
+- [ ] 署名証明書を登録したMacで `TOMOS_AI-vX.X.X-mac.pkg` を作成し、Apple公証を通している
 - [ ] GitHub Actionsで `TOMOS_AI-vX.X.X-windows.msi` が作成される
 - [ ] ZIPに `.git/`、`ComfyUI/`、`.venv/`、`.venv-asr/`、モデルファイルが含まれていない
 - [ ] GitHub ReleaseにMac/WindowsのZIP、PKG、MSIを添付している

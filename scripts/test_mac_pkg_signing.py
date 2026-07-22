@@ -75,10 +75,21 @@ def test_notarization_script_verifies_every_release_gate() -> None:
     assert 'spctl -a -vv -t install "$PKG_PATH"' in script
 
 
+def test_github_actions_builds_windows_only_and_keeps_mac_signing_local() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "build-installers.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "windows-msi:" in workflow
+    assert "make-windows-msi.py" in workflow
+    assert "mac-pkg:" not in workflow
+    assert "make-mac-pkg.sh" not in workflow
+
+
 if __name__ == "__main__":
     test_pkg_build_requires_developer_id_installer()
     test_pkg_contains_signed_app_bundle_instead_of_legacy_folder()
     test_pkg_rejects_adhoc_application_identity_before_building()
     test_pkg_verifies_developer_id_application_authority_with_fixture()
     test_notarization_script_verifies_every_release_gate()
+    test_github_actions_builds_windows_only_and_keeps_mac_signing_local()
     print("macOS PKG signing tests: OK")
