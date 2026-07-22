@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
 
 
-EXPECTED_APP_VERSION = "0.8.221"
+EXPECTED_APP_VERSION = "0.8.222"
 
 
 class FixedDoctorCache:

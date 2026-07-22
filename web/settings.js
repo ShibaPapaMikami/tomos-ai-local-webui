@@ -271,11 +271,33 @@ function renderModelInstaller(deps) {
       item: card.item,
       model: card.item.model,
       title: card.role,
-      help: `${card.item.label || composerModelLabel(card.item.model)}\n${card.help}`,
+      help: card.help,
       recommended: true,
     }));
   }
   els.modelInstaller.append(recommendedList);
+
+  const internalDetails = document.createElement("details");
+  internalDetails.className = "model-details internal-model-details";
+  const internalSummary = document.createElement("summary");
+  internalSummary.textContent = language === "en" ? "View internal model names" : "内部モデル名を確認";
+  internalDetails.append(internalSummary);
+  for (const card of recommendedCards) {
+    const row = document.createElement("div");
+    row.className = "internal-model-row";
+    const role = document.createElement("strong");
+    role.textContent = card.role;
+    const modelName = document.createElement("span");
+    modelName.textContent = card.item.label || composerModelLabel(card.item.model);
+    row.append(role, modelName);
+    if (card.item.note) {
+      const note = document.createElement("small");
+      note.textContent = card.item.note;
+      row.append(note);
+    }
+    internalDetails.append(row);
+  }
+  els.modelInstaller.append(internalDetails);
 
   const detailItems = pullable.filter((item) => (
     item?.model
@@ -381,7 +403,7 @@ function renderModelInstaller(deps) {
       row.append(info);
       return row;
     }
-    if (item.note) {
+    if (item.note && !recommended) {
       const note = document.createElement("small");
       note.className = "model-experimental-warning";
       note.textContent = item.note;
@@ -518,6 +540,44 @@ function renderComposerModelSelect({
   select.value = current || "";
 }
 
+function purposeForSettingsModel(model, state = {}) {
+  if (typeof window.GEMMA_MODELS?.purposeForModel === "function") {
+    return window.GEMMA_MODELS.purposeForModel(model, state.serverModels || {});
+  }
+  const value = String(model || "");
+  if (!value) return "auto";
+  if (value.includes("Qwen3-4B-Instruct-2507-GGUF") || value === "qwen2.5:3b") return "standard";
+  if (value.includes("gemma-4-12B-agentic-fable5-composer2.5-v2")) return "coding";
+  if (value === "gemma4:12b" || value === "gemma4:12b-mlx") return "high-performance";
+  return "auto";
+}
+
+function renderComposerPurposeSelect({ select, current = "", state = {}, modelIsInstalled }) {
+  if (!select) return;
+  const language = state.language === "en" ? "en" : "ja";
+  const installed = typeof modelIsInstalled === "function" ? modelIsInstalled : () => false;
+  const highPerformanceAvailable = installed("gemma4:12b-mlx") || installed("gemma4:12b");
+  const options = [
+    { value: "auto", label: language === "en" ? "Auto (recommended)" : "自動（おすすめ）" },
+    { value: "standard", label: language === "en" ? "Standard AI" : "標準AI" },
+    { value: "coding", label: language === "en" ? "Code work" : "コード作業" },
+    {
+      value: "high-performance",
+      label: language === "en" ? "High-performance AI" : "高性能AI",
+      disabled: !highPerformanceAvailable,
+    },
+  ];
+  select.innerHTML = "";
+  for (const item of options) {
+    const option = document.createElement("option");
+    option.value = item.value;
+    option.textContent = item.label;
+    option.disabled = Boolean(item.disabled);
+    select.append(option);
+  }
+  select.value = purposeForSettingsModel(current, state);
+}
+
 function externalLlmCheckStatusKey(errorCode) {
   if (errorCode === "invalid_url") return "settings.externalLlmInvalidUrl";
   if (errorCode === "non_local_url") return "settings.externalLlmLocalOnly";
@@ -600,7 +660,6 @@ function currentComposerModelVisibilityCandidates({ state }) {
   const current = [
     state.composerModel,
     state.modelOverrides?.chat,
-    state.serverModels?.chat,
   ].find((model) => isComposerModelCandidate(model));
   return current ? [current] : [];
 }
@@ -641,7 +700,21 @@ function renderComposerModelVisibility({
 }) {
   if (!els.composerModelVisibility) return;
   const language = state.language === "en" ? "en" : "ja";
-  const uniqueModels = [...new Set((models || []).filter(Boolean))];
+  const purposeOrder = ["standard", "coding", "high-performance"];
+  const purposeLabels = language === "en"
+    ? { standard: "Standard AI", coding: "Code work", "high-performance": "High-performance AI" }
+    : { standard: "標準AI", coding: "コード作業", "high-performance": "高性能AI" };
+  const grouped = new Map();
+  for (const model of [...new Set((models || []).filter(Boolean))]) {
+    const purpose = purposeForSettingsModel(model, state);
+    if (!purposeOrder.includes(purpose)) continue;
+    const current = grouped.get(purpose);
+    const preferred = model === state.composerModel
+      || (purpose === "standard" && String(model).includes("Qwen3-4B-Instruct-2507-GGUF"))
+      || (purpose === "high-performance" && model === "gemma4:12b-mlx");
+    if (!current || preferred) grouped.set(purpose, model);
+  }
+  const uniqueModels = purposeOrder.map((purpose) => grouped.get(purpose)).filter(Boolean);
   if (uniqueModels.length === 0) {
     els.composerModelVisibility.innerHTML = "";
     return;
@@ -663,7 +736,7 @@ function renderComposerModelVisibility({
         return `
         <label class="${isSelected ? "is-selected" : ""}">
           <input type="checkbox" data-composer-model-visible="${model}" ${isSelected ? "checked" : ""} />
-          <span>${composerModelLabel(model)}</span>
+          <span>${purposeLabels[purposeForSettingsModel(model, state)]}</span>
         </label>
       `;
       }).join("")}
@@ -724,19 +797,15 @@ function renderModelSettingsSelects({
     displayModelName,
     t,
   });
-  const composerModels = composerModelCandidates({ state, modelIsInstalled });
   const allComposerModels = composerModelCandidates({
     state: { ...state, composerModelVisibleModels: [], composerModelVisibleModelsSaved: false },
     modelIsInstalled,
   });
-  renderComposerModelSelect({
+  renderComposerPurposeSelect({
     select: els.composerModel,
-    models: composerModels,
     current: safeCurrent(state.composerModel),
-    composerModelLabel,
-    displayModelName,
-    language: state.language,
-    t,
+    state,
+    modelIsInstalled,
   });
   renderComposerModelVisibility({
     composerModelLabel,
@@ -751,7 +820,7 @@ function bindSettingsEvents({
   onThemeChange,
   onLanguageChange,
   onResponseModeChange,
-  onComposerModelChange,
+  onComposerPurposeChange,
   onThinkingModeChange,
   onModelOverrideChange,
   onEnterToSendChange,
@@ -760,7 +829,7 @@ function bindSettingsEvents({
   els.languageSelect?.addEventListener("change", () => onLanguageChange?.(els.languageSelect.value));
   els.responseMode?.addEventListener("change", () => onResponseModeChange?.(els.responseMode.value));
   els.composerResponseMode?.addEventListener("change", () => onResponseModeChange?.(els.composerResponseMode.value));
-  els.composerModel?.addEventListener("change", () => onComposerModelChange?.(els.composerModel.value));
+  els.composerModel?.addEventListener("change", () => onComposerPurposeChange?.(els.composerModel.value));
   els.thinkingMode?.addEventListener("change", () => onThinkingModeChange?.(els.thinkingMode.value));
   els.chatModel?.addEventListener("change", () => onModelOverrideChange?.("chat", els.chatModel.value));
   els.codingModel?.addEventListener("change", () => onModelOverrideChange?.("coding", els.codingModel.value));
@@ -775,6 +844,7 @@ window.GEMMA_SETTINGS = {
   fetchModelPullStatus,
   installedOrCurrentModels,
   renderComposerModelSelect,
+  renderComposerPurposeSelect,
   renderComposerModelVisibility,
   renderModelInstaller,
   renderModelSelect,

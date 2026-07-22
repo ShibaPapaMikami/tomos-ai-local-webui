@@ -1,14 +1,14 @@
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 
-const STUDENT_MODEL_ASSET_VERSION = "0.8.229-student-model-routing";
+const STUDENT_MODEL_ASSET_VERSION = "0.8.230-purpose-routing";
 const index = fs.readFileSync("web/index.html", "utf8");
 const appJs = fs.readFileSync("web/app.js", "utf8");
 assert.match(index, /rel="manifest" href="\/manifest\.webmanifest"/);
 assert.match(index, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"/);
 assert.match(index, /name="theme-color"/);
 assert.match(index, /apple-mobile-web-app-capable/);
-assert.match(index, /href="\/styles\.css\?v=0\.8\.221-note-pack-install"/);
+assert.match(index, new RegExp(`href="/styles\\.css\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/i18n\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/models\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/settings\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
@@ -64,7 +64,7 @@ assert.match(sw, /offline\.html/);
 assert.match(sw, /mobile\.html/);
 assert.match(sw, /manifest\.webmanifest/);
 assert.match(sw, new RegExp(`const CACHE_NAME = "gemma4-pwa-${STUDENT_MODEL_ASSET_VERSION}"`));
-assert.match(sw, /\/styles\.css\?v=0\.8\.221-note-pack-install/);
+assert.match(sw, new RegExp(`/styles\\.css\\?v=${STUDENT_MODEL_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/i18n\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/models\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/settings\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}`));

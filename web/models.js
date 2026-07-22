@@ -156,6 +156,45 @@ function gemmaCoreModel(options = {}) {
   return gemmaModelCanAutoSelect(serverModels.chat, serverModels) ? serverModels.chat : "gemma4:12b";
 }
 
+function gemmaPurposeForModel(model = "", serverModels = {}) {
+  const value = String(model || "").trim();
+  if (!value) return "auto";
+  const role = String(gemmaModelClassification(value, serverModels)?.role || "");
+  if (value === GEMMA_QWEN3_2507_MODEL || value === "qwen2.5:3b" || role === "core" || role === "lightweight") {
+    return "standard";
+  }
+  if (value === GEMMA_AGENTIC_CODER_MODEL || role === "developer") return "coding";
+  if (["gemma4:12b-mlx", "gemma4:12b"].includes(value) || role === "high-performance") {
+    return "high-performance";
+  }
+  return "auto";
+}
+
+function gemmaModelForPurpose(purpose = "auto", options = {}) {
+  const serverModels = options.serverModels || {};
+  const installed = typeof options.modelIsInstalled === "function"
+    ? options.modelIsInstalled
+    : (model) => gemmaModelIsInstalled(model, serverModels);
+  if (purpose === "standard") return gemmaCoreModel(options);
+  if (purpose === "coding") {
+    return installed(GEMMA_AGENTIC_CODER_MODEL) ? GEMMA_AGENTIC_CODER_MODEL : gemmaCoreModel(options);
+  }
+  if (purpose === "high-performance") {
+    if (installed("gemma4:12b-mlx")) return "gemma4:12b-mlx";
+    if (installed("gemma4:12b")) return "gemma4:12b";
+    return "";
+  }
+  return "";
+}
+
+function gemmaContextForModel(model = "", requestedContext = 8192) {
+  const requested = Number(requestedContext) || 8192;
+  if (String(model || "").includes("Qwen3-4B-Instruct-2507-GGUF")) {
+    return Math.max(8192, Math.min(requested, 32768));
+  }
+  return requested;
+}
+
 function gemmaModelForTask(task, options = {}) {
   const serverModels = options.serverModels || {};
   const overrides = options.modelOverrides || {};
@@ -214,6 +253,9 @@ window.GEMMA_MODELS = {
   responseModeLabel: gemmaResponseModeLabel,
   modelIsInstalled: gemmaModelIsInstalled,
   coreModel: gemmaCoreModel,
+  purposeForModel: gemmaPurposeForModel,
+  modelForPurpose: gemmaModelForPurpose,
+  contextForModel: gemmaContextForModel,
   modelCanAutoSelect: gemmaModelCanAutoSelect,
   isStudentHiddenModel: gemmaIsStudentHiddenModel,
   safeSavedModel: gemmaSafeSavedModel,

@@ -12,6 +12,7 @@ const {
   externalLlmCheckStatusKey,
   installedOrCurrentModels,
   renderComposerModelVisibility,
+  renderComposerPurposeSelect,
   renderModelInstaller,
   renderModelSettingsSelects,
   renderPcDiagnosticsPanel,
@@ -373,6 +374,11 @@ assert.match(installerHtml, /高性能AI/);
 assert.doesNotMatch(installerHtml, /翻訳AIモデル/);
 assert.doesNotMatch(installerHtml, /HauhauCS/);
 assert.doesNotMatch(installerHtml, /Huihui/);
+assert.doesNotMatch(installerHtml.split("内部モデル名を確認")[0], /Qwen3 4B Instruct 2507/);
+assert.doesNotMatch(installerHtml.split("内部モデル名を確認")[0], /Agentic Coder v2/);
+assert.doesNotMatch(installerHtml.split("内部モデル名を確認")[0], /Gemma 4 12B/);
+assert.match(installerHtml, /内部モデル名を確認/);
+assert.match(installerHtml, /Qwen3 4B Instruct 2507/);
 
 const migratedInstallerHtml = renderInstaller({ studentModelRoutingMigrated: true }).innerHTML;
 assert.match(migratedInstallerHtml, /以前のモデル設定を安全な自動選択へ切り替えました。/);
@@ -437,7 +443,10 @@ renderComposerModelVisibility({
   state: { language: "ja", composerModelVisibleModels: ["qwen2.5:3b"], composerModelVisibleModelsSaved: true },
 });
 assert.match(composerVisibilityEl.innerHTML, /チャット欄に表示するAIモデル/);
-assert.match(composerVisibilityEl.innerHTML, /Qwen/);
+assert.match(composerVisibilityEl.innerHTML, /標準AI/);
+assert.match(composerVisibilityEl.innerHTML, /コード作業/);
+assert.doesNotMatch(composerVisibilityEl.innerHTML, />Qwen</);
+assert.doesNotMatch(composerVisibilityEl.innerHTML, /Agentic Coder/);
 assert.match(composerVisibilityEl.innerHTML, /data-composer-model-visible="qwen2.5:3b"/);
 assert.match(composerVisibilityEl.innerHTML, /checked/);
 const checkedVisibilityHtml = composerVisibilityEl.innerHTML;
@@ -476,6 +485,26 @@ renderComposerModelVisibility({
 assert.equal((clearedVisibilityEl.innerHTML.match(/ checked/g) || []).length, 0);
 assert.doesNotMatch(clearedVisibilityEl.innerHTML, /class="is-selected"/);
 
+const composerPurposeSelect = new FakeElement("select");
+renderComposerPurposeSelect({
+  select: composerPurposeSelect,
+  current: qwen2507,
+  state: {
+    language: "ja",
+    serverModels: {
+      ...state.serverModels,
+      available: [qwen2507, agenticCoder, "gemma4:12b-mlx"],
+    },
+  },
+  modelIsInstalled: (model) => [qwen2507, agenticCoder, "gemma4:12b-mlx"].includes(model),
+});
+assert.deepEqual(
+  composerPurposeSelect.children.map((option) => option.textContent),
+  ["自動（おすすめ）", "標準AI", "コード作業", "高性能AI"],
+);
+assert.equal(composerPurposeSelect.value, "standard");
+assert.equal(composerPurposeSelect.children.some((option) => /Qwen|Gemma|Agentic/.test(option.textContent)), false);
+
 const currentChatVisibilityEl = new FakeElement("section");
 renderComposerModelVisibility({
   composerModelLabel: (model) => model === "gemma4:12b-mlx" ? "Gemma 4 MLX" : model,
@@ -490,15 +519,15 @@ renderComposerModelVisibility({
     serverModels: { chat: "gemma4:12b-mlx" },
   },
 });
-assert.match(
+assert.doesNotMatch(
   visibilityLabelForModel(currentChatVisibilityEl.innerHTML, "gemma4:12b-mlx"),
   /\bchecked\b/,
-  "自動選択中の現在チャットAIモデルは表示チェックを付ける",
+  "自動選択は用途メニューに常設するため内部既定モデルを強制表示しない",
 );
-assert.match(
+assert.doesNotMatch(
   visibilityLabelForModel(currentChatVisibilityEl.innerHTML, "gemma4:12b-mlx"),
   /\bis-selected\b/,
-  "自動選択中の現在チャットAIモデルは選択状態にする",
+  "自動選択中の内部既定モデルを明示選択として扱わない",
 );
 
 const pcDiagnosticsEl = new FakeElement("section");

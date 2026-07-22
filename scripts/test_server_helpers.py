@@ -3251,6 +3251,10 @@ def test_pullable_model_classifications() -> None:
     assert qwen["defaultVisible"] is True
     assert qwen["allowAutoSelect"] is True
     assert qwen["defaultInstall"] is True
+    assert qwen["defaultContext"] == 8192
+    assert qwen["maxContext"] == 32768
+    assert qwen["processingLocation"] == "local"
+    assert qwen["supportedTasks"] == ["chat", "translation", "knowledge", "study-pack"]
 
     coder = models[server.AGENTIC_CODER_MODEL]
     assert coder["role"] == "developer"
@@ -3258,11 +3262,15 @@ def test_pullable_model_classifications() -> None:
     assert coder["defaultVisible"] is False
     assert coder["allowAutoSelect"] is True
     assert coder["defaultInstall"] is False
+    assert coder["processingLocation"] == "local"
+    assert coder["supportedTasks"] == ["coding"]
 
     for model_name in (server.GEMMA_BASE_MODEL, server.GEMMA_MLX_MODEL):
         assert models[model_name]["role"] == "high-performance"
         assert models[model_name]["tier"] == "important"
         assert models[model_name]["defaultInstall"] is False
+        assert models[model_name]["processingLocation"] == "local"
+        assert models[model_name]["supportedTasks"] == ["image", "high-performance"]
 
     hauhau = models["hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M"]
     assert hauhau["role"] == "developer-hidden"

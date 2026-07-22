@@ -1790,6 +1790,17 @@ function setComposerModel(value) {
   if (els.composerModel) els.composerModel.value = state.composerModel;
 }
 
+function setComposerPurpose(purpose) {
+  const model = window.GEMMA_MODELS.modelForPurpose(purpose, {
+    serverModels: state.serverModels,
+    modelIsInstalled,
+  });
+  setComposerModel(model);
+  syncModelInputs();
+  renderSettingsMeta();
+  renderMessages();
+}
+
 function setComposerModelVisibleModels(models) {
   state.composerModelVisibleModels = [...new Set((models || []).filter(Boolean))];
   state.composerModelVisibleModelsSaved = true;
@@ -6015,7 +6026,7 @@ async function sendMessage(text) {
       top_p: requestOptions.topP,
       top_k: requestOptions.topK,
       num_predict: requestOptions.numPredict,
-      num_ctx: requestOptions.numCtx,
+      num_ctx: window.GEMMA_MODELS.contextForModel(requestModel, requestOptions.numCtx),
       history_turns: requestOptions.historyTurns,
       think: requestOptions.think,
       keep_alive: requestOptions.keepAlive,
@@ -8197,7 +8208,7 @@ window.GEMMA_SETTINGS?.bindSettingsEvents?.({
   onThemeChange: setTheme,
   onLanguageChange: setLanguageFromControl,
   onResponseModeChange: setResponseMode,
-  onComposerModelChange: setComposerModel,
+  onComposerPurposeChange: setComposerPurpose,
   onThinkingModeChange: setThinkingMode,
   onModelOverrideChange: (task, value) => {
     setModelOverride(task, value);

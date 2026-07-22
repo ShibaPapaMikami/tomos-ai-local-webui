@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <link rel="stylesheet" href="/styles.css?v=0.8.221-note-pack-install" />
+  <link rel="stylesheet" href="/styles.css?v=0.8.230-purpose-routing" />
   </head>
   <body>
     <div class="app-shell">
@@ -122,6 +122,7 @@
               <strong data-i18n="settings.externalLlmTitle">別のローカルAIを使う</strong>
               <span data-i18n="settings.externalLlmHelp">通常は設定不要です。このPCで別に起動しているOllamaやllama.cppをTOMOSで使う場合だけ設定します。</span>
             </div>
+            <p class="external-llm-current" data-i18n="settings.processingLocal">処理先: ローカル処理</p>
             <p class="external-llm-current" id="external-llm-status" data-i18n="settings.externalLlmStandard">TOMOS標準のローカルAIを使用中</p>
             <details class="external-llm-details">
               <summary data-i18n="settings.externalLlmDetails">詳細設定</summary>
@@ -224,17 +225,17 @@
               </select>
               <small data-i18n="settings.thinkingHelp">コード作成や修正では深めにすると破綻しにくくなりますが、時間は増えます。</small>
             </label>
-            <label class="setting-field">
+            <label class="setting-field" hidden>
               <span data-i18n="settings.chatModel">通常チャットAIモデル</span>
               <select id="chat-model"></select>
               <small data-i18n="settings.chatModelHelp">通常は自動（おすすめ）を使います。Qwen3 4Bを標準AIとして、チャット・翻訳・資料検索・教材パックへ使います。Qwen 2.5 3Bは低スペックPC・移行用の予備です。</small>
             </label>
-            <label class="setting-field">
+            <label class="setting-field" hidden>
               <span data-i18n="settings.codingModel">プログラミング用AIモデル</span>
               <select id="coding-model"></select>
               <small data-i18n="settings.codingModelHelp">コード作業用です。複雑なコードはAgentic Coderを使い、未取得時は標準AIへ戻ります。</small>
             </label>
-            <label class="setting-field">
+            <label class="setting-field" hidden>
               <span data-i18n="settings.translationModel">翻訳AIモデル</span>
               <select id="translation-model"></select>
               <small data-i18n="settings.translationModelHelp">通常は自動（おすすめ）でQwen3 4Bを使います。Qwen 2.5 3Bは低スペックPC・移行用の予備です。</small>
@@ -492,11 +493,11 @@
           <div class="settings-header">
             <div>
               <strong data-i18n="management.languageModels">言語モデル</strong>
-              <span data-i18n="management.languageModelsHelp">標準AIのQwen3 4B、コード作業用、高性能AIを取得したり、別のローカル推論サーバーへ接続します。</span>
+              <span data-i18n="management.languageModelsHelp">用途に合わせて標準AI、コード作業、高性能AIを準備します。</span>
             </div>
             <button class="ghost-button" id="language-models-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
-          <div class="management-note" data-i18n="management.languageModelsNote">Qwen3 4Bは標準AIです。Qwen 2.5 3Bは低スペックPC・移行用の予備です。コード作業、高性能AI、別のローカルAIもここで管理します。</div>
+          <div class="management-note" data-i18n="management.languageModelsNote">普段は自動（おすすめ）のままで使えます。内部モデル名は詳細から確認できます。</div>
           <div class="management-panel-body" id="language-models-body">
             <input class="language-model-tab-input" id="language-model-tab-download" name="language-model-tab" type="radio" checked />
             <input class="language-model-tab-input" id="language-model-tab-external" name="language-model-tab" type="radio" />
@@ -1336,7 +1337,7 @@
       </section>
     </div>
 
-    <script src="/i18n.js?v=0.8.229-student-model-routing"></script>
+    <script src="/i18n.js?v=0.8.230-purpose-routing"></script>
   <script src="/utils.js?v=0.8.209-tomos53"></script>
   <script src="/translation.js?v=0.8.209-tomos53"></script>
   <script src="/local-tools.js?v=0.8.209-tomos53"></script>
@@ -1352,14 +1353,14 @@
   <script src="/character.js?v=0.8.209-tomos53"></script>
   <script src="/person-name-fortune.js?v=0.8.209-tomos53"></script>
   <script src="/person-relationship.js?v=0.8.209-tomos53"></script>
-  <script src="/models.js?v=0.8.229-student-model-routing"></script>
+  <script src="/models.js?v=0.8.230-purpose-routing"></script>
   <script src="/messages.js?v=0.8.211-listground1"></script>
   <script src="/sidebar.js?v=0.8.219-searchfix"></script>
-  <script src="/settings.js?v=0.8.229-student-model-routing"></script>
+  <script src="/settings.js?v=0.8.230-purpose-routing"></script>
     <script src="/management.js?v=0.8.222-note-pack-error"></script>
   <script src="/router.js?v=0.8.209-tomos53"></script>
   <script src="/search.js?v=0.8.227-youtube-grounded"></script>
-  <script src="/pwa.js?v=0.8.229-student-model-routing"></script>
-    <script src="/app.js?v=0.8.229-student-model-routing"></script>
+  <script src="/pwa.js?v=0.8.230-purpose-routing"></script>
+    <script src="/app.js?v=0.8.230-purpose-routing"></script>
 </body>
 </html>

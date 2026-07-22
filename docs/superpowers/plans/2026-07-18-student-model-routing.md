@@ -397,7 +397,9 @@ git diff --check
 ## 今回実装しないもの
 
 - Gemma 4 E4B、E2B、Ornith 9Bのダウンロード追加。
+- Gemma E4Bと既存Gemma、Ornith 9Bと既存コードAIの実機比較。比較候補として文書にだけ残す。
 - ZONOS2のインストール、起動、音声生成。
+- Qwen3-TTS 0.6B Baseのインストールと音声生成。音声出力の第一実験候補として文書にだけ残し、現在のWhisper／Nemotron音声入力は変更しない。
 - GLM-5、gpt-oss、DeepSeekへの外部接続。
 - HauhauCS、Huihuiの削除やアンインストール。
 - 起動スクリプトの既存Gemmaフォールバック削除。

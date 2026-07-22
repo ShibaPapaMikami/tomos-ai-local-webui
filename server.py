@@ -105,7 +105,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.221")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.222")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
@@ -254,6 +254,8 @@ PULLABLE_MODELS = [
         "defaultVisible": True,
         "allowAutoSelect": True,
         "defaultInstall": False,
+        "processingLocation": "local",
+        "supportedTasks": ["image", "high-performance"],
     },
     {
         "model": GEMMA_MLX_MODEL,
@@ -265,6 +267,8 @@ PULLABLE_MODELS = [
         "defaultVisible": True,
         "allowAutoSelect": True,
         "defaultInstall": False,
+        "processingLocation": "local",
+        "supportedTasks": ["image", "high-performance"],
         "runtime": "MLX",
         "requiresOllama": "0.31.0",
         "note": "Ollama 0.31以降でMTP高速化が有効になります。Apple Silicon向けの推奨高速版です。",
@@ -279,6 +283,8 @@ PULLABLE_MODELS = [
         "defaultVisible": False,
         "allowAutoSelect": True,
         "defaultInstall": False,
+        "processingLocation": "local",
+        "supportedTasks": ["coding"],
     },
     {
         "model": "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M",
@@ -316,6 +322,8 @@ PULLABLE_MODELS = [
         "defaultContext": 8192,
         "maxContext": 32768,
         "advancedContext": 262144,
+        "processingLocation": "local",
+        "supportedTasks": ["chat", "translation", "knowledge", "study-pack"],
         "note": "Qwen公式モデルのUnsloth GGUF量子化版です。既存の qwen3:4b とは別候補です。",
     },
     {
