@@ -2577,14 +2577,15 @@ function activeCharacterMemorySet() {
   return window.GEMMA_CHARACTER?.activeMemorySet?.(state.characterMemorySets, state.character) || null;
 }
 
-function characterContextSystemPrompt() {
+function characterContextSystemPrompt(recentMessages = null) {
   const memorySet = activeCharacterMemorySet();
   const session = activeSession();
-  const lastUserMessage = [...(session?.messages || [])].reverse().find((message) => message.role === "user");
+  const messages = Array.isArray(recentMessages) ? recentMessages : (session?.messages || []);
+  const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
   const includeProtectedMemory = /保護された記憶|機密の記憶|社外秘の記憶|protected memory/i.test(String(lastUserMessage?.content || ""));
   const characterPrompt = window.GEMMA_CHARACTER?.buildCharacterSystemPrompt?.(state.character, {
     memorySet,
-    recentMessages: Array.isArray(session?.messages) ? session.messages : [],
+    recentMessages: messages,
   }) || "";
   const memoryPrompt = state.character?.memoryMode === "off"
     ? ""
@@ -4338,6 +4339,14 @@ function chatRequestMessages(sessionMessages, modelUserMessage, requestOptions =
     : [...sessionMessages.slice(0, -1), modelUserMessage];
 }
 
+function characterPromptMessages(sessionMessages, userMessage, requestOptions = {}) {
+  return requestOptions.fastModel ? [userMessage] : sessionMessages;
+}
+
+function shouldIncludeTrainingContext(requestOptions = {}) {
+  return requestOptions.translationMode !== true && requestOptions.fastModel !== true;
+}
+
 function canSendModelRequest(requestOptions = {}, requestModel = "") {
   return requestOptions.hasImages !== true || Boolean(requestModel);
 }
@@ -5900,7 +5909,7 @@ async function sendMessage(text) {
             requestOptions.thinkingMode,
             requestOptions.translationMode,
           );
-    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt()}${requestOptions.translationMode ? "" : personRelationshipContextSystemPrompt()}${selectedRecipientContextPrompt()}${baseRequestSystem}${requestOptions.translationMode ? "" : replyDraftContextSystemPrompt(text)}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${trainingContextSystemPrompt()}`;
+    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt(characterPromptMessages(session.messages, userMessage, requestOptions))}${requestOptions.translationMode ? "" : personRelationshipContextSystemPrompt()}${selectedRecipientContextPrompt()}${baseRequestSystem}${requestOptions.translationMode ? "" : replyDraftContextSystemPrompt(text)}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${shouldIncludeTrainingContext(requestOptions) ? trainingContextSystemPrompt() : ""}`;
     const modelRequestUserMessage = noteArticleText === text
       ? userMessage
       : { ...userMessage, content: noteArticleText };
