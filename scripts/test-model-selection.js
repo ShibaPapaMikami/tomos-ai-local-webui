@@ -1416,6 +1416,11 @@ assert.match(stylesSource, /width: 13px/);
 assert.match(stylesSource, /white-space: nowrap/);
 assert.match(stylesSource, /gap: 4px/);
 assert.match(stylesSource, /margin: 0/);
+assert.match(stylesSource, /\.model-internal-name\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
+assert.match(stylesSource, /\.model-internal-name\s*\{[\s\S]*?font-family:\s*ui-monospace/);
+assert.match(stylesSource, /\.model-internal-name\s*\{[\s\S]*?font-size:\s*11px/);
+assert.match(stylesSource, /\.model-internal-name\s*\{[\s\S]*?color:\s*var\(--muted\)/);
+assert.doesNotMatch(stylesSource, /\.internal-model-row/);
 
 const indexHtml = fs.readFileSync("web/index.html", "utf8");
 const i18nSource = fs.readFileSync("web/i18n.js", "utf8");
@@ -1426,7 +1431,8 @@ const translations = i18nContext.window.GEMMA_I18N;
 assert.equal(translations.ja["chat.imageModelRequired"], "画像を読むには高性能AIを追加してください。");
 assert.equal(translations.en["chat.imageModelRequired"], "Add a high-performance AI model to read images.");
 assert.match(translations.ja["management.languageModelsNote"], /自動（おすすめ）/);
-assert.match(translations.ja["management.languageModelsNote"], /内部モデル名は詳細から確認/);
+assert.match(translations.ja["management.languageModelsNote"], /実際のモデル名は各AIの欄で確認/);
+assert.doesNotMatch(translations.ja["management.languageModelsNote"], /内部モデル名は詳細から確認/);
 assert.match(translations.ja["settings.chatModelHelp"], /Qwen3 4Bを標準AI/);
 assert.match(translations.ja["settings.chatModelHelp"], /Qwen 2\.5 3Bは低スペックPC・移行用の予備/);
 assert.equal(translations.ja["model.gemmaStandard"], "高性能AI・画像理解");
@@ -1437,7 +1443,8 @@ assert.equal(translations.en["model.qwenFast"], "fallback, lightweight");
 assert.equal(translations.en["model.qwenTranslation"], "fallback, lightweight");
 assert.match(translations.en["management.languageModelsNote"], /Auto \(recommended\)/);
 assert.match(indexHtml, /普段は自動（おすすめ）のままで使えます。/);
-assert.match(indexHtml, /内部モデル名は詳細から確認できます。/);
+assert.match(indexHtml, /実際のモデル名は各AIの欄で確認できます。/);
+assert.doesNotMatch(indexHtml, /内部モデル名は詳細から確認/);
 assert.match(indexHtml, /data-i18n="settings\.processingLocal">処理先: ローカル処理/);
 assert.match(indexHtml, /<label class="setting-field" hidden>\s*<span data-i18n="settings\.chatModel">/);
 assert.match(indexHtml, /<label class="setting-field" hidden>\s*<span data-i18n="settings\.codingModel">/);
@@ -1562,25 +1569,24 @@ assert.doesNotMatch(hiddenInstaller.innerHTML, /Enterprise test model/);
 assert.match(hiddenInstaller.innerHTML, /ダウンロード済み/);
 assert.doesNotMatch(hiddenInstaller.innerHTML, /使用中/);
 assert.match(hiddenInstaller.innerHTML, /アンインストール/);
-assert.match(hiddenInstaller.innerHTML, /詳細モデルを表示/);
-assert.match(hiddenInstaller.innerHTML, /実験モデルを表示/);
-assert.match(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507/);
-assert.match(hiddenInstaller.innerHTML, /チャット・資料検索・学習向け/);
-assert.match(hiddenInstaller.innerHTML, /Qwen公式モデルのUnsloth GGUF量子化版です。既存の qwen3:4b とは別候補です。/);
-assert.match(hiddenInstaller.innerHTML, /Qwen3 4B Instruct 2507[\s\S]{0,500}ダウンロード/);
+assert.match(hiddenInstaller.innerHTML, /内部モデル: Qwen3 4B Instruct 2507/);
+assert.match(hiddenInstaller.innerHTML, /内部モデル: Gemma 4 Agentic Coder 12B Q4/);
+assert.match(hiddenInstaller.innerHTML, /内部モデル: Gemma 4 12B MLX 高速版/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /内部モデル名を確認/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /詳細モデルを表示/);
+assert.doesNotMatch(hiddenInstaller.innerHTML, /実験モデルを表示/);
 
-const visibleInstaller = new FakeElement("section");
+const uninstalledExperimentalInstaller = new FakeElement("section");
 renderInstaller({
   composerModelLabel,
-  els: { modelInstaller: visibleInstaller },
+  els: { modelInstaller: uninstalledExperimentalInstaller },
   modelIsInstalled: () => false,
   state: { language: "ja", serverModels: { pullable: experimentalPullable }, modelPullJobs: {}, showExperimentalModels: true },
   t: installerT,
 });
-assert.match(visibleInstaller.innerHTML, /Huihui Gemma 4 Coder 12B Abliterated/);
-assert.match(visibleInstaller.innerHTML, /コード実験・制限弱め・上級者向け/);
-assert.match(visibleInstaller.innerHTML, /学生向け標準、社内文書、外部送信前チェックには推奨しません/);
-assert.doesNotMatch(visibleInstaller.innerHTML, /Enterprise test model/);
+assert.doesNotMatch(uninstalledExperimentalInstaller.innerHTML, /Huihui Gemma 4 Coder 12B Abliterated/);
+assert.doesNotMatch(uninstalledExperimentalInstaller.innerHTML, /Enterprise test model/);
+assert.doesNotMatch(uninstalledExperimentalInstaller.innerHTML, /不要なモデルを削除/);
 
 const windowsInstaller = new FakeElement("section");
 renderInstaller({
@@ -1598,8 +1604,7 @@ renderInstaller({
 });
 assert.match(windowsInstaller.innerHTML, /高性能AI/);
 assert.match(windowsInstaller.innerHTML, /Gemma 4 12B/);
-const windowsRecommendedOnly = windowsInstaller.innerHTML.split("詳細モデルを表示")[0];
-assert.doesNotMatch(windowsRecommendedOnly, /MLX 高速版/);
+assert.doesNotMatch(windowsInstaller.innerHTML, /MLX 高速版/);
 const hiddenComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerModelCandidates({
   state: {
     composerModel: huihuiAbliterated,
@@ -1617,22 +1622,36 @@ const hiddenComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerM
 assert.equal(hiddenComposerCandidates.includes(huihuiAbliterated), false);
 assert.equal(hiddenComposerCandidates.includes(gemmaMlx), true);
 assert.equal(hiddenComposerCandidates.includes(qwen2507), false);
-const visibleComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerModelCandidates({
+const recommendedComposerCandidates = settingsContext.window.GEMMA_SETTINGS.composerModelCandidates({
   state: {
-    composerModel: "",
+    composerModel: huihuiAbliterated,
     serverModels: {
-      chat: "gemma4:12b",
+      chat: qwen2507,
       coding: coder,
-      translation: "qwen2.5:3b",
-      recommendedCoding: [gemmaMlx, coder],
+      translation: enterpriseModel,
+      recommendedCoding: [gemmaMlx, coder, hauhauBalanced, huihuiAbliterated, experimentalModel],
       pullable: experimentalPullable,
     },
     showExperimentalModels: true,
   },
-  modelIsInstalled: (model) => model === huihuiAbliterated || model === "gemma4:12b" || model === coder || model === "qwen2.5:3b",
+  modelIsInstalled: (model) => [
+    qwen2507,
+    coder,
+    gemmaMlx,
+    hauhauBalanced,
+    huihuiAbliterated,
+    enterpriseModel,
+    experimentalModel,
+  ].includes(model),
 });
-assert.equal(visibleComposerCandidates.includes(huihuiAbliterated), false);
-assert.equal(visibleComposerCandidates.includes(qwen2507), false);
+assert.deepEqual(
+  [...recommendedComposerCandidates].sort(),
+  [qwen2507, coder, gemmaMlx].sort(),
+  "チャット候補は取得済みの標準AI・コード作業・高性能AIだけにする",
+);
+for (const hiddenModel of [hauhauBalanced, huihuiAbliterated, enterpriseModel, experimentalModel, "qwen2.5:3b"]) {
+  assert.equal(recommendedComposerCandidates.includes(hiddenModel), false, `${hiddenModel} はチャット候補に含めない`);
+}
 assert.equal(composerModelLabel(gemmaMlx, { t: (key) => key }), "Gemma 4 MLX");
 assert.equal(composerModelLabel(huihuiAbliterated, { t: (key) => key }), "Huihui 実験");
 

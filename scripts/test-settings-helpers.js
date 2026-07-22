@@ -116,6 +116,11 @@ assert.equal(
   false,
   "experimental models should stay hidden when the experimental toggle is off",
 );
+assert.equal(
+  composerCandidates.includes("qwen2.5:3b"),
+  false,
+  "低スペック・移行用のQwen 2.5は通常チャット候補へ出さない",
+);
 
 const experimentalComposerCandidates = composerModelCandidates({
   state: { ...state, showExperimentalModels: true },
@@ -135,7 +140,7 @@ const filteredComposerCandidates = composerModelCandidates({
   },
   modelIsInstalled,
 });
-assert.equal(JSON.stringify(filteredComposerCandidates), JSON.stringify(["qwen2.5:3b"]));
+assert.equal(JSON.stringify(filteredComposerCandidates), JSON.stringify([]));
 
 const clearedComposerCandidates = composerModelCandidates({
   state: {
@@ -145,7 +150,7 @@ const clearedComposerCandidates = composerModelCandidates({
   },
   modelIsInstalled,
 });
-assert.equal(JSON.stringify(clearedComposerCandidates), JSON.stringify(["qwen2.5:3b"]));
+assert.equal(JSON.stringify(clearedComposerCandidates), JSON.stringify([]));
 
 assert.equal(externalLlmCheckStatusKey("invalid_url"), "settings.externalLlmInvalidUrl");
 assert.equal(externalLlmCheckStatusKey("non_local_url"), "settings.externalLlmLocalOnly");
@@ -171,6 +176,20 @@ class FakeElement {
   }
   append(...children) {
     this.children.push(...children);
+  }
+  querySelectorAll(selector) {
+    const modelDetailsSelector = selector === "details[data-model-details-key]";
+    const openModelDetailsSelector = selector === "details[data-model-details-key][open]";
+    if (!modelDetailsSelector && !openModelDetailsSelector) return [];
+    return descendantElements(this).filter((element) => (
+      element !== this
+      && element.tagName === "DETAILS"
+      && element.dataset.modelDetailsKey
+      && (!openModelDetailsSelector || element.open)
+    ));
+  }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
   }
   setAttribute(name, value) {
     this.attributes[name] = String(value);
@@ -340,7 +359,13 @@ function descendantElements(element) {
   ))];
 }
 
-function renderInstaller({ installedModels = [], language = "ja", studentModelRoutingMigrated = false, showExperimentalModels = false } = {}) {
+function renderInstaller({
+  installedModels = [],
+  language = "ja",
+  studentModelRoutingMigrated = false,
+  showExperimentalModels = false,
+  pullableModels = serverPullableModels,
+} = {}) {
   const modelInstaller = new FakeElement("section");
   renderModelInstaller({
     composerModelLabel: (model) => model,
@@ -348,7 +373,7 @@ function renderInstaller({ installedModels = [], language = "ja", studentModelRo
     modelIsInstalled: (model) => installedModels.includes(model),
     state: {
       language,
-      serverModels: { pullable: serverPullableModels },
+      serverModels: { pullable: pullableModels },
       modelPullJobs: {},
       showExperimentalModels,
       studentModelRoutingMigrated,
@@ -367,18 +392,30 @@ function renderInstaller({ installedModels = [], language = "ja", studentModelRo
   return modelInstaller;
 }
 
-const installerHtml = renderInstaller().innerHTML;
+const installerEl = renderInstaller();
+const installerHtml = installerEl.innerHTML;
 assert.match(installerHtml, /標準AI/);
 assert.match(installerHtml, /コード作業/);
 assert.match(installerHtml, /高性能AI/);
 assert.doesNotMatch(installerHtml, /翻訳AIモデル/);
 assert.doesNotMatch(installerHtml, /HauhauCS/);
 assert.doesNotMatch(installerHtml, /Huihui/);
-assert.doesNotMatch(installerHtml.split("内部モデル名を確認")[0], /Qwen3 4B Instruct 2507/);
-assert.doesNotMatch(installerHtml.split("内部モデル名を確認")[0], /Agentic Coder v2/);
-assert.doesNotMatch(installerHtml.split("内部モデル名を確認")[0], /Gemma 4 12B/);
-assert.match(installerHtml, /内部モデル名を確認/);
-assert.match(installerHtml, /Qwen3 4B Instruct 2507/);
+
+const recommendedCards = descendantElements(installerEl)
+  .filter((element) => element.className.includes("model-recommended-card"));
+assert.equal(recommendedCards.length, 3, "おすすめカードは3件表示する");
+for (const [card, expected] of [
+  [recommendedCards[0], ["標準AI", "Qwen3 4B Instruct 2507"]],
+  [recommendedCards[1], ["コード作業", "Agentic Coder v2"]],
+  [recommendedCards[2], ["高性能AI", "Gemma 4 12B"]],
+]) {
+  assert.match(card.outerHTML, /内部モデル:/);
+  assert.match(card.outerHTML, new RegExp(expected[0]));
+  assert.match(card.outerHTML, new RegExp(expected[1]));
+}
+assert.doesNotMatch(installerHtml, /内部モデル名を確認/);
+assert.doesNotMatch(installerHtml, /詳細モデルを表示/);
+assert.doesNotMatch(installerHtml, /実験モデルを表示/);
 
 const migratedInstallerHtml = renderInstaller({ studentModelRoutingMigrated: true }).innerHTML;
 assert.match(migratedInstallerHtml, /以前のモデル設定を安全な自動選択へ切り替えました。/);
@@ -395,6 +432,11 @@ assert.doesNotMatch(
   /HauhauCS Balanced 12B Q4/,
   "HauhauCS should stay out of the normal model details when not installed",
 );
+assert.doesNotMatch(
+  hiddenModelsNotInstalledEl.innerHTML,
+  /不要なモデルを削除/,
+  "未取得時は不要なモデルの削除欄を表示しない",
+);
 const hiddenModelsNotInstalledElements = descendantElements(hiddenModelsNotInstalledEl);
 for (const model of [hauhauBalanced, huihuiAbliterated]) {
   assert.equal(
@@ -402,10 +444,16 @@ for (const model of [hauhauBalanced, huihuiAbliterated]) {
     false,
     `student-hidden model ${model} should not expose a download action`,
   );
+  assert.equal(
+    hiddenModelsNotInstalledElements.some((element) => element.dataset.modelRemove === model),
+    false,
+    `未取得の非表示モデル ${model} は削除操作を表示しない`,
+  );
 }
 
 const hiddenModelsInstalledEl = renderInstaller({ installedModels: [hauhauBalanced] });
 const hiddenModelsInstalledElements = descendantElements(hiddenModelsInstalledEl);
+assert.match(hiddenModelsInstalledEl.innerHTML, /不要なモデルを削除/);
 assert.equal(
   hiddenModelsInstalledElements.some((element) => element.dataset.modelRemove === hauhauBalanced),
   true,
@@ -415,6 +463,102 @@ assert.equal(
   hiddenModelsInstalledElements.some((element) => element.dataset.modelPull === hauhauBalanced),
   false,
   "取得済みHauhauCSはダウンロード操作を表示しない",
+);
+
+const qwen25InstalledEl = renderInstaller({ installedModels: ["qwen2.5:3b"] });
+const qwen25UnusedModelsDetails = descendantElements(qwen25InstalledEl)
+  .find((element) => element.dataset.modelDetailsKey === "unused-models");
+assert.ok(qwen25UnusedModelsDetails, "取得済みQwen 2.5 3Bの削除欄を表示する");
+assert.match(qwen25UnusedModelsDetails.innerHTML, /Qwen 2\.5 3B/);
+assert.match(
+  qwen25UnusedModelsDetails.innerHTML,
+  /保存容量/,
+  "不要モデルの削除欄には保存容量に関する注意を表示する",
+);
+const qwen25UnusedModelsElements = descendantElements(qwen25UnusedModelsDetails);
+assert.equal(
+  qwen25UnusedModelsElements.filter((element) => element.dataset.modelRemove === "qwen2.5:3b").length,
+  1,
+  "取得済みQwen 2.5 3Bは不要モデルの削除欄に1回だけ表示する",
+);
+
+const persistentInstallerEl = new FakeElement("section");
+const persistentInstallerDeps = {
+  composerModelLabel: (model) => model,
+  els: { modelInstaller: persistentInstallerEl },
+  modelIsInstalled: (model) => model === "qwen2.5:3b",
+  state: {
+    language: "ja",
+    serverModels: { pullable: serverPullableModels },
+    modelPullJobs: {},
+  },
+  t: (key) => ({
+    "settings.modelDownload": "AIモデルのダウンロード",
+    "model.installed": "ダウンロード済み",
+    "model.downloading": "ダウンロード中",
+    "model.download": "ダウンロード",
+    "error.prefix": "エラー",
+  }[key] || key),
+};
+renderModelInstaller(persistentInstallerDeps);
+const openedUnusedModels = persistentInstallerEl.querySelector("details[data-model-details-key]");
+assert.ok(openedUnusedModels, "不要モデルの削除欄を開閉状態テストに用意する");
+assert.notEqual(openedUnusedModels.open, true, "不要モデルの削除欄は初回表示時に閉じる");
+openedUnusedModels.open = true;
+renderModelInstaller(persistentInstallerDeps);
+assert.equal(
+  persistentInstallerEl.querySelector("details[data-model-details-key]")?.open,
+  true,
+  "不要モデルの削除欄は定期再描画後も開いたままにする",
+);
+persistentInstallerEl.querySelector("details[data-model-details-key]").open = false;
+renderModelInstaller(persistentInstallerDeps);
+assert.notEqual(
+  persistentInstallerEl.querySelector("details[data-model-details-key]")?.open,
+  true,
+  "通常再描画ではユーザーが閉じた不要モデルの削除欄を閉じたままにする",
+);
+persistentInstallerEl.querySelector("details[data-model-details-key]").open = true;
+renderModelInstaller(persistentInstallerDeps);
+persistentInstallerDeps.state.serverModels.pullable = [];
+renderModelInstaller(persistentInstallerDeps);
+assert.equal(
+  persistentInstallerEl.querySelector("details[data-model-details-key]"),
+  null,
+  "一時的にモデル一覧が空なら不要モデルの削除欄を描画しない",
+);
+persistentInstallerDeps.state.serverModels.pullable = serverPullableModels;
+renderModelInstaller(persistentInstallerDeps);
+assert.equal(
+  persistentInstallerEl.querySelector("details[data-model-details-key]")?.open,
+  true,
+  "一時的な空のモデル一覧を挟んでも不要モデルの削除欄を開いたままにする",
+);
+assert.doesNotThrow(() => renderModelInstaller({
+  ...persistentInstallerDeps,
+  els: { modelInstaller: new FakeElement("section") },
+  modelIsInstalled: () => false,
+}), "開閉状態を持つdetailsがない初回描画でも例外にしない");
+assert.equal(
+  qwen25UnusedModelsElements.some((element) => element.dataset.modelPull === "qwen2.5:3b"),
+  false,
+  "取得済みQwen 2.5 3Bはダウンロード操作を表示しない",
+);
+
+const enterpriseInstalledEl = renderInstaller({
+  installedModels: [enterpriseHealthModel],
+  pullableModels: healthState.serverModels.pullable,
+});
+const enterpriseInstalledElements = descendantElements(enterpriseInstalledEl);
+assert.doesNotMatch(
+  enterpriseInstalledEl.innerHTML,
+  /不要なモデルを削除/,
+  "取得済みEnterpriseモデルは不要モデルの削除欄を表示しない",
+);
+assert.equal(
+  enterpriseInstalledElements.some((element) => element.dataset.modelRemove === enterpriseHealthModel),
+  false,
+  "取得済みEnterpriseモデルは削除操作を表示しない",
 );
 
 const experimentalInstalledEl = renderInstaller({
@@ -437,20 +581,21 @@ assert.equal(
 
 const composerVisibilityEl = new FakeElement("section");
 renderComposerModelVisibility({
-  composerModelLabel: (model) => model === "qwen2.5:3b" ? "Qwen" : model,
+  composerModelLabel: (model) => model,
   els: { composerModelVisibility: composerVisibilityEl },
-  models: ["qwen2.5:3b", agenticCoder],
-  state: { language: "ja", composerModelVisibleModels: ["qwen2.5:3b"], composerModelVisibleModelsSaved: true },
+  models: [qwen2507, "qwen2.5:3b", agenticCoder],
+  state: { language: "ja", composerModelVisibleModels: [qwen2507], composerModelVisibleModelsSaved: true },
 });
 assert.match(composerVisibilityEl.innerHTML, /チャット欄に表示するAIモデル/);
 assert.match(composerVisibilityEl.innerHTML, /標準AI/);
 assert.match(composerVisibilityEl.innerHTML, /コード作業/);
-assert.doesNotMatch(composerVisibilityEl.innerHTML, />Qwen</);
+assert.doesNotMatch(composerVisibilityEl.innerHTML, />Qwen3|Qwen 2\.5/);
 assert.doesNotMatch(composerVisibilityEl.innerHTML, /Agentic Coder/);
-assert.match(composerVisibilityEl.innerHTML, /data-composer-model-visible="qwen2.5:3b"/);
+assert.match(composerVisibilityEl.innerHTML, new RegExp(`data-composer-model-visible="${qwen2507.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
+assert.doesNotMatch(composerVisibilityEl.innerHTML, /data-composer-model-visible="qwen2\.5:3b"/);
 assert.match(composerVisibilityEl.innerHTML, /checked/);
 const checkedVisibilityHtml = composerVisibilityEl.innerHTML;
-assert.match(checkedVisibilityHtml, /data-composer-model-visible="qwen2\.5:3b" checked/);
+assert.match(checkedVisibilityHtml, new RegExp(`data-composer-model-visible="${qwen2507.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" checked`));
 assert.doesNotMatch(checkedVisibilityHtml, new RegExp(`data-composer-model-visible="${agenticCoder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" checked`));
 function visibilityLabelForModel(html, model) {
   const marker = `data-composer-model-visible="${model}"`;
@@ -463,23 +608,24 @@ function visibilityLabelForModel(html, model) {
   return html.slice(labelStart, labelEnd + "</label>".length);
 }
 
-assert.match(visibilityLabelForModel(checkedVisibilityHtml, "qwen2.5:3b"), /class="is-selected"/);
+assert.match(visibilityLabelForModel(checkedVisibilityHtml, qwen2507), /class="is-selected"/);
 assert.doesNotMatch(visibilityLabelForModel(checkedVisibilityHtml, agenticCoder), /\bis-selected\b/);
 
 const defaultVisibilityEl = new FakeElement("section");
 renderComposerModelVisibility({
   composerModelLabel: (model) => model,
   els: { composerModelVisibility: defaultVisibilityEl },
-  models: ["qwen2.5:3b", agenticCoder],
+  models: [qwen2507, "qwen2.5:3b", agenticCoder],
   state: { language: "ja", composerModelVisibleModels: [], composerModelVisibleModelsSaved: false },
 });
 assert.equal((defaultVisibilityEl.innerHTML.match(/ checked/g) || []).length, 2);
+assert.doesNotMatch(defaultVisibilityEl.innerHTML, /data-composer-model-visible="qwen2\.5:3b"/);
 
 const clearedVisibilityEl = new FakeElement("section");
 renderComposerModelVisibility({
   composerModelLabel: (model) => model,
   els: { composerModelVisibility: clearedVisibilityEl },
-  models: ["qwen2.5:3b", agenticCoder],
+  models: [qwen2507, "qwen2.5:3b", agenticCoder],
   state: { language: "ja", composerModelVisibleModels: [], composerModelVisibleModelsSaved: true },
 });
 assert.equal((clearedVisibilityEl.innerHTML.match(/ checked/g) || []).length, 0);

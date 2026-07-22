@@ -193,6 +193,27 @@ function renderPcDiagnosticsPanel(deps) {
   `;
 }
 
+const modelDetailsOpenStates = new WeakMap();
+
+function modelDetailsOpenState(container) {
+  if (!container?.querySelectorAll) return new Set();
+  const keyedDetails = [...container.querySelectorAll("details[data-model-details-key]")];
+  if (keyedDetails.length > 0) {
+    modelDetailsOpenStates.set(container, new Set(keyedDetails
+      .filter((details) => details.open)
+      .map((details) => details.dataset.modelDetailsKey)
+      .filter(Boolean)));
+  }
+  return modelDetailsOpenStates.get(container) || new Set();
+}
+
+function restoreModelDetailsOpenState(container, openKeys) {
+  if (!container?.querySelectorAll) return;
+  for (const details of container.querySelectorAll("details[data-model-details-key]")) {
+    details.open = openKeys.has(details.dataset.modelDetailsKey);
+  }
+}
+
 function renderModelInstaller(deps) {
   const {
     composerModelLabel,
@@ -202,6 +223,7 @@ function renderModelInstaller(deps) {
     t,
   } = deps;
   if (!els.modelInstaller) return;
+  const openDetails = modelDetailsOpenState(els.modelInstaller);
   const pullable = state.serverModels.pullable || [];
   if (pullable.length === 0) {
     els.modelInstaller.innerHTML = "";
@@ -277,94 +299,35 @@ function renderModelInstaller(deps) {
   }
   els.modelInstaller.append(recommendedList);
 
-  const internalDetails = document.createElement("details");
-  internalDetails.className = "model-details internal-model-details";
-  const internalSummary = document.createElement("summary");
-  internalSummary.textContent = language === "en" ? "View internal model names" : "内部モデル名を確認";
-  internalDetails.append(internalSummary);
-  for (const card of recommendedCards) {
-    const row = document.createElement("div");
-    row.className = "internal-model-row";
-    const role = document.createElement("strong");
-    role.textContent = card.role;
-    const modelName = document.createElement("span");
-    modelName.textContent = card.item.label || composerModelLabel(card.item.model);
-    row.append(role, modelName);
-    if (card.item.note) {
-      const note = document.createElement("small");
-      note.textContent = card.item.note;
-      row.append(note);
-    }
-    internalDetails.append(row);
-  }
-  els.modelInstaller.append(internalDetails);
-
-  const detailItems = pullable.filter((item) => (
-    item?.model
-    && !item.experimental
-    && item.defaultVisible !== false
-    && !isEnterpriseModel(item)
-    && !recommendedIds.has(item.model)
-  ));
-  if (detailItems.length > 0) {
-    const details = document.createElement("details");
-    details.className = "model-details";
-    const summary = document.createElement("summary");
-    summary.textContent = language === "en" ? "Show detailed models" : "詳細モデルを表示";
-    details.append(summary);
-    let lastFamily = "";
-    for (const item of detailItems) {
-      const family = modelFamilyLabel(item, state.language);
-      if (family && family !== lastFamily) {
-        const familyHeading = document.createElement("div");
-        familyHeading.className = "model-family-heading compact";
-        familyHeading.textContent = family;
-        details.append(familyHeading);
-        lastFamily = family;
-      }
-      details.append(renderModelRow({ item, model: item.model, detail: true }));
-    }
-    els.modelInstaller.append(details);
-  }
-
-  const hiddenInstalledItems = pullable.filter((item) => (
-    item?.model
-    && item.defaultVisible === false
-    && !isEnterpriseModel(item)
-    && !recommendedIds.has(item.model)
-    && modelIsInstalled(item.model)
-  ));
-  const hiddenInstalledIds = new Set(hiddenInstalledItems.map((item) => item.model));
+  const hiddenInstalledItems = [...new Map(pullable
+    .filter((item) => (
+      item?.model
+      && !isEnterpriseModel(item)
+      && !recommendedIds.has(item.model)
+      && modelIsInstalled(item.model)
+    ))
+    .map((item) => [item.model, item]))
+    .values()];
   if (hiddenInstalledItems.length > 0) {
     const details = document.createElement("details");
     details.className = "model-details hidden-installed";
+    details.dataset.modelDetailsKey = "unused-models";
     const summary = document.createElement("summary");
-    summary.textContent = language === "en" ? "Manage hidden installed models" : "インストール済みの非表示モデルを管理";
+    summary.textContent = language === "en" ? "Remove unused models" : "不要なモデルを削除";
     details.append(summary);
+    const storageNote = document.createElement("p");
+    storageNote.className = "model-storage-note";
+    storageNote.textContent = language === "en"
+      ? "AI models may use several GB of storage. Remove only models you no longer need."
+      : "AIモデルは数GB以上の保存容量を使う場合があります。不要なモデルだけ削除してください。";
+    details.append(storageNote);
     for (const item of hiddenInstalledItems) {
       details.append(renderModelRow({ item, model: item.model, detail: true }));
     }
     els.modelInstaller.append(details);
   }
 
-  const experimentalItems = pullable.filter((item) => (
-    item?.experimental
-    && !isEnterpriseModel(item)
-    && !hiddenInstalledIds.has(item.model)
-  ));
-  if (experimentalItems.length > 0) {
-    const details = document.createElement("details");
-    details.className = "model-details experimental";
-    const summary = document.createElement("summary");
-    summary.textContent = language === "en" ? "Show experimental models" : "実験モデルを表示";
-    details.append(summary);
-    if (state.showExperimentalModels) {
-      for (const item of experimentalItems) {
-        details.append(renderModelRow({ item, model: item.model, experimental: true }));
-      }
-    }
-    els.modelInstaller.append(details);
-  }
+  restoreModelDetailsOpenState(els.modelInstaller, openDetails);
 
   function renderModelRow({ item = {}, model = "", title = "", help = "", recommended = false, experimental = false }) {
     const modelId = item.model || model;
@@ -385,6 +348,12 @@ function renderModelInstaller(deps) {
     const detail = document.createElement("span");
     detail.textContent = help || item.purpose || modelId;
     info.append(name, detail);
+    if (recommended) {
+      const internalName = document.createElement("small");
+      internalName.className = "model-internal-name";
+      internalName.textContent = `${language === "en" ? "Internal model" : "内部モデル"}: ${item.label || modelId}`;
+      info.append(internalName);
+    }
     if (experimental || item.experimental) {
       const warning = document.createElement("small");
       warning.className = "model-experimental-warning";
@@ -650,7 +619,6 @@ function isComposerModelCandidate(model) {
   return (
     model === "gemma4:12b" ||
     model === "gemma4:12b-mlx" ||
-    model === "qwen2.5:3b" ||
     model.includes("Qwen3-4B-Instruct-2507-GGUF") ||
     model.includes("gemma-4-12B-agentic-fable5-composer2.5-v2")
   );
@@ -679,7 +647,6 @@ function composerModelCandidates({ state, modelIsInstalled }) {
     ...COMPOSER_OPTIONAL_MODEL_IDS,
     "gemma4:12b-mlx",
     "gemma4:12b",
-    "qwen2.5:3b",
     isComposerModelCandidate(state.composerModel) ? state.composerModel : "",
   ].filter((model) => isComposerModelCandidate(model)), "chat");
   const uniqueCandidates = [...new Set(candidates)];
@@ -706,6 +673,7 @@ function renderComposerModelVisibility({
     : { standard: "標準AI", coding: "コード作業", "high-performance": "高性能AI" };
   const grouped = new Map();
   for (const model of [...new Set((models || []).filter(Boolean))]) {
+    if (!isComposerModelCandidate(model)) continue;
     const purpose = purposeForSettingsModel(model, state);
     if (!purposeOrder.includes(purpose)) continue;
     const current = grouped.get(purpose);
