@@ -3,7 +3,7 @@
     if (!("serviceWorker" in navigator)) return;
     if (window.location.protocol !== "http:" && window.location.protocol !== "https:") return;
     try {
-      await navigator.serviceWorker.register("/sw.js?v=0.8.230-purpose-routing");
+      await navigator.serviceWorker.register("/sw.js?v=0.8.231-greeting-context");
     } catch (error) {
       console.warn("Service worker registration failed", error);
     }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "gemma4-pwa-0.8.230-purpose-routing";
+const CACHE_NAME = "gemma4-pwa-0.8.231-greeting-context";
 const APP_SHELL = [
   "/",
   "/mobile.html",
@@ -28,9 +28,9 @@ const APP_SHELL = [
   "/management.js?v=0.8.222-note-pack-error",
   "/router.js?v=0.8.209-tomos53",
   "/search.js?v=0.8.227-youtube-grounded",
-  "/pwa.js?v=0.8.230-purpose-routing",
+  "/pwa.js?v=0.8.231-greeting-context",
   "/mobile-standalone.js?v=0.8.209-tomos53",
-  "/app.js?v=0.8.230-purpose-routing",
+  "/app.js?v=0.8.231-greeting-context",
   "/icons/icon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png"

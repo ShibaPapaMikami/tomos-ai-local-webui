@@ -549,6 +549,8 @@ vm.runInContext(
     extractFunctionSource(appSource, "shouldUseLongNoteArticlePipeline"),
     extractFunctionSource(appSource, "shouldUseWorkspaceTextShortcuts"),
     extractFunctionSource(appSource, "chatRequestMessages"),
+    extractFunctionSource(appSource, "characterPromptMessages"),
+    extractFunctionSource(appSource, "shouldIncludeTrainingContext"),
     extractFunctionSource(appSource, "canSendModelRequest"),
     extractFunctionSource(appSource, "chatModelRequestFields"),
   ].join("\n"),
@@ -577,6 +579,20 @@ const imageRequestMessages = imageRequestHelperContext.chatRequestMessages(
 );
 assert.equal(imageRequestMessages.length, 1);
 assert.equal(imageRequestMessages[0].images[0], "base64-image-data");
+const greetingMessage = { role: "user", content: "おはよ" };
+assert.deepEqual(
+  JSON.parse(JSON.stringify(imageRequestHelperContext.characterPromptMessages(
+    [{ role: "assistant", content: "Web調査をONにしてください" }, greetingMessage],
+    greetingMessage,
+    { fastModel: true },
+  ))),
+  [greetingMessage],
+);
+assert.equal(imageRequestHelperContext.shouldIncludeTrainingContext({ fastModel: true }), false);
+assert.equal(imageRequestHelperContext.shouldIncludeTrainingContext({ translationMode: true }), false);
+assert.equal(imageRequestHelperContext.shouldIncludeTrainingContext({ fastModel: false, translationMode: false }), true);
+assert.match(appSource, /characterContextSystemPrompt\(characterPromptMessages\(/);
+assert.match(appSource, /shouldIncludeTrainingContext\(requestOptions\) \? trainingContextSystemPrompt\(\) : ""/);
 const imageRequestFields = imageRequestHelperContext.chatModelRequestFields(gemmaMlx, imageRequestMessages);
 assert.equal(imageRequestFields.model, gemmaMlx);
 assert.equal(imageRequestFields.messages[0].images[0], "base64-image-data");
@@ -1388,12 +1404,12 @@ assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(indexSource, /\/pwa\.js\?v=0\.8\.230-purpose-routing/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.230-purpose-routing/);
+assert.match(indexSource, /\/pwa\.js\?v=0\.8\.231-greeting-context/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.231-greeting-context/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.230-purpose-routing"/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.231-greeting-context"/);
 assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.230-purpose-routing/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.230-purpose-routing/);
@@ -1402,8 +1418,8 @@ assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.230-purpose-routing/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.230-purpose-routing/);
+assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.231-greeting-context/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.231-greeting-context/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
