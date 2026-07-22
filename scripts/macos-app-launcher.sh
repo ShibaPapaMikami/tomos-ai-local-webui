@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
+TOMOS_OLLAMA_BIN_PATHS="${TOMOS_OLLAMA_BIN_PATHS:-/opt/homebrew/bin:/usr/local/bin:/Applications/Ollama.app/Contents/Resources}"
+export PATH="$TOMOS_OLLAMA_BIN_PATHS:$PATH"
+TOMOS_REQUIRE_OLLAMA="${TOMOS_REQUIRE_OLLAMA:-1}"
+OLLAMA_DOWNLOAD_URL="${TOMOS_OLLAMA_DOWNLOAD_URL:-https://ollama.com/download}"
 
 RESOURCE_ROOT="${TOMOS_RESOURCE_ROOT:-$(cd "$(dirname "$0")/../Resources/Gemma4_12B" && pwd)}"
 WEB_URL="${TOMOS_WEB_URL:-http://127.0.0.1:54876}"
@@ -10,7 +14,7 @@ LOG_DIR="${TOMOS_LOG_DIR:-$HOME/Library/Logs/TOMOS AI}"
 LOCK_DIR="${TOMOS_LAUNCH_LOCK_DIR:-$LOG_DIR/launcher.lock}"
 LOCK_OWNER_FILE="$LOCK_DIR/owner"
 LOCK_STALE_SECONDS="${TOMOS_LOCK_STALE_SECONDS:-300}"
-EXPECTED_APP_VERSION="${TOMOS_APP_VERSION:-0.8.220}"
+EXPECTED_APP_VERSION="${TOMOS_APP_VERSION:-0.8.221}"
 APP_SUPPORT_DIR="${TOMOS_APP_SUPPORT_DIR:-$HOME/Library/Application Support/TOMOS AI}"
 LEGACY_ROOT="${TOMOS_LEGACY_ROOT:-/Applications/Gemma4_12B}"
 STARTED_PROCESS_PID=""
@@ -86,7 +90,7 @@ PY
 }
 
 show_start_error() {
-  osascript -e 'display dialog "TOMOS AIを起動できませんでした。Ollamaが起動しているか確認してください。" buttons {"OK"} default button "OK" with icon caution' >/dev/null 2>&1 || true
+  osascript -e 'display dialog "TOMOS AIを起動できませんでした。いったん終了して、もう一度開いてください。" buttons {"OK"} default button "OK" with icon caution' >/dev/null 2>&1 || true
 }
 
 show_different_app_error() {
@@ -95,6 +99,14 @@ show_different_app_error() {
 
 show_missing_start_command_error() {
   osascript -e 'display dialog "TOMOS AIの起動ファイルが見つかりません。アプリを入れ直してください。" buttons {"OK"} default button "OK" with icon caution' >/dev/null 2>&1 || true
+}
+
+show_missing_ollama_guide() {
+  local choice
+  choice="$(osascript -e 'display dialog "TOMOS AIにはOllamaが必要です。\n\n「Ollamaを入れる」を押してインストールした後、TOMOS AIをもう一度開いてください。ターミナル操作は不要です。" buttons {"閉じる", "Ollamaを入れる"} default button "Ollamaを入れる" with icon caution' 2>/dev/null || true)"
+  if [[ "$choice" == *"Ollamaを入れる"* ]]; then
+    "$OPEN_COMMAND" "$OLLAMA_DOWNLOAD_URL" >/dev/null 2>&1 || true
+  fi
 }
 
 wait_for_launcher() {
@@ -202,6 +214,10 @@ if [ "$INITIAL_HEALTH_STATE" = "ready" ]; then
 fi
 if [ "$INITIAL_HEALTH_STATE" = "different-app" ]; then
   show_different_app_error
+  exit 1
+fi
+if [ "$TOMOS_REQUIRE_OLLAMA" = "1" ] && ! command -v ollama >/dev/null 2>&1; then
+  show_missing_ollama_guide
   exit 1
 fi
 

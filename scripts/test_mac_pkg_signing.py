@@ -44,7 +44,7 @@ def test_pkg_rejects_adhoc_application_identity_before_building() -> None:
             "TOMOS_TEST_EVENTS": str(events),
         })
         completed = subprocess.run(
-            ["/bin/bash", str(scripts / "make-mac-pkg.sh"), "0.8.220"],
+            ["/bin/bash", str(scripts / "make-mac-pkg.sh"), "0.8.221"],
             cwd=temp,
             env=environment,
             stdout=subprocess.PIPE,

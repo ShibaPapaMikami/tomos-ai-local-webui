@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "scripts" / "macos-app-launcher.sh"
-HEALTHY_TOMOS = '{"ok": true, "appVersion": "0.8.220"}'
+HEALTHY_TOMOS = '{"ok": true, "appVersion": "0.8.221"}'
 
 
 @dataclass
@@ -31,13 +31,19 @@ class MacosAppLauncherTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app_support_dir = tempfile.TemporaryDirectory()
         self._original_app_support_dir = os.environ.get("TOMOS_APP_SUPPORT_DIR")
+        self._original_require_ollama = os.environ.get("TOMOS_REQUIRE_OLLAMA")
         os.environ["TOMOS_APP_SUPPORT_DIR"] = self.app_support_dir.name
+        os.environ["TOMOS_REQUIRE_OLLAMA"] = "0"
 
     def tearDown(self) -> None:
         if self._original_app_support_dir is None:
             os.environ.pop("TOMOS_APP_SUPPORT_DIR", None)
         else:
             os.environ["TOMOS_APP_SUPPORT_DIR"] = self._original_app_support_dir
+        if self._original_require_ollama is None:
+            os.environ.pop("TOMOS_REQUIRE_OLLAMA", None)
+        else:
+            os.environ["TOMOS_REQUIRE_OLLAMA"] = self._original_require_ollama
         self.app_support_dir.cleanup()
 
     def run_launcher(self, health_sequence: list[bool | str]) -> LauncherResult:
@@ -1147,6 +1153,100 @@ printf '%s' "$line"
             events = event_log.read_text(encoding="utf-8").splitlines() if event_log.exists() else []
             self.assertEqual(completed.returncode, 0)
             self.assertEqual(events, ["migrated"])
+
+    def test_launcher_adds_common_ollama_directory_to_finder_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            ollama_bin_dir = temp / "ollama-bin"
+            bin_dir.mkdir()
+            ollama_bin_dir.mkdir()
+            self.write_process_fingerprint_command(bin_dir)
+            self.write_command(ollama_bin_dir / "ollama", "#!/usr/bin/env bash\nexit 0\n")
+            health_file = temp / "health-sequence"
+            health_file.write_text(f"fail\nfail\n{HEALTHY_TOMOS}\n", encoding="utf-8")
+            detected_ollama = temp / "detected-ollama"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "command -v ollama > \"$TOMOS_TEST_DETECTED_OLLAMA\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "curl",
+                "#!/usr/bin/env bash\n"
+                "line=$(sed -n '1p' \"$TOMOS_TEST_HEALTH_FILE\")\n"
+                "sed -i '' '1d' \"$TOMOS_TEST_HEALTH_FILE\"\n"
+                "[ \"$line\" != fail ] && printf '%s' \"$line\"\n"
+                "[ \"$line\" != fail ]\n",
+            )
+            self.write_command(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
+            self.write_command(bin_dir / "nohup", "#!/usr/bin/env bash\nexec \"$@\"\n")
+            self.write_command(bin_dir / "osascript", "#!/usr/bin/env bash\nexit 0\n")
+            open_command = bin_dir / "open-browser"
+            self.write_command(open_command, "#!/usr/bin/env bash\nexit 0\n")
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
+                "TOMOS_OLLAMA_BIN_PATHS": str(ollama_bin_dir),
+                "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                "TOMOS_START_COMMAND": str(start_command),
+                "TOMOS_OPEN_COMMAND": str(open_command),
+                "TOMOS_LOG_DIR": str(temp / "logs"),
+                "TOMOS_TEST_DETECTED_OLLAMA": str(detected_ollama),
+                "TOMOS_TEST_HEALTH_FILE": str(health_file),
+                "TOMOS_TEST_PROCESS_FINGERPRINT": "test-fingerprint",
+            })
+            completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+            self.assertEqual(completed.returncode, 0)
+            self.assertEqual(detected_ollama.read_text(encoding="utf-8").strip(), str(ollama_bin_dir / "ollama"))
+
+    def test_launcher_guides_beginner_to_ollama_download_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            bin_dir = temp / "bin"
+            bin_dir.mkdir()
+            dialog_file = temp / "dialog.txt"
+            opened_url_file = temp / "opened-url.txt"
+            start_marker = temp / "started.txt"
+            start_command = temp / "start.command"
+            start_command.write_text(
+                "#!/usr/bin/env bash\n"
+                "touch \"$TOMOS_TEST_START_MARKER\"\n",
+                encoding="utf-8",
+            )
+            start_command.chmod(0o755)
+            self.write_command(
+                bin_dir / "osascript",
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$*\" > \"$TOMOS_TEST_DIALOG_FILE\"\n"
+                "printf 'button returned:Ollamaを入れる\\n'\n",
+            )
+            open_command = bin_dir / "open-browser"
+            self.write_command(
+                open_command,
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$1\" > \"$TOMOS_TEST_OPENED_URL_FILE\"\n",
+            )
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": f"{bin_dir}:/usr/bin:/bin:/usr/sbin:/sbin",
+                "TOMOS_OLLAMA_BIN_PATHS": str(temp / "missing-ollama"),
+                "TOMOS_REQUIRE_OLLAMA": "1",
+                "TOMOS_RESOURCE_ROOT": str(temp / "resources"),
+                "TOMOS_START_COMMAND": str(start_command),
+                "TOMOS_OPEN_COMMAND": str(open_command),
+                "TOMOS_LOG_DIR": str(temp / "logs"),
+                "TOMOS_TEST_DIALOG_FILE": str(dialog_file),
+                "TOMOS_TEST_OPENED_URL_FILE": str(opened_url_file),
+                "TOMOS_TEST_START_MARKER": str(start_marker),
+            })
+            completed = subprocess.run(["/bin/bash", str(LAUNCHER)], cwd=ROOT, env=environment)
+            self.assertEqual(completed.returncode, 1)
+            self.assertFalse(start_marker.exists())
+            self.assertIn("TOMOS AIにはOllamaが必要です", dialog_file.read_text(encoding="utf-8"))
+            self.assertEqual(opened_url_file.read_text(encoding="utf-8").strip(), "https://ollama.com/download")
 
 
 if __name__ == "__main__":

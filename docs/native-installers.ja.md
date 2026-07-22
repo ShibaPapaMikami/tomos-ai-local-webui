@@ -40,6 +40,8 @@ bash scripts/notarize-mac-pkg.sh dist/TOMOS_AI-vX.X.X-mac.pkg
 
 インストール後は、「アプリケーション」の「TOMOS AI」を開きます。LaunchpadやDockからも起動できます。
 
+Ollamaが未導入の場合は、TOMOS AIが案内を表示します。「Ollamaを入れる」を押して公式インストーラーを入れた後、TOMOS AIをもう一度開いてください。導入済みのOllamaはTOMOS AIが自動で見つけて起動するため、ターミナル操作や接続URLの入力は不要です。
+
 以前の `/Applications/Gemma4_12B` は自動削除されません。新しい「TOMOS AI」で設定、長期記憶、教材パックを確認した後に、古いフォルダーを手動でゴミ箱へ移動してください。
 
 ## Windows MSIを作る
