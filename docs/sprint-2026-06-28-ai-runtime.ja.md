@@ -9,44 +9,14 @@
 
 ## 今回の焦点
 
+1. private教材パックを実利用できる状態に近づける。
 2. 教材パックのインポート、追加、有効化、モード選択、チャット反映を安定させる。
 3. 学習セットと教材パックの責務を混ぜない。
 4. 次の実装として、スマホPWA/PC取り込み、CodeGraph、キャラクター記憶へ進める準備をする。
 
 ## 現状確認
 
-
-このフォルダーは `.gitignore` で除外されているため、社内情報やprivate教材をGitHubへ誤って入れにくい。
-
-現在の構成:
-
-```text
-  pack.json
-  README.md
-  mvv.md
-  value-writing-rules.md
-  coordinator-communication-rules.md
-  tone-guide.md
-  avoid-phrases.md
-  glossary.csv
-  modes/
-    slack-rewrite.md
-    email-rewrite.md
-    request-rewrite.md
-    report-rewrite.md
-    external-check.md
-  examples/
-    slack-examples.md
-    email-examples.md
-```
-
-`pack.json` には5つのモードが定義済み。
-
-- Slackを整える
-- メールを整える
-- 依頼文を整える
-- 報告文を整える
-- 外部送信前チェック
+private教材は `.gitignore` 対象の領域で管理し、公開リポジトリへ含めない。
 
 ## 実施済み確認
 
@@ -64,6 +34,7 @@
 未確認:
 
 - [ ] Safari上で設定メニューを開き、教材パックパネルを目視確認する
+- [ ] Safari上でprivate教材パックをインポートする
 - [ ] インポート後に5モードがチャット入力欄の教材パック選択へ出ることを確認する
 
 Safariの自動操作は、`Allow JavaScript from Apple Events` とアクセシビリティ権限の制約で自動実行できなかったため、手動確認として残す。
@@ -120,10 +91,13 @@ git diff --check
 
 ### Task 2: 教材パック利用UXの確認
 
+目的: 非エンジニアでもprivate教材パックを使える導線にする。
 
 確認項目:
 
 - [ ] 「教材パック」パネルを開ける
+- [ ] 「外部教材データをインポート」でprivate教材フォルダーを選べる
+- [ ] インポート完了時に教材名が表示される
 - [ ] private教材であることが分かる表示がある
 - [ ] チャット画面で `Slackを整える` などのモードを選べる
 - [ ] モード未選択時は、通常チャットに過剰干渉しない
@@ -136,18 +110,15 @@ UI文言の注意:
 
 ### Task 3: 学習セットとの接続
 
+目的: private教材パックを使った実運用で、修正例が学習セットへ貯まるようにする。
 
 仕様:
 
-```text
-= 基本ルール、MVV、トーン、モード
-
-= 実際に使って出た修正例、好み、追加ルール
-```
-
 実装/確認:
 
+- [ ] private教材パック利用中に `修正して学習` できる
 - [ ] 保存先として通常の学習セットを選べる
+- [ ] 必要なら専用の学習セットを手動作成して使う
 - [ ] 教材パック本体には保存しない
 - [ ] 学習ノート表示で、元質問、保存した正しい回答、元AI回答、元チャット名を読める
 
@@ -568,6 +539,7 @@ PilotDeck本体コードは取り込まない。
 - [ ] Context CoreはUI、Firebase、DB、LLM providerへ直接依存しない
 - [ ] Dating側では `@tomos-ai/character-core` と同じく、packageまたはadapterで受け取れる形にする
 - [ ] Dating側の対象はキャラクター記憶、口調候補、理想返答/NG返答、Prompt version、AI同士模擬チャット評価に限定する
+- [ ] Dating側へ契約書管理、会社資料検索、社内専用教材パックを持ち込まない
 - [ ] 共通型を作る場合は `ContextEntity`、`ContextRelation`、`ContextMemory` のようにゲーム固有名を避ける
 
 #### やらないこと
@@ -588,6 +560,7 @@ PilotDeck本体コードは取り込まない。
 - [ ] scope定義が明記されている
 - [ ] Entity/Relationより前に `ContextRecord` が定義されている
 - [ ] `context()` は削除済み、期限切れ、別scopeの記憶を返さない
+- [ ] Dating scopeでは社内専用教材、契約書、会社資料が返らない
 - [ ] 契約書、会社資料の回答では必ず原文snippet/source/pageを返す
 - [ ] `profile()` は安定事実と最近の活動を混ぜない
 - [ ] `remember()` はセンシティブ情報を自動保存しない、または保存前確認に回す
@@ -790,6 +763,7 @@ PilotDeck本体コードは取り込まない。
 
 このスプリントの完了条件:
 
+- [ ] private教材パックをアプリからインポートできる
 - [ ] 5つのモードがチャット画面で選べる
 - [ ] 1つ以上のモードで実際にリライトできる
 - [ ] `修正して学習` が学習セットに保存される

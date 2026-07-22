@@ -764,6 +764,7 @@ assert.equal(mobileImportPayloadToSession({ payload: { type: "wrong", messages: 
 async function runImportTests() {
   const makeFile = (name, content) => ({
     name,
+    webkitRelativePath: `private-writing-pack/${name}`,
     async text() {
       return content;
     },
@@ -773,18 +774,26 @@ async function runImportTests() {
     state: stateForImport,
     files: [
       makeFile("pack.json", JSON.stringify({
+        id: "private-writing-pack",
+        name: "社内文章ルール",
         version: "0.1.0",
+        description: "社内の文章ルールに沿って整えます。",
         visibility: "private",
         modes: [
           { id: "slack-rewrite", name: "Slackを整える", promptFile: "modes/slack-rewrite.md" },
         ],
       })),
+      makeFile("modes/slack-rewrite.md", "# Slackを整える\n\n社内ルールに沿って整えてください。"),
     ],
     t,
   });
   assert.equal(result.ok, true);
+  assert.equal(result.definition.id, "private-writing-pack");
   assert.equal(result.definition.imported, true);
   assert.equal(result.definition.private, true);
+  assert.equal(result.definition.modes[0].prompt.includes("社内ルール"), true);
+  assert.equal(stateForImport.studyPacks["private-writing-pack"].installed, true);
+  assert.equal(studyPackById("private-writing-pack").modes[0].prompt.includes("社内ルール"), true);
 
   const groups = studyPackMenuGroups({
     packs: [
@@ -797,10 +806,13 @@ async function runImportTests() {
       },
       result.definition,
     ],
+    selectedValue: "private-writing-pack:slack-rewrite",
     t,
   });
   assert.equal(groups.length, 2);
   assert.equal(groups[0].label, "日本語レポート添削");
+  assert.equal(groups[1].label, "社内文章ルール");
+  assert.equal(groups[1].modes[0].value, "private-writing-pack:slack-rewrite");
   assert.equal(groups[1].modes[0].active, true);
 
   const selectionModel = studyPackSelectionModel({
@@ -815,8 +827,11 @@ async function runImportTests() {
       result.definition,
     ],
     selectedPackId: "",
+    selectedValue: "private-writing-pack:slack-rewrite",
     t,
   });
+  assert.equal(selectionModel.activePackId, "private-writing-pack");
+  assert.equal(selectionModel.packOptions[1].label, "社内文章ルール");
   assert.equal(selectionModel.modeOptions.length, 1);
   assert.equal(selectionModel.modeOptions[0].label, "Slackを整える");
   assert.equal(selectionModel.modeOptions[0].active, true);
@@ -834,6 +849,7 @@ async function runImportTests() {
     ],
     selectedValues: [
       "ja-report-writing-basic:make-readable",
+      "private-writing-pack:slack-rewrite",
     ],
     t,
   });
@@ -844,6 +860,7 @@ async function runImportTests() {
   assert.deepEqual(Array.from(toggleStudyPackModeValue(["a:one"], "b:two", true)), ["a:one", "b:two"]);
   assert.deepEqual(Array.from(toggleStudyPackModeValue(["a:one", "b:two"], "a:one", false)), ["b:two"]);
   const compactPrompt = compactStudyPackPrompt({
+    packName: "社内文章ルール",
     modeName: "メールを整える",
     mode: {
       prompt: "社外向けメールとして、結論、背景、確認事項が分かるように整えてください。必要以上に硬くしすぎないでください。",
@@ -854,6 +871,7 @@ async function runImportTests() {
     outputPrompt: "出力はまず「修正版:」として、対象本文そのものを書き換えてください。必要な場合だけ、最後に「変更点:」を2〜3個添えてください。",
     includeExamples: false,
   });
+  assert.match(compactPrompt, /社内文章ルール \/ メールを整える/);
   assert.match(compactPrompt, /結論、背景、確認事項/);
   assert.match(compactPrompt, /修正版/);
   assert.doesNotMatch(compactPrompt, /長い入力例|長い出力例/);

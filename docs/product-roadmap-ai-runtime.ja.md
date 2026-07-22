@@ -353,6 +353,7 @@ Dating側で使わないもの:
 
 - 契約書管理
 - 会社文書検索
+- 社内専用教材パック
 - 本番DB/Rules/Secrets
 - 決済/AGO/Firebase固有処理
 
@@ -407,6 +408,7 @@ Context Core上の扱い:
 対象: 社内利用、企業文書、MVV、部署別ルール。
 
 - [ ] 社内用教材パックをprivate教材として扱う
+- [ ] 社内専用教材パックをprivate教材として運用する
 - [ ] メール、Slack、依頼文、報告文、外部送信前チェックをモード化する
 - [ ] 学習セットにたまった修正例を、担当者レビュー後に教材パックへ反映する
 - [ ] 社内文書は匿名化と機密情報除去を必須にする
@@ -630,34 +632,6 @@ relations
 - 禁止事項
 - 良い例/悪い例
 - 出典/ライセンス/社内利用条件
-
-### 最初に作るパック
-
-
-目的:
-
-- 依頼、相談、報告、謝罪、お礼、外部送信前チェックを支援する
-- 冷たすぎず、回りくどすぎず、相手が次に何をすればよいか分かる文章にする
-
-### 推奨フォルダー構成
-
-```text
-  pack.json
-  README.md
-  mvv.md
-  tone-guide.md
-  avoid-phrases.md
-  glossary.csv
-  modes/
-    slack-rewrite.md
-    email-rewrite.md
-    request-rewrite.md
-    report-rewrite.md
-    external-check.md
-  examples/
-    slack-examples.md
-    email-examples.md
-```
 
 ### 制作ルール
 
