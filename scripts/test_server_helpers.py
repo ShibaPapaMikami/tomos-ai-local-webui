@@ -1008,8 +1008,9 @@ def test_pc_diagnostics_recommendation_levels() -> None:
     })
     assert low_memory_fallback["level"] == "very-heavy"
     assert low_memory_fallback["label"] == "激重い"
-    assert low_memory_fallback["recommended"]["standard"] == "qwen2.5:3b"
-    assert low_memory_fallback["recommended"]["coding"] == "qwen2.5:3b"
+    assert low_memory_fallback["recommended"]["standard"] == server.QWEN3_2507_MODEL
+    assert low_memory_fallback["recommended"]["coding"] == server.QWEN3_2507_MODEL
+    assert "取得" in low_memory_fallback["summary"]
 
 
 def test_pc_diagnostics_payload_shape() -> None:

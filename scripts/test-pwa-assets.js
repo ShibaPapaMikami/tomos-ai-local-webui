@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const assert = require("node:assert/strict");
 
 const STUDENT_MODEL_ASSET_VERSION = "0.8.230-purpose-routing";
-const CHAT_CONTEXT_ASSET_VERSION = "0.8.231-greeting-context";
+const CHAT_CONTEXT_ASSET_VERSION = "0.8.233-standard-routing";
 const index = fs.readFileSync("web/index.html", "utf8");
 const appJs = fs.readFileSync("web/app.js", "utf8");
 assert.match(index, /rel="manifest" href="\/manifest\.webmanifest"/);
@@ -10,8 +10,8 @@ assert.match(index, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"
 assert.match(index, /name="theme-color"/);
 assert.match(index, /apple-mobile-web-app-capable/);
 assert.match(index, new RegExp(`href="/styles\\.css\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
-assert.match(index, new RegExp(`src="/i18n\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
-assert.match(index, new RegExp(`src="/models\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
+assert.match(index, new RegExp(`src="/i18n\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}"`));
+assert.match(index, new RegExp(`src="/models\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/settings\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/pwa\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}"`));
 assert.match(index, /src="\/search\.js\?v=0\.8\.227-youtube-grounded"/);
@@ -66,8 +66,8 @@ assert.match(sw, /mobile\.html/);
 assert.match(sw, /manifest\.webmanifest/);
 assert.match(sw, new RegExp(`const CACHE_NAME = "gemma4-pwa-${CHAT_CONTEXT_ASSET_VERSION}"`));
 assert.match(sw, new RegExp(`/styles\\.css\\?v=${STUDENT_MODEL_ASSET_VERSION}`));
-assert.match(sw, new RegExp(`/i18n\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}`));
-assert.match(sw, new RegExp(`/models\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}`));
+assert.match(sw, new RegExp(`/i18n\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}`));
+assert.match(sw, new RegExp(`/models\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/settings\\.js\\?v=${STUDENT_MODEL_ASSET_VERSION}`));
 assert.match(sw, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(sw, /\/management\.js\?v=0\.8\.222-note-pack-error/);
@@ -285,5 +285,14 @@ const currentAppVersion = currentVersionMatch[1];
 const resetCacheHtml = fs.readFileSync("web/reset-cache.html", "utf8");
 assert.match(resetCacheHtml, new RegExp(`/\\?v=${CHAT_CONTEXT_ASSET_VERSION}&reset=1`));
 assert.doesNotMatch(resetCacheHtml, /tomos1/);
+
+const releaseGuide = fs.readFileSync("docs/github-release-guide.ja.md", "utf8");
+const releaseChecklist = fs.readFileSync("docs/release-checklist.ja.md", "utf8");
+const nativeInstallerGuide = fs.readFileSync("docs/native-installers.ja.md", "utf8");
+assert.match(releaseGuide, /macOS用PKGとWindows用MSIだけを添付/);
+assert.match(releaseGuide, /Source code \(zip\).*削除できません/);
+assert.doesNotMatch(releaseGuide, /gh release create[\s\S]*?\.zip[\s\S]*?```/);
+assert.match(releaseChecklist, /GitHub ReleaseにZIPを添付していない/);
+assert.match(nativeInstallerGuide, /ZIP版は開発者の内部確認用で、GitHub Releaseには掲載しません/);
 
 console.log("pwa asset tests passed");

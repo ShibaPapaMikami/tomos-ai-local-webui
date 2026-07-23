@@ -22,6 +22,7 @@ vm.runInContext(fs.readFileSync("web/character.js", "utf8"), context, { filename
 const {
   addMemory,
   buildCharacterSystemPrompt,
+  buildLightweightCharacterSystemPrompt,
   buildMemorySystemPrompt,
   classifyMemory,
   characterMemoryContextId,
@@ -61,6 +62,18 @@ assert.match(buildCharacterSystemPrompt(character), /ユーザーの呼び方は
 assert.match(buildCharacterSystemPrompt(character), /自分自身を指すときは「私」/);
 assert.match(buildCharacterSystemPrompt(character), /性別設定は女性/);
 assert.match(buildCharacterSystemPrompt(character), /正確性・安全性/);
+const lightweightPrompt = buildLightweightCharacterSystemPrompt({
+  name: "しばぱぱ",
+  userName: "まさふみ",
+  selfName: "ぼく",
+  personality: "やさしく親しい友だちのように短く返す",
+  tonePreset: "friendly",
+});
+assert.match(lightweightPrompt, /最優先のキャラクタールール/);
+assert.match(lightweightPrompt, /短い挨拶でも「まさふみ」を必ず1回/);
+assert.match(lightweightPrompt, /一人称は「ぼく」だけ/);
+assert.match(lightweightPrompt, /「おはよ」への返答は「おはよう、まさふみ。今日もぼくと一緒に進めようね。」だけにして、質問や別の文を追加しない/);
+assert.match(lightweightPrompt, /無関係な質問や意味の推測を追加しない/);
 
 let sets = loadMemorySets(character);
 assert.equal(sets.length, 1);

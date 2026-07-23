@@ -123,15 +123,15 @@ function gemmaIsStudentHiddenModel(model = "", serverModels = {}) {
 
 function gemmaSafeSavedModel(model = "", serverModels = {}) {
   const value = String(model || "").trim();
-  return gemmaIsStudentHiddenModel(value, serverModels) ? "" : value;
+  return value === "qwen2.5:3b" || gemmaIsStudentHiddenModel(value, serverModels) ? "" : value;
 }
 
 function gemmaModelCanAutoSelect(model, serverModels = {}) {
   const value = String(model || "").trim();
+  if (value === "qwen2.5:3b") return false;
   const classification = gemmaModelClassification(value, serverModels);
   const knownAllowed = [
     GEMMA_QWEN3_2507_MODEL,
-    "qwen2.5:3b",
     "gemma4:12b",
     "gemma4:12b-mlx",
     GEMMA_AGENTIC_CODER_MODEL,
@@ -152,15 +152,17 @@ function gemmaCoreModel(options = {}) {
   ) {
     return GEMMA_QWEN3_2507_MODEL;
   }
-  if (installed("qwen2.5:3b") && gemmaModelCanAutoSelect("qwen2.5:3b", serverModels)) return "qwen2.5:3b";
-  return gemmaModelCanAutoSelect(serverModels.chat, serverModels) ? serverModels.chat : "gemma4:12b";
+  if (installed("gemma4:12b-mlx") && gemmaModelCanAutoSelect("gemma4:12b-mlx", serverModels)) return "gemma4:12b-mlx";
+  if (installed("gemma4:12b") && gemmaModelCanAutoSelect("gemma4:12b", serverModels)) return "gemma4:12b";
+  const configured = gemmaSafeSavedModel(serverModels.chat, serverModels);
+  return installed(configured) && gemmaModelCanAutoSelect(configured, serverModels) ? configured : "";
 }
 
 function gemmaPurposeForModel(model = "", serverModels = {}) {
   const value = String(model || "").trim();
   if (!value) return "auto";
   const role = String(gemmaModelClassification(value, serverModels)?.role || "");
-  if (value === GEMMA_QWEN3_2507_MODEL || value === "qwen2.5:3b" || role === "core" || role === "lightweight") {
+  if (value === GEMMA_QWEN3_2507_MODEL || role === "core") {
     return "standard";
   }
   if (value === GEMMA_AGENTIC_CODER_MODEL || role === "developer") return "coding";

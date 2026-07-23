@@ -1,11 +1,11 @@
-const CACHE_NAME = "gemma4-pwa-0.8.231-greeting-context";
+const CACHE_NAME = "gemma4-pwa-0.8.233-standard-routing";
 const APP_SHELL = [
   "/",
   "/mobile.html",
   "/offline.html",
   "/manifest.webmanifest",
   "/styles.css?v=0.8.230-purpose-routing",
-  "/i18n.js?v=0.8.230-purpose-routing",
+  "/i18n.js?v=0.8.233-standard-routing",
   "/utils.js?v=0.8.209-tomos53",
   "/translation.js?v=0.8.209-tomos53",
   "/local-tools.js?v=0.8.209-tomos53",
@@ -21,16 +21,16 @@ const APP_SHELL = [
   "/character.js?v=0.8.209-tomos53",
   "/person-name-fortune.js?v=0.8.209-tomos53",
   "/person-relationship.js?v=0.8.209-tomos53",
-  "/models.js?v=0.8.230-purpose-routing",
+  "/models.js?v=0.8.233-standard-routing",
   "/messages.js?v=0.8.211-listground1",
   "/sidebar.js?v=0.8.219-searchfix",
   "/settings.js?v=0.8.230-purpose-routing",
   "/management.js?v=0.8.222-note-pack-error",
   "/router.js?v=0.8.209-tomos53",
   "/search.js?v=0.8.227-youtube-grounded",
-  "/pwa.js?v=0.8.231-greeting-context",
+  "/pwa.js?v=0.8.233-standard-routing",
   "/mobile-standalone.js?v=0.8.209-tomos53",
-  "/app.js?v=0.8.231-greeting-context",
+  "/app.js?v=0.8.233-standard-routing",
   "/icons/icon.svg",
   "/icons/icon-192.png",
   "/icons/icon-512.png"

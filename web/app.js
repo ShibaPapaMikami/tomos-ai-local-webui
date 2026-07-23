@@ -2577,16 +2577,18 @@ function activeCharacterMemorySet() {
   return window.GEMMA_CHARACTER?.activeMemorySet?.(state.characterMemorySets, state.character) || null;
 }
 
-function characterContextSystemPrompt(recentMessages = null) {
+function characterContextSystemPrompt(recentMessages = null, options = {}) {
   const memorySet = activeCharacterMemorySet();
   const session = activeSession();
   const messages = Array.isArray(recentMessages) ? recentMessages : (session?.messages || []);
   const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
   const includeProtectedMemory = /保護された記憶|機密の記憶|社外秘の記憶|protected memory/i.test(String(lastUserMessage?.content || ""));
-  const characterPrompt = window.GEMMA_CHARACTER?.buildCharacterSystemPrompt?.(state.character, {
-    memorySet,
-    recentMessages: messages,
-  }) || "";
+  const characterPrompt = options.lightweight
+    ? (window.GEMMA_CHARACTER?.buildLightweightCharacterSystemPrompt?.(state.character) || "")
+    : (window.GEMMA_CHARACTER?.buildCharacterSystemPrompt?.(state.character, {
+        memorySet,
+        recentMessages: messages,
+      }) || "");
   const memoryPrompt = state.character?.memoryMode === "off"
     ? ""
     : (window.GEMMA_CHARACTER?.buildMemorySystemPrompt?.(memorySet, { includeProtected: includeProtectedMemory }) || "");
@@ -4347,8 +4349,12 @@ function shouldIncludeTrainingContext(requestOptions = {}) {
   return requestOptions.translationMode !== true && requestOptions.fastModel !== true;
 }
 
+function shouldIncludeRelationshipContext(requestOptions = {}) {
+  return requestOptions.translationMode !== true && requestOptions.fastModel !== true;
+}
+
 function canSendModelRequest(requestOptions = {}, requestModel = "") {
-  return requestOptions.hasImages !== true || Boolean(requestModel);
+  return Boolean(requestModel);
 }
 
 function chatModelRequestFields(model, messages) {
@@ -5909,7 +5915,7 @@ async function sendMessage(text) {
             requestOptions.thinkingMode,
             requestOptions.translationMode,
           );
-    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt(characterPromptMessages(session.messages, userMessage, requestOptions))}${requestOptions.translationMode ? "" : personRelationshipContextSystemPrompt()}${selectedRecipientContextPrompt()}${baseRequestSystem}${requestOptions.translationMode ? "" : replyDraftContextSystemPrompt(text)}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${shouldIncludeTrainingContext(requestOptions) ? trainingContextSystemPrompt() : ""}`;
+    const requestSystemWithTraining = `${requestOptions.translationMode ? "" : characterContextSystemPrompt(characterPromptMessages(session.messages, userMessage, requestOptions), { lightweight: requestOptions.fastModel })}${shouldIncludeRelationshipContext(requestOptions) ? personRelationshipContextSystemPrompt() : ""}${shouldIncludeRelationshipContext(requestOptions) ? selectedRecipientContextPrompt() : ""}${baseRequestSystem}${requestOptions.translationMode ? "" : replyDraftContextSystemPrompt(text)}${requestOptions.useStudyPackContext ? studyPackContextSystemPrompt(text) : ""}${shouldIncludeTrainingContext(requestOptions) ? trainingContextSystemPrompt() : ""}`;
     const modelRequestUserMessage = noteArticleText === text
       ? userMessage
       : { ...userMessage, content: noteArticleText };
@@ -5920,14 +5926,15 @@ async function sendMessage(text) {
     requestModel = modelForRequestTask(requestTask, requestOptions);
     if (!canSendModelRequest(requestOptions, requestModel)) {
       const durationSeconds = (Date.now() - state.startedAt) / 1000;
+      const imageModelMissing = requestOptions.hasImages === true;
       pushAssistantReply(session, {
-        content: t("chat.imageModelRequired"),
+        content: t(imageModelMissing ? "chat.imageModelRequired" : "chat.standardModelRequired"),
         durationSeconds,
         runMeta: {
           ...messageRunMeta(requestOptions, ""),
           model: "",
           modelLabel: "",
-          modelReason: "画像対応モデルが未取得",
+          modelReason: imageModelMissing ? "画像対応モデルが未取得" : "標準AIが未取得",
         },
       });
       return;
