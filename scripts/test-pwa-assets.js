@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const assert = require("node:assert/strict");
 
 const STUDENT_MODEL_ASSET_VERSION = "0.8.230-purpose-routing";
-const CHAT_CONTEXT_ASSET_VERSION = "0.8.234-standard-selection";
+const CHAT_CONTEXT_ASSET_VERSION = "0.8.235-strict-purpose";
 const index = fs.readFileSync("web/index.html", "utf8");
 const appJs = fs.readFileSync("web/app.js", "utf8");
 assert.match(index, /rel="manifest" href="\/manifest\.webmanifest"/);

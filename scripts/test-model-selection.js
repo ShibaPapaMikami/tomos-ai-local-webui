@@ -93,12 +93,18 @@ assert.equal(purposeForModel(qwen2507, coreModels), "standard");
 assert.equal(purposeForModel(coder, coreModels), "coding");
 assert.equal(purposeForModel(gemmaMlx, coreModels), "high-performance");
 assert.equal(modelForPurpose("standard", { serverModels: coreModels }), qwen2507);
+assert.equal(
+  modelForPurpose("standard", { serverModels: mlxModels }),
+  "",
+  "標準AIはGemmaへ代替しない",
+);
 assert.equal(modelForPurpose("coding", { serverModels: coreModels }), coder);
 assert.equal(
   modelForPurpose("coding", {
     serverModels: { ...coreModels, available: coreModels.available.filter((model) => model !== coder) },
   }),
-  qwen2507,
+  "",
+  "コード作業は標準AIへ代替しない",
 );
 assert.equal(
   modelForPurpose("high-performance", {
@@ -406,6 +412,66 @@ assert.equal(
     modelOverrides: {},
   }),
   gemmaMlx,
+);
+assert.equal(
+  modelForRequestTask("chat", { fastModel: true }, {
+    composerPurpose: "standard",
+    composerModel: "",
+    serverModels: mlxModels,
+    modelOverrides: {},
+  }),
+  "",
+  "標準AIを明示した場合は高速会話でもGemmaへ代替しない",
+);
+assert.equal(
+  modelForRequestTask("chat", { fastModel: true }, {
+    composerPurpose: "auto",
+    composerModel: "",
+    serverModels: mlxModels,
+    modelOverrides: {},
+  }),
+  gemmaMlx,
+  "自動選択では導入済みGemmaへ代替できる",
+);
+assert.equal(
+  modelForRequestTask("coding", {}, {
+    composerPurpose: "coding",
+    composerModel: "",
+    serverModels: coreModels,
+    modelOverrides: {},
+  }),
+  coder,
+  "コード作業を明示した場合はAgentic Coderを使う",
+);
+assert.equal(
+  modelForRequestTask("coding", {}, {
+    composerPurpose: "coding",
+    composerModel: "",
+    serverModels: { ...coreModels, available: coreModels.available.filter((model) => model !== coder) },
+    modelOverrides: {},
+  }),
+  "",
+  "コード作業を明示した場合は標準AIへ代替しない",
+);
+assert.equal(
+  modelForRequestTask("chat", {}, {
+    composerPurpose: "high-performance",
+    composerModel: "",
+    serverModels: coreModels,
+    modelOverrides: {},
+  }),
+  "gemma4:12b",
+  "高性能AIを明示した場合はGemmaを使う",
+);
+assert.equal(
+  modelForRequestTask("chat", {}, {
+    composerPurpose: "high-performance",
+    composerModel: "",
+    serverModels: { chat: qwen2507, available: [qwen2507] },
+    modelOverrides: {},
+  }),
+  "",
+  "高性能AIを明示した場合は標準AIへ代替しない",
 );
 
 assert.equal(
@@ -1433,30 +1499,30 @@ assert.match(serverSource, /"safetyLevel": "low"/);
 assert.match(serverSource, /"external-send-check"/);
 assert.doesNotMatch(codingCandidatesBlock, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
 assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
-assert.match(indexSource, /\/i18n\.js\?v=0\.8\.234-standard-selection/);
+assert.match(indexSource, /\/i18n\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/models\.js\?v=0\.8\.234-standard-selection/);
-assert.match(indexSource, /\/settings\.js\?v=0\.8\.234-standard-selection/);
+assert.match(indexSource, /\/models\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(indexSource, /\/settings\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(indexSource, /\/pwa\.js\?v=0\.8\.234-standard-selection/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.234-standard-selection/);
+assert.match(indexSource, /\/pwa\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.234-standard-selection"/);
-assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.234-standard-selection/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.235-strict-purpose"/);
+assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.234-standard-selection/);
-assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.234-standard-selection/);
+assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.234-standard-selection/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.234-standard-selection/);
+assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
@@ -1485,6 +1551,10 @@ assert.equal(translations.ja["chat.imageModelRequired"], "画像を読むには�
 assert.equal(translations.en["chat.imageModelRequired"], "Add a high-performance AI model to read images.");
 assert.equal(translations.ja["chat.standardModelRequired"], "チャットを使うには「言語モデル」で標準AI（Qwen3 4B Instruct 2507）をダウンロードしてください。");
 assert.equal(translations.en["chat.standardModelRequired"], "To use chat, download Standard AI (Qwen3 4B Instruct 2507) from Language Models.");
+assert.equal(translations.ja["chat.codingModelRequired"], "コード作業を使うには「言語モデル」でAgentic Coderをダウンロードしてください。");
+assert.equal(translations.en["chat.codingModelRequired"], "To use Code work, download Agentic Coder from Language Models.");
+assert.equal(translations.ja["chat.highPerformanceModelRequired"], "高性能AIを使うには「言語モデル」でGemma 4 12Bをダウンロードしてください。");
+assert.equal(translations.en["chat.highPerformanceModelRequired"], "To use High-performance AI, download Gemma 4 12B from Language Models.");
 assert.match(translations.ja["management.languageModelsNote"], /自動（おすすめ）/);
 assert.match(translations.ja["management.languageModelsNote"], /実際のモデル名は各AIの欄で確認/);
 assert.doesNotMatch(translations.ja["management.languageModelsNote"], /内部モデル名は詳細から確認/);
