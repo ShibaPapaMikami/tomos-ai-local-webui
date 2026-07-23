@@ -189,6 +189,7 @@ assert.equal(isStudentHiddenModel(huihuiAbliterated), true);
 assert.equal(isStudentHiddenModel("gemma4:12b"), false);
 assert.equal(safeSavedModel(hauhauBalanced), "");
 assert.equal(safeSavedModel(huihuiAbliterated), "");
+assert.equal(safeSavedModel("qwen2.5:3b"), "");
 assert.equal(safeSavedModel("gemma4:12b"), "gemma4:12b");
 
 assert.equal(
@@ -340,12 +341,12 @@ assert.equal(
 
 assert.equal(
   modelForTask("chat", { serverModels: baseModels, modelOverrides: {} }),
-  "qwen2.5:3b",
+  "gemma4:12b",
 );
 
 assert.equal(
   modelForTask("chat", { serverModels: mlxModels, modelOverrides: {} }),
-  "qwen2.5:3b",
+  gemmaMlx,
 );
 
 assert.equal(
@@ -368,22 +369,22 @@ assert.equal(
     serverModels: baseModels,
     modelOverrides: {},
   }),
-  "qwen2.5:3b",
+  "gemma4:12b",
 );
 
 assert.equal(
-  fallbackCodingModel({ serverModels: { chat: "gemma4:12b" } }),
+  fallbackCodingModel({ serverModels: { chat: "gemma4:12b", available: ["gemma4:12b"] } }),
   "gemma4:12b",
 );
 
 assert.equal(
   fastChatModel({ serverModels: baseModels }),
-  "qwen2.5:3b",
+  "gemma4:12b",
 );
 
 assert.equal(
   fastChatModel({ serverModels: mlxModels }),
-  "qwen2.5:3b",
+  gemmaMlx,
 );
 
 assert.equal(
@@ -396,7 +397,7 @@ assert.equal(
     serverModels: baseModels,
     modelOverrides: {},
   }),
-  "qwen2.5:3b",
+  "gemma4:12b",
 );
 
 assert.equal(
@@ -404,7 +405,7 @@ assert.equal(
     serverModels: mlxModels,
     modelOverrides: {},
   }),
-  "qwen2.5:3b",
+  gemmaMlx,
 );
 
 assert.equal(
@@ -412,7 +413,7 @@ assert.equal(
     serverModels: baseModels,
     modelOverrides: {},
   }),
-  "qwen2.5:3b",
+  "gemma4:12b",
 );
 
 assert.equal(
@@ -420,7 +421,7 @@ assert.equal(
     serverModels: mlxModels,
     modelOverrides: {},
   }),
-  "qwen2.5:3b",
+  gemmaMlx,
 );
 
 assert.equal(
@@ -428,8 +429,17 @@ assert.equal(
     serverModels: baseModels,
     modelOverrides: { translation: "qwen2.5:3b" },
   }),
-  "qwen2.5:3b",
+  "gemma4:12b",
 );
+
+const qwen25OnlyModels = {
+  chat: "qwen2.5:3b",
+  translation: "qwen2.5:3b",
+  available: ["qwen2.5:3b"],
+  pullable: serverPullableModels,
+};
+assert.equal(modelForPurpose("standard", { serverModels: qwen25OnlyModels }), "");
+assert.equal(fastChatModel({ serverModels: qwen25OnlyModels }), "");
 
 assert.equal(
   modelForRequestTask("coding", { responseMode: "quality" }, {
@@ -462,6 +472,8 @@ assert.equal(typeof modelPurpose, "function");
 assert.equal(modelPurpose("gemma4:12b"), "標準チャット・画像理解");
 assert.equal(modelPurpose(gemmaMlx), "Apple Silicon向け高速チャット・コード生成");
 assert.equal(modelPurpose("qwen2.5:3b"), "低スペックPC・移行用の予備");
+assert.equal(serverModelById.get("qwen2.5:3b")?.allowAutoSelect, false);
+assert.equal(serverModelById.get("qwen2.5:3b")?.defaultVisible, false);
 assert.equal(modelPurpose(qwen2507), "標準AI・資料検索・学習パック");
 assert.equal(displayModelName(qwen2507), "Qwen3 4B Instruct 2507");
 assert.equal(composerModelLabel(qwen2507, { t: (key) => key }), "Qwen3 2507");
@@ -488,7 +500,8 @@ assert.match(managementSource, /isNoteArticleWritingRequest,/);
 assert.match(appSource, /function isNoteArticleWritingRequest\(text\)/);
 assert.match(appSource, /window\.GEMMA_MANAGEMENT\?\.isNoteArticleWritingRequest/);
 assert.match(appSource, /hasImages: images\.length > 0/);
-assert.match(appSource, /content: t\("chat\.imageModelRequired"\)/);
+assert.match(appSource, /"chat\.imageModelRequired"/);
+assert.match(appSource, /"chat\.standardModelRequired"/);
 assert.match(appSource, /if \(!canSendModelRequest\(requestOptions, requestModel\)\)/);
 assert.match(appSource, /async function sendMessage\(text\) \{\s*if \(state\.busy \|\| !\(await prepareComposerMessageForSend\(text\)\)\) return false;/);
 assert.match(appSource, /if \(state\.composerModel\) return modelForTask\("coding", true\);/);
@@ -551,6 +564,7 @@ vm.runInContext(
     extractFunctionSource(appSource, "chatRequestMessages"),
     extractFunctionSource(appSource, "characterPromptMessages"),
     extractFunctionSource(appSource, "shouldIncludeTrainingContext"),
+    extractFunctionSource(appSource, "shouldIncludeRelationshipContext"),
     extractFunctionSource(appSource, "canSendModelRequest"),
     extractFunctionSource(appSource, "chatModelRequestFields"),
   ].join("\n"),
@@ -571,6 +585,7 @@ assert.equal(imageRequestHelperContext.shouldUseWorkspaceTextShortcuts(false, im
 assert.equal(imageRequestHelperContext.shouldUseWorkspaceTextShortcuts(false, { hasImages: false }), true);
 assert.equal(imageRequestHelperContext.canSendModelRequest(imageRequestOptions, ""), false);
 assert.equal(imageRequestHelperContext.canSendModelRequest(imageRequestOptions, gemmaMlx), true);
+assert.equal(imageRequestHelperContext.canSendModelRequest({ hasImages: false }, ""), false);
 const imageMessage = { role: "user", content: "画像を説明して", images: ["base64-image-data"] };
 const imageRequestMessages = imageRequestHelperContext.chatRequestMessages(
   [{ role: "user", content: "前の質問" }, imageMessage],
@@ -591,7 +606,13 @@ assert.deepEqual(
 assert.equal(imageRequestHelperContext.shouldIncludeTrainingContext({ fastModel: true }), false);
 assert.equal(imageRequestHelperContext.shouldIncludeTrainingContext({ translationMode: true }), false);
 assert.equal(imageRequestHelperContext.shouldIncludeTrainingContext({ fastModel: false, translationMode: false }), true);
+assert.equal(imageRequestHelperContext.shouldIncludeRelationshipContext({ fastModel: true }), false);
+assert.equal(imageRequestHelperContext.shouldIncludeRelationshipContext({ translationMode: true }), false);
+assert.equal(imageRequestHelperContext.shouldIncludeRelationshipContext({ fastModel: false, translationMode: false }), true);
 assert.match(appSource, /characterContextSystemPrompt\(characterPromptMessages\(/);
+assert.match(appSource, /lightweight: requestOptions\.fastModel/);
+assert.match(appSource, /shouldIncludeRelationshipContext\(requestOptions\) \? personRelationshipContextSystemPrompt\(\) : ""/);
+assert.match(appSource, /shouldIncludeRelationshipContext\(requestOptions\) \? selectedRecipientContextPrompt\(\) : ""/);
 assert.match(appSource, /shouldIncludeTrainingContext\(requestOptions\) \? trainingContextSystemPrompt\(\) : ""/);
 const imageRequestFields = imageRequestHelperContext.chatModelRequestFields(gemmaMlx, imageRequestMessages);
 assert.equal(imageRequestFields.model, gemmaMlx);
@@ -881,6 +902,22 @@ assert.equal(
   migrationContext.migrateStudentModelRoutingStorage(migrationStorage, safeSavedModel),
   false,
 );
+const retiredQwenValues = new Map([
+  ["gemma4.studentModelRoutingV1Migrated", "true"],
+  ["gemma4.composerModel", "qwen2.5:3b"],
+  ["gemma4.model.chat", "qwen2.5:3b"],
+  ["gemma4.model.translation", "qwen2.5:3b"],
+  ["gemma4.composerModelVisibleModels", JSON.stringify(["qwen2.5:3b"])],
+]);
+const retiredQwenStorage = {
+  getItem: (key) => retiredQwenValues.has(key) ? retiredQwenValues.get(key) : null,
+  setItem: (key, value) => retiredQwenValues.set(key, String(value)),
+};
+assert.equal(migrationContext.migrateStudentModelRoutingStorage(retiredQwenStorage, safeSavedModel), false);
+assert.equal(retiredQwenValues.get("gemma4.composerModel"), "");
+assert.equal(retiredQwenValues.get("gemma4.model.chat"), "");
+assert.equal(retiredQwenValues.get("gemma4.model.translation"), "");
+assert.deepEqual(JSON.parse(retiredQwenValues.get("gemma4.composerModelVisibleModels")), []);
 const cleanMigrationValues = new Map([["gemma4.composerModel", "gemma4:12b"]]);
 const cleanMigrationStorage = {
   getItem: (key) => cleanMigrationValues.has(key) ? cleanMigrationValues.get(key) : null,
@@ -1396,30 +1433,30 @@ assert.match(serverSource, /"safetyLevel": "low"/);
 assert.match(serverSource, /"external-send-check"/);
 assert.doesNotMatch(codingCandidatesBlock, /Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
 assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-gemma-4-12B-coder-fable5-composer2\.5-v1-abliterated/);
-assert.match(indexSource, /\/i18n\.js\?v=0\.8\.230-purpose-routing/);
+assert.match(indexSource, /\/i18n\.js\?v=0\.8\.233-standard-routing/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
-assert.match(indexSource, /\/models\.js\?v=0\.8\.230-purpose-routing/);
+assert.match(indexSource, /\/models\.js\?v=0\.8\.233-standard-routing/);
 assert.match(indexSource, /\/settings\.js\?v=0\.8\.230-purpose-routing/);
 assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(indexSource, /\/pwa\.js\?v=0\.8\.231-greeting-context/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.231-greeting-context/);
+assert.match(indexSource, /\/pwa\.js\?v=0\.8\.233-standard-routing/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.233-standard-routing/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.231-greeting-context"/);
-assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.230-purpose-routing/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.233-standard-routing"/);
+assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.233-standard-routing/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
-assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.230-purpose-routing/);
+assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.233-standard-routing/);
 assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.230-purpose-routing/);
 assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.231-greeting-context/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.231-greeting-context/);
+assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.233-standard-routing/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.233-standard-routing/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
@@ -1446,6 +1483,8 @@ vm.runInContext(i18nSource, i18nContext, { filename: "web/i18n.js" });
 const translations = i18nContext.window.GEMMA_I18N;
 assert.equal(translations.ja["chat.imageModelRequired"], "画像を読むには高性能AIを追加してください。");
 assert.equal(translations.en["chat.imageModelRequired"], "Add a high-performance AI model to read images.");
+assert.equal(translations.ja["chat.standardModelRequired"], "チャットを使うには「言語モデル」で標準AI（Qwen3 4B Instruct 2507）をダウンロードしてください。");
+assert.equal(translations.en["chat.standardModelRequired"], "To use chat, download Standard AI (Qwen3 4B Instruct 2507) from Language Models.");
 assert.match(translations.ja["management.languageModelsNote"], /自動（おすすめ）/);
 assert.match(translations.ja["management.languageModelsNote"], /実際のモデル名は各AIの欄で確認/);
 assert.doesNotMatch(translations.ja["management.languageModelsNote"], /内部モデル名は詳細から確認/);
@@ -1505,10 +1544,12 @@ assert.match(studentInstallGuide, /`自動（おすすめ）`[\s\S]*`標準AI`[\
 assert.match(studentInstallGuide, /`TXT`、`Markdown`、`PDF`/);
 assert.match(studentInstallGuide, /`CSV`、`Excel`、LanceDB、Knowledge Graphは今回の標準機能には含まれません/);
 assert.match(studentInstallGuide, /`ローカル処理` または `企業サーバー送信`/);
+assert.match(studentInstallGuide, /Qwen 2\.5 3Bは旧環境からの移行確認用で、標準AIや高速会話には自動選択しません/);
 assert.match(studentInstallGuide, /Qwen3-TTS 0\.6B Baseを第一実験候補/);
 assert.match(studentInstallGuide, /Ornith 9Bは実機比較候補/);
 assert.match(studentInstallGuide, /Gemma E4Bは既存Gemmaとの実機比較候補/);
 assert.match(releaseChecklist, /通常画面の選択肢が `自動（おすすめ）`、`標準AI`、`コード作業`、`高性能AI` の4つだけ/);
+assert.match(releaseChecklist, /Qwen 2\.5 3Bが標準AIや高速会話へ自動選択されない/);
 assert.match(releaseChecklist, /企業資料という理由だけで企業サーバーへ自動送信されない/);
 assert.match(manualChecklist, /PC幅とモバイル幅で `自動（おすすめ）`、`標準AI`、`コード作業`、`高性能AI` の4用途/);
 

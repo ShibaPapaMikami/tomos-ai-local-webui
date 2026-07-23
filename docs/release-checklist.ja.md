@@ -24,7 +24,9 @@
 - [ ] 署名証明書を登録したMacで `TOMOS_AI-vX.X.X-mac.pkg` を作成し、Apple公証を通している
 - [ ] GitHub Actionsで `TOMOS_AI-vX.X.X-windows.msi` が作成される
 - [ ] ZIPに `.git/`、`ComfyUI/`、`.venv/`、`.venv-asr/`、モデルファイルが含まれていない
-- [ ] GitHub ReleaseにMac/WindowsのZIP、PKG、MSIを添付している
+- [ ] GitHub ReleaseにはmacOS用PKGとWindows用MSIだけを添付している
+- [ ] 初心者が迷わないよう、GitHub ReleaseにZIPを添付していない
+- [ ] GitHub自動生成のSource codeは削除できないため、学生向け案内ではPKGまたはMSIだけを指定している
 - [ ] 古いReleaseを削除せず残している
 - [ ] 学生向け案内に、使うReleaseのURLとOS別インストーラー名を記載している
 
@@ -34,6 +36,8 @@
 - [ ] 通常画面では用途名を先に表示し、内部モデル名は各おすすめカード内で小さく確認できる
 - [ ] 取得済みの非推奨モデルだけが`不要なモデルを削除`に表示される
 - [ ] `標準AI` がチャット、翻訳、資料検索、教材パックの標準として使われる
+- [ ] Qwen 2.5 3Bが標準AIや高速会話へ自動選択されない
+- [ ] Qwen3 4B未取得時はQwen 2.5 3Bへ戻らず、標準AIのダウンロード案内が表示される
 - [ ] `コード作業` は専用AIが取得済みなら使い、未取得なら標準AIへ一度だけ戻る
 - [ ] `高性能AI` は画像添付時だけ使われる
 - [ ] 翻訳用のカードが重複せず、翻訳は標準AIの用途に含まれる

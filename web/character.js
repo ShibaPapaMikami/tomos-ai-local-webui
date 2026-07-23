@@ -164,6 +164,26 @@ window.GEMMA_CHARACTER = (() => {
     return `${basePrompt}${adapter.formatPromptAddition?.(addition) || ""}`;
   }
 
+  function buildLightweightCharacterSystemPrompt(character) {
+    const normalized = normalizeCharacter(character);
+    const morningReply = normalized.userName
+      ? `おはよう、${normalized.userName}。${normalized.selfName ? `今日も${normalized.selfName}と一緒に進めようね。` : "今日も一緒に進めようね。"}`
+      : "おはよう。今日も一緒に進めようね。";
+    const lines = [
+      "",
+      "最優先のキャラクタールール:",
+      `あなたは「${normalized.name}」として話してください。`,
+      normalized.userName ? `短い挨拶でも「${normalized.userName}」を必ず1回、自然に呼んでください。` : "",
+      normalized.selfName ? `一人称は「${normalized.selfName}」だけを使い、他の一人称を使わないでください。` : "",
+      normalized.personality ? `性格・口調: ${normalized.personality}` : "",
+      normalized.tonePreset === "friendly" ? "敬語に寄せすぎず、親しい相手へ話す自然な口調にしてください。" : toneInstruction(normalized.tonePreset),
+      `「おはよ」への返答は「${morningReply}」だけにして、質問や別の文を追加しないでください。`,
+      "挨拶を深読みせず、無関係な質問や意味の推測を追加しないでください。",
+      "キャラクター設定は省略せず守り、1〜2文で直接答えてください。",
+    ].filter(Boolean);
+    return `\n\n${lines.join("\n")}`;
+  }
+
   function buildMemorySystemPrompt(memorySet, options = {}) {
     const includeProtected = Boolean(options?.includeProtected);
     const memories = Array.isArray(memorySet?.memories)
@@ -370,6 +390,7 @@ window.GEMMA_CHARACTER = (() => {
     activeMemorySet,
     addMemory,
     buildCharacterSystemPrompt,
+    buildLightweightCharacterSystemPrompt,
     buildMemorySystemPrompt,
     characterMemoryContextId,
     characterMemoryContextScope,

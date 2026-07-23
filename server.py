@@ -105,7 +105,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.226")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.227")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
@@ -305,8 +305,8 @@ PULLABLE_MODELS = [
         "family": "Qwen系",
         "role": "lightweight",
         "tier": "optional",
-        "defaultVisible": True,
-        "allowAutoSelect": True,
+        "defaultVisible": False,
+        "allowAutoSelect": False,
         "defaultInstall": False,
     },
     {
@@ -3652,11 +3652,11 @@ def pc_diagnostics_recommendation(system_info: dict[str, object]) -> dict[str, o
     else:
         level = "very-heavy"
         label = "激重い"
-        standard = QWEN3_2507_MODEL if has_core else "qwen2.5:3b"
+        standard = QWEN3_2507_MODEL
         if has_core:
             summary = "標準AIはQwen3 4Bがおすすめです。12B系や実験モデルは避ける方が安定します。"
         else:
-            summary = "Qwen3 4Bを取得するまで、Qwen 2.5 3Bを予備の軽量AIとして使えます。12B系や実験モデルは避ける方が安定します。"
+            summary = "チャットを使う前に標準AIのQwen3 4Bを取得してください。Qwen 2.5 3Bは自動選択しません。"
         high_performance = ""
         warnings = ["12B系、HauhauCS、実験モデルはこのPCでは非推奨です。"]
 
