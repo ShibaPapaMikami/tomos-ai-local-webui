@@ -655,6 +655,11 @@ assert.deepEqual(
 );
 assert.equal(composerPurposeSelect.value, "standard");
 assert.equal(composerPurposeSelect.children.some((option) => /Qwen|Gemma|Agentic/.test(option.textContent)), false);
+assert.equal(
+  composerPurposeSelect.children.every((option) => option.disabled === false),
+  true,
+  "未導入の用途も選択してダウンロード画面を開ける",
+);
 
 const missingStandardPurposeSelect = new FakeElement("select");
 renderComposerPurposeSelect({
@@ -679,8 +684,45 @@ const appSource = fs.readFileSync("web/app.js", "utf8");
 assert.match(appSource, /localStorage\.setItem\("gemma4\.composerPurpose", selectedPurpose\)/);
 assert.match(
   appSource,
-  /selectedPurpose === "standard" && !model[\s\S]*?panel: els\.languageModelsPanel/,
-  "標準AIが未導入なら既存の言語モデル画面を開く",
+  /selectedPurpose !== "auto" && !model[\s\S]*?panel: els\.languageModelsPanel/,
+  "明示用途のモデルが未導入なら既存の言語モデル画面を開く",
+);
+assert.match(
+  appSource,
+  /composerPurpose: state\.composerPurpose/,
+  "選択した用途を実際のモデル選択へ渡す",
+);
+assert.match(
+  appSource,
+  /chat\.codingModelRequired[\s\S]*?chat\.highPerformanceModelRequired[\s\S]*?chat\.standardModelRequired/,
+  "未導入時は選択した用途ごとの案内を表示する",
+);
+assert.match(
+  appSource,
+  /state\.composerPurpose === "auto"[\s\S]*?requestModel = modelForTask\("chat"\) \|\| requestModel/,
+  "長文処理の代替モデルは自動選択の場合だけ使う",
+);
+assert.match(
+  appSource,
+  /function modelForWorkspaceBuild\(text\)[\s\S]*?state\.composerPurpose !== "auto"[\s\S]*?modelForRequestTask\("coding", \{ hasImages: false \}\)/,
+  "フォルダー生成でも明示用途を実際のモデル選択へ渡す",
+);
+assert.match(
+  appSource,
+  /error\.name === "TimeoutError"[\s\S]*?state\.composerPurpose === "auto"[\s\S]*?activeCodingModel !== fallback/,
+  "タイムアウト時の別モデルへの切替は自動選択の場合だけ許可する",
+);
+const missingWorkspaceModelBlock = appSource.slice(
+  appSource.indexOf("if (!activeCodingModel)"),
+  appSource.indexOf("state.busy = true", appSource.indexOf("if (!activeCodingModel)")),
+);
+assert.match(missingWorkspaceModelBlock, /chat\.codingModelRequired/);
+assert.match(missingWorkspaceModelBlock, /chat\.highPerformanceModelRequired/);
+assert.match(missingWorkspaceModelBlock, /chat\.standardModelRequired/);
+assert.match(
+  missingWorkspaceModelBlock,
+  /pushAssistantReply\(session[\s\S]*?saveSessions\(\);\s*render\(\);\s*return true;/,
+  "フォルダー生成でも用途別の未導入案内を保存して画面へ表示する",
 );
 
 const currentChatVisibilityEl = new FakeElement("section");

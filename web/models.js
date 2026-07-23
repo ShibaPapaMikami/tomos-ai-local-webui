@@ -177,13 +177,23 @@ function gemmaModelForPurpose(purpose = "auto", options = {}) {
   const installed = typeof options.modelIsInstalled === "function"
     ? options.modelIsInstalled
     : (model) => gemmaModelIsInstalled(model, serverModels);
-  if (purpose === "standard") return gemmaCoreModel(options);
+  if (purpose === "standard") {
+    return installed(GEMMA_QWEN3_2507_MODEL)
+      && gemmaModelCanAutoSelect(GEMMA_QWEN3_2507_MODEL, serverModels)
+      ? GEMMA_QWEN3_2507_MODEL
+      : "";
+  }
   if (purpose === "coding") {
-    return installed(GEMMA_AGENTIC_CODER_MODEL) ? GEMMA_AGENTIC_CODER_MODEL : gemmaCoreModel(options);
+    return installed(GEMMA_AGENTIC_CODER_MODEL)
+      && gemmaModelCanAutoSelect(GEMMA_AGENTIC_CODER_MODEL, serverModels)
+      ? GEMMA_AGENTIC_CODER_MODEL
+      : "";
   }
   if (purpose === "high-performance") {
-    if (installed("gemma4:12b-mlx")) return "gemma4:12b-mlx";
-    if (installed("gemma4:12b")) return "gemma4:12b";
+    if (installed("gemma4:12b-mlx") && gemmaModelCanAutoSelect("gemma4:12b-mlx", serverModels)) {
+      return "gemma4:12b-mlx";
+    }
+    if (installed("gemma4:12b") && gemmaModelCanAutoSelect("gemma4:12b", serverModels)) return "gemma4:12b";
     return "";
   }
   return "";
@@ -231,6 +241,13 @@ function gemmaModelForRequestTask(task, requestOptions = {}, options = {}) {
   const installed = typeof options.modelIsInstalled === "function"
     ? options.modelIsInstalled
     : (model) => gemmaModelIsInstalled(model, serverModels);
+  const composerPurpose = ["standard", "coding", "high-performance"].includes(options.composerPurpose)
+    ? options.composerPurpose
+    : "auto";
+  if (composerPurpose !== "auto") {
+    if (requestOptions.hasImages === true && composerPurpose !== "high-performance") return "";
+    return gemmaModelForPurpose(composerPurpose, options);
+  }
   if (requestOptions.hasImages === true) {
     if (installed("gemma4:12b-mlx")) return "gemma4:12b-mlx";
     if (installed("gemma4:12b")) return "gemma4:12b";

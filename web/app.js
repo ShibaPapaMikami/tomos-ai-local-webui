@@ -1809,7 +1809,7 @@ function setComposerPurpose(purpose) {
   syncModelInputs();
   renderSettingsMeta();
   renderMessages();
-  if (selectedPurpose === "standard" && !model) {
+  if (selectedPurpose !== "auto" && !model) {
     renderModelInstaller();
     window.GEMMA_MANAGEMENT?.openManagementPanel?.({
       els,
@@ -1891,6 +1891,7 @@ function messageRunMeta(requestOptions, model, overrides = {}) {
 
 function modelForRequestTask(task, requestOptions) {
   return window.GEMMA_MODELS.modelForRequestTask(task, requestOptions, {
+    composerPurpose: state.composerPurpose,
     composerModel: state.composerModel,
     modelOverrides: state.modelOverrides,
     serverModels: state.serverModels,
@@ -4475,6 +4476,9 @@ function isSimpleWorkspaceBuildRequest(text) {
 }
 
 function modelForWorkspaceBuild(text) {
+  if (state.composerPurpose !== "auto") {
+    return modelForRequestTask("coding", { hasImages: false });
+  }
   if (state.composerModel) return modelForTask("coding", true);
   return isSimpleWorkspaceBuildRequest(text) ? fastChatModel() : modelForTask("coding");
 }
@@ -5376,6 +5380,35 @@ async function handleWorkspaceBuild(text) {
 
   session.messages.push({ role: "user", content: text });
   updateSessionTitle(session, text);
+  let activeCodingModel = modelForWorkspaceBuild(text);
+  if (!activeCodingModel) {
+    const missingModelMessageKey = state.composerPurpose === "coding"
+      ? "chat.codingModelRequired"
+      : state.composerPurpose === "high-performance"
+        ? "chat.highPerformanceModelRequired"
+        : "chat.standardModelRequired";
+    pushAssistantReply(session, {
+      content: t(missingModelMessageKey),
+      durationSeconds: 0,
+      runMeta: {
+        model: "",
+        modelLabel: "",
+        task: "coding",
+        taskLabel: t("task.coding"),
+        modelReason: state.composerPurpose === "coding"
+          ? "コード作業AIが未取得"
+          : state.composerPurpose === "high-performance"
+            ? "高性能AIが未取得"
+            : "標準AIが未取得",
+        responseMode: "quality",
+        responseModeLabel: t("mode.quality"),
+        thinkingMode: "high",
+      },
+    });
+    saveSessions();
+    render();
+    return true;
+  }
   state.busy = true;
   state.abortController = new AbortController();
   startProgressTimer(t("progress.workspace"));
@@ -5395,7 +5428,6 @@ async function handleWorkspaceBuild(text) {
   let attempts = 0;
   const simpleBuild = isSimpleWorkspaceBuildRequest(text);
   const maxAttempts = simpleBuild ? 2 : 3;
-  let activeCodingModel = modelForWorkspaceBuild(text);
   let usedFallbackModel = false;
   const generationOptions = simpleBuild
     ? {
@@ -5479,6 +5511,7 @@ async function handleWorkspaceBuild(text) {
           error.name === "TimeoutError" &&
           attempts < maxAttempts &&
           !usedFallbackModel &&
+          state.composerPurpose === "auto" &&
           activeCodingModel !== fallback
         ) {
           activeCodingModel = fallback;
@@ -5566,7 +5599,9 @@ async function handleWorkspaceBuild(text) {
           ].join("\n")
         : [
             "生成が時間内に完了しなかったため停止しました。",
-            "- Coderが遅い場合は標準モデルへの自動切替を試します",
+            state.composerPurpose === "auto"
+              ? "- Coderが遅い場合は標準モデルへの自動切替を試します"
+              : "- 選択中のAIを別のAIへ自動切替しません",
             "- それでも止まる場合は、依頼をさらに小さくしてください。例: まず画面だけ作る",
           ].join("\n");
     } else {
@@ -5944,20 +5979,34 @@ async function sendMessage(text) {
     if (!canSendModelRequest(requestOptions, requestModel)) {
       const durationSeconds = (Date.now() - state.startedAt) / 1000;
       const imageModelMissing = requestOptions.hasImages === true;
+      const missingModelMessageKey = imageModelMissing
+        ? "chat.imageModelRequired"
+        : state.composerPurpose === "coding"
+          ? "chat.codingModelRequired"
+          : state.composerPurpose === "high-performance"
+            ? "chat.highPerformanceModelRequired"
+            : "chat.standardModelRequired";
+      const missingModelReason = imageModelMissing
+        ? "画像対応モデルが未取得"
+        : state.composerPurpose === "coding"
+          ? "コード作業AIが未取得"
+          : state.composerPurpose === "high-performance"
+            ? "高性能AIが未取得"
+            : "標準AIが未取得";
       pushAssistantReply(session, {
-        content: t(imageModelMissing ? "chat.imageModelRequired" : "chat.standardModelRequired"),
+        content: t(missingModelMessageKey),
         durationSeconds,
         runMeta: {
           ...messageRunMeta(requestOptions, ""),
           model: "",
           modelLabel: "",
-          modelReason: imageModelMissing ? "画像対応モデルが未取得" : "標準AIが未取得",
+          modelReason: missingModelReason,
         },
       });
       return;
     }
     if (shouldUseLongNoteArticlePipeline(noteArticleText, requestOptions)) {
-      requestModel = modelForTask("chat") || requestModel;
+      if (state.composerPurpose === "auto") requestModel = modelForTask("chat") || requestModel;
       state.abortController = new AbortController();
       const data = await requestLongNoteArticleReconstruction({
         text: noteArticleText,

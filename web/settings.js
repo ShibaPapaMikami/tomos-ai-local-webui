@@ -530,8 +530,6 @@ function renderComposerPurposeSelect({
 }) {
   if (!select) return;
   const language = state.language === "en" ? "en" : "ja";
-  const installed = typeof modelIsInstalled === "function" ? modelIsInstalled : () => false;
-  const highPerformanceAvailable = installed("gemma4:12b-mlx") || installed("gemma4:12b");
   const options = [
     { value: "auto", label: language === "en" ? "Auto (recommended)" : "自動（おすすめ）" },
     { value: "standard", label: language === "en" ? "Standard AI" : "標準AI" },
@@ -539,7 +537,6 @@ function renderComposerPurposeSelect({
     {
       value: "high-performance",
       label: language === "en" ? "High-performance AI" : "高性能AI",
-      disabled: !highPerformanceAvailable,
     },
   ];
   select.innerHTML = "";
