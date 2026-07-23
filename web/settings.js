@@ -521,7 +521,13 @@ function purposeForSettingsModel(model, state = {}) {
   return "auto";
 }
 
-function renderComposerPurposeSelect({ select, current = "", state = {}, modelIsInstalled }) {
+function renderComposerPurposeSelect({
+  select,
+  current = "",
+  selectedPurpose = "",
+  state = {},
+  modelIsInstalled,
+}) {
   if (!select) return;
   const language = state.language === "en" ? "en" : "ja";
   const installed = typeof modelIsInstalled === "function" ? modelIsInstalled : () => false;
@@ -544,7 +550,10 @@ function renderComposerPurposeSelect({ select, current = "", state = {}, modelIs
     option.disabled = Boolean(item.disabled);
     select.append(option);
   }
-  select.value = purposeForSettingsModel(current, state);
+  const validPurposes = new Set(options.map((item) => item.value));
+  select.value = validPurposes.has(selectedPurpose)
+    ? selectedPurpose
+    : purposeForSettingsModel(current, state);
 }
 
 function externalLlmCheckStatusKey(errorCode) {
@@ -772,6 +781,7 @@ function renderModelSettingsSelects({
   renderComposerPurposeSelect({
     select: els.composerModel,
     current: safeCurrent(state.composerModel),
+    selectedPurpose: state.composerPurpose,
     state,
     modelIsInstalled,
   });

@@ -72,6 +72,10 @@ const storedComposerModel = initialComposerModelVisibility.saved
   && !initialComposerModelVisibility.models.includes(initialComposerModel)
   ? ""
   : initialComposerModel;
+const initialComposerPurpose = localStorage.getItem("gemma4.composerPurpose") || "";
+const storedComposerPurpose = ["auto", "standard", "coding", "high-performance"].includes(initialComposerPurpose)
+  ? initialComposerPurpose
+  : (window.GEMMA_MODELS?.purposeForModel?.(storedComposerModel, {}) || "auto");
 
 if (storedComposerModel !== initialComposerModel) {
   localStorage.setItem("gemma4.composerModel", storedComposerModel);
@@ -130,6 +134,7 @@ const state = {
     translation: localStorage.getItem("gemma4.model.translation") || "",
   },
   composerModel: storedComposerModel,
+  composerPurpose: storedComposerPurpose,
   composerModelVisibleModels: initialComposerModelVisibility.models,
   composerModelVisibleModelsSaved: initialComposerModelVisibility.saved,
   studentModelRoutingMigrated,
@@ -1791,7 +1796,12 @@ function setComposerModel(value) {
 }
 
 function setComposerPurpose(purpose) {
-  const model = window.GEMMA_MODELS.modelForPurpose(purpose, {
+  const selectedPurpose = ["auto", "standard", "coding", "high-performance"].includes(purpose)
+    ? purpose
+    : "auto";
+  state.composerPurpose = selectedPurpose;
+  localStorage.setItem("gemma4.composerPurpose", selectedPurpose);
+  const model = window.GEMMA_MODELS.modelForPurpose(selectedPurpose, {
     serverModels: state.serverModels,
     modelIsInstalled,
   });
@@ -1799,6 +1809,13 @@ function setComposerPurpose(purpose) {
   syncModelInputs();
   renderSettingsMeta();
   renderMessages();
+  if (selectedPurpose === "standard" && !model) {
+    renderModelInstaller();
+    window.GEMMA_MANAGEMENT?.openManagementPanel?.({
+      els,
+      panel: els.languageModelsPanel,
+    });
+  }
 }
 
 function setComposerModelVisibleModels(models) {

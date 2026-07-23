@@ -404,6 +404,11 @@ assert.doesNotMatch(installerHtml, /Huihui/);
 const recommendedCards = descendantElements(installerEl)
   .filter((element) => element.className.includes("model-recommended-card"));
 assert.equal(recommendedCards.length, 3, "おすすめカードは3件表示する");
+assert.match(
+  recommendedCards[0].outerHTML,
+  /<button class="ghost-button model-install-button">ダウンロード<\/button>/,
+  "標準AIカードにQwen3のダウンロードボタンを表示する",
+);
 for (const [card, expected] of [
   [recommendedCards[0], ["標準AI", "Qwen3 4B Instruct 2507"]],
   [recommendedCards[1], ["コード作業", "Agentic Coder v2"]],
@@ -650,6 +655,33 @@ assert.deepEqual(
 );
 assert.equal(composerPurposeSelect.value, "standard");
 assert.equal(composerPurposeSelect.children.some((option) => /Qwen|Gemma|Agentic/.test(option.textContent)), false);
+
+const missingStandardPurposeSelect = new FakeElement("select");
+renderComposerPurposeSelect({
+  select: missingStandardPurposeSelect,
+  current: "",
+  selectedPurpose: "standard",
+  state: {
+    language: "ja",
+    serverModels: {
+      ...state.serverModels,
+      available: [],
+    },
+  },
+  modelIsInstalled: () => false,
+});
+assert.equal(
+  missingStandardPurposeSelect.value,
+  "standard",
+  "標準AIが未導入でも利用者が選んだ用途を維持する",
+);
+const appSource = fs.readFileSync("web/app.js", "utf8");
+assert.match(appSource, /localStorage\.setItem\("gemma4\.composerPurpose", selectedPurpose\)/);
+assert.match(
+  appSource,
+  /selectedPurpose === "standard" && !model[\s\S]*?panel: els\.languageModelsPanel/,
+  "標準AIが未導入なら既存の言語モデル画面を開く",
+);
 
 const currentChatVisibilityEl = new FakeElement("section");
 renderComposerModelVisibility({
