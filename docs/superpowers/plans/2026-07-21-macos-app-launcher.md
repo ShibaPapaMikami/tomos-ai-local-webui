@@ -1,5 +1,14 @@
 # macOS App Launcher Implementation Plan
 
+> **状態: 後継計画へ統合済み。Taskを実行しない。**
+>
+> この計画は `.app` からブラウザーを開くため、TOMOSの正式デスクトップアプリ計画としては廃止した。既存PKG identifier、Bundle ID、旧データを削除しない移行、Developer ID署名・公証の条件だけを後継計画へ引き継ぐ。
+>
+> 後継正本:
+> - `docs/superpowers/specs/2026-07-24-tomos-desktop-app-evolution-design.md`
+> - `docs/superpowers/plans/2026-07-24-tomos-tauri-desktop-shell.md`
+> - `docs/superpowers/plans/2026-07-23-tomos-evolution-master.md`
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** TOMOS AIを`/Applications/TOMOS AI.app`から起動し、ローカルサーバーの重複を防ぎながら既定ブラウザーで既存UIを開ける、公証可能なmacOSアプリ形式にする。
