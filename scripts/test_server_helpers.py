@@ -3287,6 +3287,34 @@ def test_pullable_model_classifications() -> None:
         assert model["pullable"] is False
 
 
+def test_parse_ollama_pull_progress_and_download_jobs() -> None:
+    parsed = server.parse_ollama_pull_progress(
+        "pulling 7ab  42% ▕████▏ 2.1 GB/5.0 GB 12 MB/s 4m"
+    )
+    assert parsed["percent"] == 42
+    assert parsed["completedBytes"] == 2100000000
+    assert parsed["totalBytes"] == 5000000000
+
+    with server.MODEL_PULL_LOCK:
+        server.MODEL_PULL_JOBS.clear()
+        server.MODEL_PULL_JOBS["example:model"] = {
+            "model": "example:model",
+            "status": "running",
+            "message": "pulling",
+            "percent": 42,
+            "completedBytes": 2100000000,
+            "totalBytes": 5000000000,
+            "startedAt": 1,
+            "finishedAt": None,
+        }
+    payload = server.download_jobs_status(reconcile_models=False)
+    job = next(item for item in payload["jobs"] if item["id"] == "model:example:model")
+    assert job["kind"] == "model"
+    assert job["label"] == "example:model"
+    assert job["percent"] == 42
+    assert job["retryAction"] == {"type": "model", "id": "example:model"}
+
+
 if __name__ == "__main__":
     test_contract_pdf_import_status_payload_shape()
     test_contract_pdf_import_connection_test_payload_shape()
@@ -3451,4 +3479,5 @@ if __name__ == "__main__":
     test_validate_model_remove_accepts_pullable_model()
     test_validate_model_remove_accepts_existing_student_hidden_models()
     test_pullable_model_classifications()
+    test_parse_ollama_pull_progress_and_download_jobs()
     print("server helper tests passed")

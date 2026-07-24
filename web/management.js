@@ -474,10 +474,14 @@ window.GEMMA_MANAGEMENT = (() => {
       response = await fetch("/api/study-packs/note-article/install", { method: "POST" });
       payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) throw new Error(payload.error || "download failed");
-      registerManagedStudyPack({ state, definition: payload.definition });
-      state.managedStudyPack = payload.pack;
+      state.managedStudyPack = {
+        ...(state.managedStudyPack || {}),
+        status: "downloading",
+        downloadMessage: payload.message || "",
+      };
       renderStudyPacksPanel({ state, t });
-      return { ok: true, message: t("management.noteArticlePackInstallDone") };
+      window.GEMMA_DOWNLOAD_MONITOR?.refresh?.();
+      return { ok: true, message: payload.message || t("model.downloading") };
     } catch {
       const errorMessage = managedStudyPackInstallError(response, payload, t);
       state.managedStudyPack = { ...(state.managedStudyPack || {}), status: "error", errorMessage };
@@ -1374,7 +1378,23 @@ window.GEMMA_MANAGEMENT = (() => {
       managedCard.dataset.status = status;
       managedStatus.textContent = status === "error" && state.managedStudyPack?.errorMessage
         ? state.managedStudyPack.errorMessage
-        : t(statusKeys[status] || statusKeys.error);
+        : status === "downloading" && state.managedStudyPack?.percent !== null && state.managedStudyPack?.percent !== undefined && Number.isFinite(Number(state.managedStudyPack.percent))
+          ? `${t(statusKeys.downloading)} ${Math.round(Number(state.managedStudyPack.percent))}%`
+          : t(statusKeys[status] || statusKeys.error);
+      let progress = managedCard.querySelector(".model-inline-progress");
+      if (status === "downloading") {
+        if (!progress) {
+          progress = document.createElement("div");
+          progress.className = "model-inline-progress";
+          managedCard.querySelector("div")?.append(progress);
+        }
+        const percent = state.managedStudyPack?.percent !== null && state.managedStudyPack?.percent !== undefined && Number.isFinite(Number(state.managedStudyPack.percent))
+          ? Math.max(0, Math.min(100, Math.round(Number(state.managedStudyPack.percent))))
+          : null;
+        progress.innerHTML = `<div class="global-download-track${percent === null ? " is-indeterminate" : ""}" role="progressbar" aria-valuemin="0" aria-valuemax="100"${percent === null ? "" : ` aria-valuenow="${percent}"`}><span${percent === null ? "" : ` style="width:${percent}%"`}></span></div>`;
+      } else {
+        progress?.remove();
+      }
       managedAction.textContent = t(actionKeys[status] || statusKeys[status] || statusKeys.error);
       managedAction.disabled = !actionKeys[status];
       managedAction.dataset.action = status === "installed" ? "remove" : "install";

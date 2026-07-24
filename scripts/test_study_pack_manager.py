@@ -5,6 +5,7 @@ import tempfile
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -101,6 +102,24 @@ def test_download_allows_only_configured_github_asset():
         raise AssertionError("untrusted URL must be rejected")
 
 
+def test_download_reports_streaming_progress():
+    archive = b"0123456789"
+    response = mock.MagicMock()
+    response.headers = {"Content-Length": str(len(archive))}
+    response.read.side_effect = [archive[:4], archive[4:8], archive[8:], b""]
+    response.__enter__.return_value = response
+    progress = []
+    with mock.patch("study_pack_manager.urllib.request.urlopen", return_value=response):
+        data = study_pack_manager.download_pack_bytes(
+            "https://github.com/example/release/pack.zip",
+            allowed_url="https://github.com/example/release/pack.zip",
+            progress_callback=lambda completed, total: progress.append((completed, total)),
+            chunk_size=4,
+        )
+    assert data == archive
+    assert progress == [(4, 10), (8, 10), (10, 10)]
+
+
 def test_archive_rejects_excessive_expanded_size():
     archive = make_pack_zip()
     previous_limit = study_pack_manager.MAX_EXTRACTED_BYTES
@@ -135,8 +154,33 @@ def test_server_catalog_uses_local_install_state():
     assert payload["packs"][0]["status"] == "not-installed"
     server_source = Path("server.py").read_text(encoding="utf-8")
     assert '"/api/study-packs/catalog"' in server_source
+    assert '"/api/downloads/status"' in server_source
     assert '"/api/study-packs/note-article/install"' in server_source
     assert '"/api/study-packs/note-article/remove"' in server_source
+
+
+def test_server_starts_note_pack_install_as_background_job():
+    class FakeThread:
+        started = False
+
+        def __init__(self, *, target, daemon):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            FakeThread.started = True
+
+    with server.STUDY_PACK_INSTALL_LOCK:
+        server.STUDY_PACK_INSTALL_JOB.clear()
+    with mock.patch.object(server, "study_pack_catalog_payload", return_value={
+        "packs": [{"sha256": "a" * 64}],
+    }), mock.patch.object(server.threading, "Thread", FakeThread):
+        payload = server.install_note_article_pack_payload()
+    assert payload["ok"] is True
+    assert payload["status"] == "running"
+    assert FakeThread.started is True
+    with server.STUDY_PACK_INSTALL_LOCK:
+        assert server.STUDY_PACK_INSTALL_JOB["status"] == "queued"
 
 
 if __name__ == "__main__":
@@ -144,6 +188,8 @@ if __name__ == "__main__":
     test_install_rejects_wrong_hash()
     test_install_rejects_unsafe_zip_path()
     test_download_allows_only_configured_github_asset()
+    test_download_reports_streaming_progress()
     test_archive_rejects_excessive_expanded_size()
     test_server_catalog_uses_local_install_state()
+    test_server_starts_note_pack_install_as_background_job()
     print("study pack manager tests passed")

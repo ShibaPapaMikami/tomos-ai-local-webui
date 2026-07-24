@@ -105,7 +105,7 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.229")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.230")
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
@@ -142,11 +142,65 @@ def study_pack_catalog_payload() -> dict:
     }
 
 
+def run_note_article_pack_install() -> None:
+    entry = study_pack_catalog_payload()["packs"][0]
+    try:
+        def update_progress(completed: int, total: int) -> None:
+            percent = round(completed / total * 100) if total > 0 else None
+            with STUDY_PACK_INSTALL_LOCK:
+                STUDY_PACK_INSTALL_JOB.update({
+                    "status": "running",
+                    "message": "教材パックをダウンロードしています。",
+                    "percent": min(99, percent) if percent is not None else None,
+                    "completedBytes": completed,
+                    "totalBytes": total,
+                })
+
+        result = install_pack(
+            entry,
+            install_root=STUDY_PACK_INSTALL_ROOT,
+            progress_callback=update_progress,
+        )
+        with STUDY_PACK_INSTALL_LOCK:
+            STUDY_PACK_INSTALL_JOB.update({
+                "status": "done",
+                "message": "note記事作成サポートを追加しました。",
+                "percent": 100,
+                "result": result,
+                "finishedAt": time.time(),
+            })
+    except Exception as exc:
+        with STUDY_PACK_INSTALL_LOCK:
+            STUDY_PACK_INSTALL_JOB.update({
+                "status": "error",
+                "message": str(exc),
+                "finishedAt": time.time(),
+            })
+
+
 def install_note_article_pack_payload() -> dict:
     entry = study_pack_catalog_payload()["packs"][0]
     if not entry["sha256"]:
         raise ValueError("配布ファイルはまだ公開されていません。")
-    return install_pack(entry, install_root=STUDY_PACK_INSTALL_ROOT)
+    with STUDY_PACK_INSTALL_LOCK:
+        if STUDY_PACK_INSTALL_JOB.get("status") in {"queued", "running"}:
+            return {
+                "ok": True,
+                "status": str(STUDY_PACK_INSTALL_JOB.get("status")),
+                "message": str(STUDY_PACK_INSTALL_JOB.get("message") or ""),
+            }
+        STUDY_PACK_INSTALL_JOB.clear()
+        STUDY_PACK_INSTALL_JOB.update({
+            "status": "queued",
+            "message": "教材パックのダウンロード待機中です。",
+            "percent": 0,
+            "completedBytes": 0,
+            "totalBytes": 0,
+            "startedAt": time.time(),
+            "finishedAt": None,
+        })
+    threading.Thread(target=run_note_article_pack_install, daemon=True).start()
+    return {"ok": True, "status": "running", "message": "教材パックのダウンロードを開始しました。"}
 
 
 def remove_note_article_pack_payload() -> dict:
@@ -353,6 +407,8 @@ PULLABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model
 REMOVABLE_MODEL_NAMES = {item["model"] for item in PULLABLE_MODELS if item["model"]}
 MODEL_PULL_JOBS: dict[str, dict[str, object]] = {}
 MODEL_PULL_LOCK = threading.Lock()
+STUDY_PACK_INSTALL_JOB: dict[str, object] = {}
+STUDY_PACK_INSTALL_LOCK = threading.Lock()
 ASR_SETUP_JOB: dict[str, object] = {}
 ASR_SETUP_LOCK = threading.Lock()
 OCR_SETUP_JOB: dict[str, object] = {}
@@ -5849,6 +5905,7 @@ def reconcile_model_pull_jobs() -> set[str] | None:
                 job.update({
                     "status": "done",
                     "message": "ダウンロードが完了しました。",
+                    "percent": 100,
                     "finishedAt": job.get("finishedAt") or now,
                 })
                 MODEL_PULL_JOBS[model] = job
@@ -5865,12 +5922,101 @@ def model_pull_status() -> dict:
     return response
 
 
+def _download_size_bytes(value: str, unit: str) -> int:
+    multipliers = {
+        "B": 1,
+        "KB": 1000,
+        "MB": 1000 ** 2,
+        "GB": 1000 ** 3,
+        "KIB": 1024,
+        "MIB": 1024 ** 2,
+        "GIB": 1024 ** 3,
+    }
+    return round(float(value) * multipliers.get(unit.upper(), 1))
+
+
+def parse_ollama_pull_progress(line: str) -> dict[str, object]:
+    result: dict[str, object] = {}
+    percent_match = re.search(r"(\d{1,3})%", str(line or ""))
+    if percent_match:
+        result["percent"] = max(0, min(100, int(percent_match.group(1))))
+    size_match = re.search(
+        r"([\d.]+)\s*(B|KB|MB|GB|KiB|MiB|GiB)\s*/\s*([\d.]+)\s*(B|KB|MB|GB|KiB|MiB|GiB)",
+        str(line or ""),
+        re.IGNORECASE,
+    )
+    if size_match:
+        result["completedBytes"] = _download_size_bytes(size_match.group(1), size_match.group(2))
+        result["totalBytes"] = _download_size_bytes(size_match.group(3), size_match.group(4))
+    return result
+
+
+def _common_download_job(
+    job_id: str,
+    kind: str,
+    label: str,
+    job: dict[str, object],
+    retry_id: str,
+) -> dict[str, object]:
+    status = str(job.get("status") or "")
+    percent = job.get("percent")
+    if status == "done":
+        percent = 100
+    return {
+        "id": job_id,
+        "kind": kind,
+        "label": label,
+        "status": status,
+        "percent": percent if isinstance(percent, (int, float)) else None,
+        "completedBytes": int(job.get("completedBytes") or 0),
+        "totalBytes": int(job.get("totalBytes") or 0),
+        "message": str(job.get("message") or ""),
+        "startedAt": job.get("startedAt"),
+        "finishedAt": job.get("finishedAt"),
+        "retryAction": {"type": kind, "id": retry_id},
+    }
+
+
+def download_jobs_status(*, reconcile_models: bool = True) -> dict[str, object]:
+    with MODEL_PULL_LOCK:
+        has_active_model_job = any(
+            job.get("status") in {"queued", "running"}
+            for job in MODEL_PULL_JOBS.values()
+        )
+    if reconcile_models and has_active_model_job:
+        reconcile_model_pull_jobs()
+    jobs: list[dict[str, object]] = []
+    with MODEL_PULL_LOCK:
+        model_jobs = {key: dict(value) for key, value in MODEL_PULL_JOBS.items()}
+    for model, job in model_jobs.items():
+        label = next(
+            (str(item.get("label") or model) for item in PULLABLE_MODELS if item.get("model") == model),
+            model,
+        )
+        jobs.append(_common_download_job(f"model:{model}", "model", label, job, model))
+    setup_jobs = (
+        ("asr:setup", "asr", "音声認識", ASR_SETUP_LOCK, ASR_SETUP_JOB),
+        ("ocr:setup", "ocr", "画像・PDF文字読み取り", OCR_SETUP_LOCK, OCR_SETUP_JOB),
+        ("internet-layer:setup", "internet-layer", "Web調査", INTERNET_LAYER_SETUP_LOCK, INTERNET_LAYER_SETUP_JOB),
+        ("study-pack:note-article-writing", "study-pack", "note記事作成サポート", STUDY_PACK_INSTALL_LOCK, STUDY_PACK_INSTALL_JOB),
+    )
+    for job_id, kind, label, lock, source in setup_jobs:
+        with lock:
+            job = dict(source)
+        if job:
+            jobs.append(_common_download_job(job_id, kind, label, job, job_id.split(":", 1)[-1]))
+    return {"ok": True, "jobs": jobs}
+
+
 def run_model_pull(model: str) -> None:
     with MODEL_PULL_LOCK:
         MODEL_PULL_JOBS[model] = {
             "model": model,
             "status": "running",
             "message": "ダウンロードを開始しました。",
+            "percent": 0,
+            "completedBytes": 0,
+            "totalBytes": 0,
             "startedAt": time.time(),
             "finishedAt": None,
         }
@@ -5886,7 +6032,7 @@ def run_model_pull(model: str) -> None:
             if last_line:
                 with MODEL_PULL_LOCK:
                     job = MODEL_PULL_JOBS.get(model, {})
-                    job.update({"message": last_line})
+                    job.update({"message": last_line, **parse_ollama_pull_progress(last_line)})
                     MODEL_PULL_JOBS[model] = job
         code = process.wait()
         if code == 0:
@@ -5899,6 +6045,7 @@ def run_model_pull(model: str) -> None:
             job.update({
                 "status": "done" if code == 0 else "error",
                 "message": "ダウンロードが完了しました。" if code == 0 else last_line or f"ollama pull が終了コード {code} で失敗しました。",
+                "percent": 100 if code == 0 else job.get("percent"),
                 "finishedAt": time.time(),
             })
             MODEL_PULL_JOBS[model] = job
@@ -5922,6 +6069,7 @@ def start_model_pull(model: str) -> dict:
                 "model": model,
                 "status": "done",
                 "message": "すでにダウンロード済みです。",
+                "percent": 100,
                 "startedAt": time.time(),
                 "finishedAt": time.time(),
             }
@@ -5934,6 +6082,9 @@ def start_model_pull(model: str) -> dict:
             "model": model,
             "status": "queued",
             "message": "ダウンロード待機中です。",
+            "percent": 0,
+            "completedBytes": 0,
+            "totalBytes": 0,
             "startedAt": time.time(),
             "finishedAt": None,
         }
@@ -6214,6 +6365,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/study-packs/catalog":
             json_response(self, 200, study_pack_catalog_payload())
+            return
+        if parsed.path == "/api/downloads/status":
+            json_response(self, 200, download_jobs_status())
             return
         if parsed.path == "/api/contracts/pdf-import/status":
             json_response(self, 200, contract_pdf_import_status_payload())

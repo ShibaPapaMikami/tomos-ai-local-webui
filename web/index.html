@@ -16,7 +16,7 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-  <link rel="stylesheet" href="/styles.css?v=0.8.230-purpose-routing" />
+  <link rel="stylesheet" href="/styles.css?v=0.8.236-download-progress" />
   </head>
   <body>
     <div class="app-shell">
@@ -1286,6 +1286,11 @@
       <button class="undo-close" id="undo-close" type="button" title="閉じる" aria-label="閉じる" data-i18n-title="common.close" data-i18n-aria-label="common.close">×</button>
     </div>
 
+    <aside class="global-download-panel" id="global-download-panel" hidden aria-live="polite" aria-label="ダウンロード状況">
+      <div class="global-download-title">ダウンロード状況</div>
+      <div class="global-download-list" data-download-list></div>
+    </aside>
+
     <div class="modal-backdrop" id="correction-modal" hidden>
       <section class="correction-dialog" role="dialog" aria-modal="true" aria-labelledby="correction-title">
         <div class="correction-header">
@@ -1343,7 +1348,7 @@
   <script src="/local-tools.js?v=0.8.209-tomos53"></script>
   <script src="/weather.js?v=0.8.209-tomos53"></script>
   <script src="/image-tools.js?v=0.8.209-tomos53"></script>
-  <script src="/asr.js?v=0.8.209-tomos53"></script>
+  <script src="/asr.js?v=0.8.236-download-progress"></script>
   <script src="/attachments.js?v=0.8.209-tomos53"></script>
   <script src="/composer.js?v=0.8.209-tomos53"></script>
   <script src="/workspace.js?v=0.8.225-note-no-save"></script>
@@ -1356,11 +1361,12 @@
   <script src="/models.js?v=0.8.235-strict-purpose"></script>
   <script src="/messages.js?v=0.8.211-listground1"></script>
   <script src="/sidebar.js?v=0.8.219-searchfix"></script>
-  <script src="/settings.js?v=0.8.235-strict-purpose"></script>
-    <script src="/management.js?v=0.8.222-note-pack-error"></script>
+  <script src="/settings.js?v=0.8.236-download-progress"></script>
+    <script src="/management.js?v=0.8.236-download-progress"></script>
+  <script src="/download-progress.js?v=0.8.236-download-progress"></script>
   <script src="/router.js?v=0.8.209-tomos53"></script>
   <script src="/search.js?v=0.8.227-youtube-grounded"></script>
-  <script src="/pwa.js?v=0.8.235-strict-purpose"></script>
-    <script src="/app.js?v=0.8.235-strict-purpose"></script>
+  <script src="/pwa.js?v=0.8.236-download-progress"></script>
+    <script src="/app.js?v=0.8.236-download-progress"></script>
 </body>
 </html>

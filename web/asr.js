@@ -344,7 +344,7 @@
     `).join("");
     const setupRunning = setupJob?.status === "running" || setupJob?.status === "queued";
     const setupMessage = setupJob?.message ? `
-      <div class="asr-status">${escapeHtml(t("settings.asrSetupStatus"))}: ${escapeHtml(setupJob.message)}</div>
+      <div class="asr-status">${escapeHtml(t("settings.asrSetupStatus"))}: ${escapeHtml(setupJob.message)}${setupJob.percent !== null && setupJob.percent !== undefined && Number.isFinite(Number(setupJob.percent)) ? ` (${Math.round(Number(setupJob.percent))}%)` : ""}</div>
     ` : "";
     const setupButton = requirements.length && status.dependenciesOk === false ? `
       <button class="ghost-button model-install-button" type="button" data-asr-setup ${setupRunning ? "disabled" : ""}>

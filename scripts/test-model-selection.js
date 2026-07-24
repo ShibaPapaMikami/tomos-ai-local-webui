@@ -1502,27 +1502,29 @@ assert.doesNotMatch(serverSource, /recommendedCodingModels[\s\S]{0,260}Huihui-ge
 assert.match(indexSource, /\/i18n\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/models\.js\?v=0\.8\.235-strict-purpose/);
-assert.match(indexSource, /\/settings\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(indexSource, /\/settings\.js\?v=0\.8\.236-download-progress/);
 assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
-assert.match(indexSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
+assert.match(indexSource, /\/management\.js\?v=0\.8\.236-download-progress/);
+assert.match(indexSource, /\/download-progress\.js\?v=0\.8\.236-download-progress/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(indexSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(indexSource, /\/pwa\.js\?v=0\.8\.235-strict-purpose/);
-assert.match(indexSource, /\/app\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(indexSource, /\/pwa\.js\?v=0\.8\.236-download-progress/);
+assert.match(indexSource, /\/app\.js\?v=0\.8\.236-download-progress/);
 assert.match(indexSource, /アプリ版 取得中/);
 assert.doesNotMatch(indexSource, /アプリ版 0\.8\.214/);
 assert.doesNotMatch(appSource, /0\.8\.210/);
-assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.235-strict-purpose"/);
+assert.match(serviceWorkerSource, /const CACHE_NAME = "gemma4-pwa-0\.8\.236-download-progress"/);
 assert.match(serviceWorkerSource, /\/i18n\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.235-strict-purpose/);
-assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.236-download-progress/);
 assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
-assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.222-note-pack-error/);
+assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.236-download-progress/);
+assert.match(serviceWorkerSource, /\/download-progress\.js\?v=0\.8\.236-download-progress/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
 assert.match(serviceWorkerSource, /\/search\.js\?v=0\.8\.227-youtube-grounded/);
-assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.235-strict-purpose/);
-assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.235-strict-purpose/);
+assert.match(serviceWorkerSource, /\/pwa\.js\?v=0\.8\.236-download-progress/);
+assert.match(serviceWorkerSource, /\/app\.js\?v=0\.8\.236-download-progress/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.chatModel": "通常チャットAIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.codingModel": "プログラミング用AIモデル"/);
 assert.match(fs.readFileSync("web/i18n.js", "utf8"), /"settings\.translationModel": "翻訳AIモデル"/);
@@ -1554,6 +1556,12 @@ assert.equal(translations.en["chat.standardModelRequired"], "To use chat, downlo
 assert.equal(translations.ja["chat.codingModelRequired"], "コード作業を使うには「言語モデル」でAgentic Coderをダウンロードしてください。");
 assert.equal(translations.en["chat.codingModelRequired"], "To use Code work, download Agentic Coder from Language Models.");
 assert.equal(translations.ja["chat.highPerformanceModelRequired"], "高性能AIを使うには「言語モデル」でGemma 4 12Bをダウンロードしてください。");
+
+const missingModelBlock = appSource.slice(
+  appSource.indexOf("if (!canSendModelRequest(requestOptions, requestModel))"),
+  appSource.indexOf("if (shouldUseLongNoteArticlePipeline", appSource.indexOf("if (!canSendModelRequest(requestOptions, requestModel))")),
+);
+assert.match(missingModelBlock, /codeUnderstanding:\s*false/);
 assert.equal(translations.en["chat.highPerformanceModelRequired"], "To use High-performance AI, download Gemma 4 12B from Language Models.");
 assert.match(translations.ja["management.languageModelsNote"], /自動（おすすめ）/);
 assert.match(translations.ja["management.languageModelsNote"], /実際のモデル名は各AIの欄で確認/);

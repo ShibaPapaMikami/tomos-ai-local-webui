@@ -88,7 +88,14 @@ def build_catalog(*, install_root: Path, release_url: str, sha256: str, version:
     }]
 
 
-def download_pack_bytes(url: str, *, allowed_url: str, max_bytes: int = MAX_ARCHIVE_BYTES) -> bytes:
+def download_pack_bytes(
+    url: str,
+    *,
+    allowed_url: str,
+    max_bytes: int = MAX_ARCHIVE_BYTES,
+    progress_callback=None,
+    chunk_size: int = 64 * 1024,
+) -> bytes:
     if url != allowed_url or not url.startswith("https://github.com/"):
         raise ValueError("許可されていない配布元です。")
     request = urllib.request.Request(url, headers={"User-Agent": "TOMOS-study-pack-installer"})
@@ -96,7 +103,19 @@ def download_pack_bytes(url: str, *, allowed_url: str, max_bytes: int = MAX_ARCH
         length = int(response.headers.get("Content-Length", "0") or 0)
         if length > max_bytes:
             raise ValueError("配布ファイルのサイズが上限を超えています。")
-        data = response.read(max_bytes + 1)
+        chunks = []
+        completed = 0
+        while True:
+            chunk = response.read(min(chunk_size, max_bytes + 1 - completed))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            completed += len(chunk)
+            if completed > max_bytes:
+                raise ValueError("配布ファイルのサイズが上限を超えています。")
+            if progress_callback:
+                progress_callback(completed, length)
+        data = b"".join(chunks)
     if len(data) > max_bytes:
         raise ValueError("配布ファイルのサイズが上限を超えています。")
     return data
@@ -183,10 +202,11 @@ def install_pack_bytes(data: bytes, catalog_entry: dict, *, install_root: Path) 
     return {"ok": True, "pack": pack, "definition": pack["definition"]}
 
 
-def install_pack(catalog_entry: dict, *, install_root: Path) -> dict:
+def install_pack(catalog_entry: dict, *, install_root: Path, progress_callback=None) -> dict:
     data = download_pack_bytes(
         str(catalog_entry.get("releaseUrl", "")),
         allowed_url=str(catalog_entry.get("releaseUrl", "")),
+        progress_callback=progress_callback,
     )
     return install_pack_bytes(data, catalog_entry, install_root=install_root)
 

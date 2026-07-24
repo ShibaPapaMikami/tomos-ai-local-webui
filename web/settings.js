@@ -378,7 +378,13 @@ function renderModelInstaller(deps) {
       note.textContent = item.note;
       info.append(note);
     }
-    const status = document.createElement(installed ? "div" : job?.status === "running" || job?.status === "queued" || job?.status === "error" ? "span" : "button");
+    const status = document.createElement(
+      installed || job?.status === "running" || job?.status === "queued"
+        ? "div"
+        : job?.status === "error"
+          ? "span"
+          : "button",
+    );
     if (installed) {
       status.className = "model-install-actions";
       const badge = document.createElement("span");
@@ -391,8 +397,20 @@ function renderModelInstaller(deps) {
       remove.textContent = language === "en" ? "Uninstall" : "アンインストール";
       status.append(badge, remove);
     } else if (job?.status === "running" || job?.status === "queued") {
-      status.className = "model-installed-badge";
-      status.textContent = t("model.downloading");
+      status.className = "model-inline-progress";
+      const label = document.createElement("small");
+      const percent = Number.isFinite(Number(job.percent)) ? Math.max(0, Math.min(100, Math.round(Number(job.percent)))) : null;
+      label.textContent = percent === null ? t("model.downloading") : `${t("model.downloading")} ${percent}%`;
+      const track = document.createElement("div");
+      track.className = `global-download-track${percent === null ? " is-indeterminate" : ""}`;
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      if (percent !== null) track.setAttribute("aria-valuenow", String(percent));
+      const bar = document.createElement("span");
+      if (percent !== null) bar.style.width = `${percent}%`;
+      track.append(bar);
+      status.append(label, track);
     } else if (job?.status === "error") {
       status.className = "model-installed-badge error";
       status.textContent = t("error.prefix");

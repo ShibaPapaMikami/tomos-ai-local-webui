@@ -156,6 +156,7 @@ const state = {
   showExperimentalModels: localStorage.getItem("gemma4.showExperimentalModels") === "true",
   modelPullJobs: {},
   modelPullTimer: null,
+  downloadJobs: [],
   appInfo: {
     version: "",
     commit: "",
@@ -188,6 +189,7 @@ let stopMicLevelMonitor = null;
 let noticeTimer = null;
 let healthCheckPromise = null;
 let healthCheckCompleted = false;
+let lastCompletedStudyPackJob = "";
 let modelRequestPreparing = false;
 
 const WORKSPACE_PLAN_TIMEOUT_MS = 120000;
@@ -289,6 +291,7 @@ const els = {
   composerRecipient: document.querySelector("#composer-recipient"),
   progressLine: document.querySelector("#progress-line"),
   progressText: document.querySelector("#progress-text"),
+  globalDownloadPanel: document.querySelector("#global-download-panel"),
   imageStrip: document.querySelector("#image-strip"),
   studyPackModeRow: document.querySelector("#study-pack-mode-row"),
   imageInput: document.querySelector("#image-input"),
@@ -5403,6 +5406,7 @@ async function handleWorkspaceBuild(text) {
         responseMode: "quality",
         responseModeLabel: t("mode.quality"),
         thinkingMode: "high",
+        codeUnderstanding: false,
       },
     });
     saveSessions();
@@ -6001,6 +6005,7 @@ async function sendMessage(text) {
           model: "",
           modelLabel: "",
           modelReason: missingModelReason,
+          codeUnderstanding: false,
         },
       });
       return;
@@ -8336,6 +8341,43 @@ if (state.folders.length > 0 && sessionsForActiveFolder().length === 0) {
 }
 
 if (state.workspaceRoot) loadWorkspace();
+
+window.GEMMA_DOWNLOAD_MONITOR = window.GEMMA_DOWNLOADS?.createDownloadMonitor?.({
+  root: els.globalDownloadPanel,
+  onJobs: (jobs) => {
+    const previousRunningModels = Object.values(state.modelPullJobs)
+      .some((job) => ["queued", "running"].includes(job.status));
+    state.downloadJobs = jobs;
+    state.modelPullJobs = Object.fromEntries(
+      jobs
+        .filter((job) => job.kind === "model")
+        .map((job) => [job.retryAction?.id || job.label, job]),
+    );
+    const asrJob = jobs.find((job) => job.kind === "asr");
+    if (asrJob) state.asrSetupJob = asrJob;
+    const studyPackProgress = jobs.find((job) => job.kind === "study-pack" && ["queued", "running", "error"].includes(job.status));
+    if (studyPackProgress) {
+      state.managedStudyPack = {
+        ...(state.managedStudyPack || { id: "note-article-writing" }),
+        status: studyPackProgress.status === "error" ? "error" : "downloading",
+        percent: studyPackProgress.percent,
+        errorMessage: studyPackProgress.status === "error" ? studyPackProgress.message : "",
+      };
+      renderStudyPacksPanel();
+    }
+    renderModelInstaller();
+    renderAsrSettingsPanel();
+    const runningModels = Object.values(state.modelPullJobs)
+      .some((job) => ["queued", "running"].includes(job.status));
+    if (previousRunningModels && !runningModels) checkHealth();
+    const studyPackJob = jobs.find((job) => job.kind === "study-pack" && job.status === "done");
+    const completionKey = studyPackJob ? `${studyPackJob.id}:${studyPackJob.finishedAt}` : "";
+    if (completionKey && completionKey !== lastCompletedStudyPackJob) {
+      lastCompletedStudyPackJob = completionKey;
+      window.GEMMA_MANAGEMENT?.loadManagedStudyPackCatalog?.({ state, t });
+    }
+  },
+});
 
 checkHealth();
 openInitialManagementPanelFromUrl();
