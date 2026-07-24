@@ -91,13 +91,14 @@ Directorへ次を提示し、承認を得る。
 - Create: `src-tauri/build.rs` — Tauri設定をbuildへ反映。
 - Create: `src-tauri/tauri.conf.json` — アプリ名、Bundle ID、ウィンドウ、CSP。
 - Create: `src-tauri/capabilities/main.json` — main windowへ最小権限だけを許可。
+- Create: `src-tauri/icons/icon.png` — 既存のTOMOS 512pxアイコンをTauri既定アイコンとして再利用。
 - Create: `src-tauri/src/main.rs` — binary entrypoint。
 - Create: `src-tauri/src/lib.rs` — Tauri lifecycle、single instance、WebView遷移。
 - Create: `src-tauri/src/runtime.rs` — TOMOSサーバーの判定、起動、停止。
 - Create: `web/desktop-starting.html` — 起動中と起動失敗だけを表示する静的画面。
 - Create: `web/desktop-starting.js` — 固定エラーコードを日本語表示へ変換。
 - Create: `scripts/test-desktop-shell-contract.py` — Tauri設定と安全境界の依存なし契約テスト。
-- Modify: `.gitignore` — `src-tauri/target/` を除外。
+- Modify: `.gitignore` — `src-tauri/target/` と自動生成schemaを除外。
 
 ## Public Contracts
 
@@ -195,6 +196,7 @@ def test_required_files_exist() -> None:
         TAURI_ROOT / "build.rs",
         TAURI_ROOT / "tauri.conf.json",
         TAURI_ROOT / "capabilities" / "main.json",
+        TAURI_ROOT / "icons" / "icon.png",
         TAURI_ROOT / "src" / "main.rs",
         TAURI_ROOT / "src" / "lib.rs",
     ]
@@ -230,6 +232,7 @@ def test_capability_has_no_shell_or_external_write_permission() -> None:
 def test_git_ignores_rust_build_output() -> None:
     patterns = read(ROOT / ".gitignore").splitlines()
     assert "src-tauri/target/" in patterns
+    assert "src-tauri/gen/schemas/" in patterns
 
 
 def main() -> None:
@@ -331,6 +334,7 @@ fn main() {
 
 ```gitignore
 src-tauri/target/
+src-tauri/gen/schemas/
 ```
 
 `src-tauri/src/main.rs`:
@@ -687,14 +691,22 @@ git commit -m "feat: add TOMOS desktop runtime supervisor"
 ```python
 def test_lifecycle_uses_single_instance_and_owned_cleanup() -> None:
     lib = read(TAURI_ROOT / "src" / "lib.rs")
+    compact = "".join(lib.split())
     assert "tauri_plugin_single_instance::init" in lib
+    assert "SECOND_INSTANCE_FOCUS_DELAY_MS" in lib
+    assert "refocus_after_second_instance(window)" in lib
+    assert "Duration::from_millis(SECOND_INSTANCE_FOCUS_DELAY_MS)" in lib
+    assert "PageLoadEvent::Finished" in lib
+    assert "runtime_started.swap(true, Ordering::SeqCst)" in lib
+    assert ".on_page_load(move |window, payload|" in lib
     assert 'get_webview_window("main")' in lib
     assert "RuntimeSupervisor::default()" in lib
     assert "supervisor.stop_owned()" in lib
     assert "WindowEvent::CloseRequested" in lib
+    assert "WindowEvent::Destroyed" in lib
     assert "app_handle.exit(0)" in lib
     assert "http://127.0.0.1:54876/" in lib
-    assert 'WebviewWindowBuilder::new(app, "main"' in lib
+    assert 'WebviewWindowBuilder::new(app,"main"' in compact
     assert '.inner_size(1280.0, 820.0)' in lib
     assert '.min_inner_size(960.0, 640.0)' in lib
     assert '.on_navigation(|url|' in lib
@@ -729,25 +741,49 @@ fn main() {
 ```rust
 mod runtime;
 
-use std::sync::Arc;
-use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
+use tauri::{
+    webview::PageLoadEvent, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 
 use runtime::{resolve_resource_root, RuntimeSupervisor};
+
+const SECOND_INSTANCE_FOCUS_DELAY_MS: u64 = 250;
+
+fn refocus_after_second_instance(window: tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        thread::sleep(Duration::from_millis(SECOND_INSTANCE_FOCUS_DELAY_MS));
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    });
+}
 
 pub fn run() {
     let supervisor = Arc::new(RuntimeSupervisor::default());
     let setup_supervisor = Arc::clone(&supervisor);
+    let runtime_started = Arc::new(AtomicBool::new(false));
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+                refocus_after_second_instance(window);
             }
         }))
         .setup(move |app| {
-            let window = WebviewWindowBuilder::new(
+            let runtime = Arc::clone(&setup_supervisor);
+            WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::App("desktop-starting.html".into()),
@@ -764,26 +800,33 @@ pub fn run() {
                     && url.port_or_known_default() == Some(54876);
                 bundled_asset || tomos_local
             })
-            .build()?;
-            let runtime = Arc::clone(&setup_supervisor);
-            tauri::async_runtime::spawn_blocking(move || {
-                let result = resolve_resource_root().and_then(|root| runtime.start(&root));
-                match result {
-                    Ok(_) => {
-                        let url = "http://127.0.0.1:54876/"
-                            .parse()
-                            .expect("valid TOMOS URL");
-                        let _ = window.navigate(url);
-                    }
-                    Err(error) => {
-                        let script = format!(
-                            "window.TOMOS_DESKTOP_STARTUP && window.TOMOS_DESKTOP_STARTUP.showError({:?});",
-                            error.code()
-                        );
-                        let _ = window.eval(&script);
-                    }
+            .on_page_load(move |window, payload| {
+                if payload.event() != PageLoadEvent::Finished
+                    || runtime_started.swap(true, Ordering::SeqCst)
+                {
+                    return;
                 }
-            });
+                let runtime = Arc::clone(&runtime);
+                tauri::async_runtime::spawn_blocking(move || {
+                    let result = resolve_resource_root().and_then(|root| runtime.start(&root));
+                    match result {
+                        Ok(_) => {
+                            let url = "http://127.0.0.1:54876/"
+                                .parse()
+                                .expect("valid TOMOS URL");
+                            let _ = window.navigate(url);
+                        }
+                        Err(error) => {
+                            let script = format!(
+                                "window.TOMOS_DESKTOP_STARTUP.showError({:?});",
+                                error.code()
+                            );
+                            let _ = window.eval(&script);
+                        }
+                    }
+                });
+            })
+            .build()?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -793,7 +836,7 @@ pub fn run() {
         match event {
             RunEvent::WindowEvent {
                 label,
-                event: WindowEvent::CloseRequested { .. },
+                event: WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed,
                 ..
             } if label == "main" => {
                 supervisor.stop_owned();
@@ -905,11 +948,11 @@ python3 scripts/test-desktop-shell-contract.py
 ```js
 (() => {
   const messages = {
-    missing_resource_root: "TOMOSの実行環境を確認できませんでした。再インストールしてください。",
-    missing_python: "TOMOSの実行環境を確認できませんでした。再インストールしてください。",
-    port_in_use: "TOMOSが使う場所を別のアプリが使用しています。ほかのTOMOSを終了して、もう一度開いてください。",
-    server_exited: "TOMOSを起動できませんでした。診断情報を確認してください。",
-    timeout: "TOMOSの起動に時間がかかっています。Ollamaを確認して、もう一度開いてください。",
+    "missing_resource_root": "TOMOSの実行環境を確認できませんでした。再インストールしてください。",
+    "missing_python": "TOMOSの実行環境を確認できませんでした。再インストールしてください。",
+    "port_in_use": "TOMOSが使う場所を別のアプリが使用しています。ほかのTOMOSを終了して、もう一度開いてください。",
+    "server_exited": "TOMOSを起動できませんでした。診断情報を確認してください。",
+    "timeout": "TOMOSの起動に時間がかかっています。Ollamaを確認して、もう一度開いてください。",
   };
   const title = document.querySelector("#desktop-startup-title");
   const message = document.querySelector("#desktop-startup-message");

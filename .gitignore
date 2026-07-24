@@ -36,6 +36,8 @@ models/
 .gemma4-data/
 .worktrees/
 .superpowers/sdd/
+src-tauri/target/
+src-tauri/gen/schemas/
 
 # Local private user/company content. Never commit these.
 private-content/
