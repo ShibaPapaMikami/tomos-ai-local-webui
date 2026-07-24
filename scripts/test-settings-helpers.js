@@ -3,6 +3,12 @@ const assert = require("node:assert/strict");
 const { execFileSync } = require("node:child_process");
 const vm = require("node:vm");
 
+const appSource = fs.readFileSync("web/app.js", "utf8");
+assert.match(appSource, /pcBenchmark:\s*\{\s*status:\s*"idle",\s*result:\s*null,\s*error:\s*"",?\s*\}/);
+assert.match(appSource, /pcBenchmarkRequestId:\s*0/);
+assert.match(appSource, /\/api\/diagnostics\/model-benchmark/);
+assert.match(appSource, /data-pc-benchmark-start/);
+
 const context = { window: {}, console };
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("web/settings.js", "utf8"), context, { filename: "web/settings.js" });
@@ -767,12 +773,22 @@ renderPcDiagnosticsPanel({
           isAppleSilicon: true,
           gpu: "Apple Silicon GPU",
           hasGpu: true,
+          gpuInfo: {
+            detected: true,
+            name: "Apple Silicon GPU",
+            vendor: "apple",
+            vramGb: 32,
+            vramConfidence: "unified",
+            unifiedMemory: true,
+            source: "system",
+          },
           ollamaVersion: "0.31.1",
           availableModels: [qwen2507, agenticCoder, "custom:high-performance"],
         },
         recommendation: {
           level: "comfortable",
           label: "快適",
+          basis: "theoretical",
           summary: "このPCでは12B系も使いやすいです。",
           recommended: {
             standard: qwen2507,
@@ -783,7 +799,18 @@ renderPcDiagnosticsPanel({
           },
           warnings: [],
         },
+        benchmark: null,
       },
+    },
+    pcBenchmark: {
+      status: "idle",
+      result: null,
+      error: "",
+    },
+    serverModels: {
+      pullable: [
+        { model: qwen2507, allowAutoSelect: true },
+      ],
     },
   },
   t: (key) => key,
@@ -828,6 +855,65 @@ for (const label of ["標準AI", "コード作業", "高性能AI"]) {
 }
 assert.match(pcDiagnosticsEl.innerHTML, /pc-diagnostics-model-checks/);
 assert.match(pcDiagnosticsEl.innerHTML, /pc-diagnostics-divider/);
+assert.match(pcDiagnosticsEl.innerHTML, /理論上の目安/);
+assert.match(pcDiagnosticsEl.innerHTML, /Apple Silicon GPU/);
+assert.match(pcDiagnosticsEl.innerHTML, /共有メモリ 32 GB/);
+assert.match(pcDiagnosticsEl.innerHTML, /統合メモリ/);
+assert.match(pcDiagnosticsEl.innerHTML, /data-pc-benchmark-start/);
+assert.doesNotMatch(pcDiagnosticsEl.innerHTML, /自動で切り替え/);
+
+const pcDiagnosticsWindowsEl = new FakeElement("section");
+renderPcDiagnosticsPanel({
+  composerModelLabel: (model) => model,
+  els: { pcDiagnostics: pcDiagnosticsWindowsEl },
+  escapeHtml: (value) => String(value),
+  state: {
+    language: "ja",
+    appInfo: {
+      pcDiagnostics: {
+        ok: true,
+        system: {
+          os: "Windows",
+          cpu: "Intel CPU",
+          memoryGb: 16,
+          isAppleSilicon: false,
+          gpu: "NVIDIA GeForce RTX 4060",
+          hasGpu: true,
+          gpuInfo: {
+            detected: true,
+            name: "NVIDIA GeForce RTX 4060",
+            vendor: "nvidia",
+            vramGb: 8,
+            vramConfidence: "high",
+            unifiedMemory: false,
+            source: "nvidia-smi",
+          },
+          ollamaVersion: "0.31.1",
+          availableModels: [qwen2507, agenticCoder],
+        },
+        recommendation: {
+          level: "heavy",
+          label: "重い",
+          basis: "theoretical",
+          recommended: {
+            standard: qwen2507,
+            coding: agenticCoder,
+            highPerformance: "",
+          },
+          warnings: [],
+        },
+        benchmark: null,
+      },
+    },
+    pcBenchmark: { status: "idle", result: null, error: "" },
+    serverModels: {
+      pullable: [{ model: qwen2507, allowAutoSelect: true }],
+    },
+  },
+});
+assert.match(pcDiagnosticsWindowsEl.innerHTML, /NVIDIA GeForce RTX 4060/);
+assert.match(pcDiagnosticsWindowsEl.innerHTML, /VRAM 8 GB/);
+assert.match(pcDiagnosticsWindowsEl.innerHTML, /短い速度テストを開始/);
 
 const pcDiagnosticsFallbackEl = new FakeElement("section");
 renderPcDiagnosticsPanel({
@@ -850,7 +936,9 @@ renderPcDiagnosticsPanel({
 });
 assert.match(pcDiagnosticsFallbackEl.innerHTML, /再診断/);
 assert.match(pcDiagnosticsFallbackEl.innerHTML, /GPU/);
-assert.match(pcDiagnosticsFallbackEl.innerHTML, /なし/);
+assert.match(pcDiagnosticsFallbackEl.innerHTML, /情報を取得できませんでした/);
+assert.match(pcDiagnosticsFallbackEl.innerHTML, /速度テストには取得済みの標準AIが必要です/);
+assert.match(pcDiagnosticsFallbackEl.innerHTML, /data-pc-benchmark-start[\s\S]*disabled/);
 
 const pcDiagnosticsOldOllamaEl = new FakeElement("section");
 renderPcDiagnosticsPanel({
@@ -892,4 +980,93 @@ renderSettingsMeta({
 });
 assert.match(settingsMetaEl.innerHTML, /PC診断: 快適/);
 
-console.log("settings helper tests passed");
+async function testPcBenchmarkExplicitActionAndStateTransitions() {
+  const startIndex = appSource.indexOf("async function startPcBenchmark()");
+  const endIndex = appSource.indexOf("\nfunction checkHealth()", startIndex);
+  assert.ok(startIndex >= 0 && endIndex > startIndex, "速度テストhandlerを抽出できる必要があります");
+  const startFunctionSource = appSource.slice(startIndex, endIndex);
+  let fetchCount = 0;
+  let request = null;
+  let resolveResponse = null;
+  let renderCount = 0;
+  const benchmarkState = {
+    appInfo: {
+      pcDiagnostics: {
+        recommendation: {
+          recommended: { standard: qwen2507 },
+        },
+      },
+    },
+    modelOverrides: { chat: "", coding: "", translation: "" },
+    composerModel: "",
+    pcBenchmark: { status: "idle", result: null, error: "" },
+    pcBenchmarkRequestId: 0,
+  };
+  const actionContext = {
+    state: benchmarkState,
+    fetch: (url, options) => {
+      fetchCount += 1;
+      request = { url, options };
+      return new Promise((resolve) => {
+        resolveResponse = resolve;
+      });
+    },
+    renderSettingsMeta: () => {
+      renderCount += 1;
+    },
+  };
+  vm.createContext(actionContext);
+  vm.runInContext(`${startFunctionSource}\nthis.startPcBenchmark = startPcBenchmark;`, actionContext);
+
+  const firstRun = actionContext.startPcBenchmark();
+  const duplicateRun = actionContext.startPcBenchmark();
+  assert.equal(fetchCount, 1, "実行中の二重クリックは1回だけ送信する");
+  assert.equal(benchmarkState.pcBenchmark.status, "running");
+  assert.equal(request.url, "/api/diagnostics/model-benchmark");
+  assert.deepEqual(JSON.parse(request.options.body), { model: qwen2507 });
+  assert.deepEqual(benchmarkState.modelOverrides, { chat: "", coding: "", translation: "" });
+  assert.equal(benchmarkState.composerModel, "");
+
+  resolveResponse({
+    ok: true,
+    json: async () => ({
+      ok: true,
+      benchmark: {
+        model: qwen2507,
+        elapsedMs: 1200,
+        tokensPerSecond: 20,
+        status: "complete",
+      },
+    }),
+  });
+  await firstRun;
+  await duplicateRun;
+  assert.equal(benchmarkState.pcBenchmark.status, "complete");
+  assert.equal(benchmarkState.pcBenchmark.result.tokensPerSecond, 20);
+  assert.equal(renderCount, 2);
+
+  benchmarkState.pcBenchmark = { status: "idle", result: null, error: "" };
+  let resolveStaleResponse = null;
+  actionContext.fetch = () => new Promise((resolve) => {
+    resolveStaleResponse = resolve;
+  });
+  const staleRun = actionContext.startPcBenchmark();
+  benchmarkState.pcBenchmarkRequestId += 1;
+  benchmarkState.pcBenchmark = { status: "idle", result: null, error: "" };
+  resolveStaleResponse({
+    ok: true,
+    json: async () => ({
+      ok: true,
+      benchmark: { model: qwen2507, status: "complete" },
+    }),
+  });
+  await staleRun;
+  assert.equal(benchmarkState.pcBenchmark.status, "idle", "古い応答を現在状態へ反映しない");
+}
+
+testPcBenchmarkExplicitActionAndStateTransitions()
+  .then(() => console.log("settings helper tests passed"))
+  .catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });

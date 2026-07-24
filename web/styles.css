@@ -2557,8 +2557,16 @@ h1 {
 .pc-diagnostics-actions {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
+}
+
+.pc-diagnostics-basis {
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .pc-diagnostics-refresh {
@@ -2744,6 +2752,44 @@ h1 {
   height: 1px;
   background: var(--line);
   margin: 0 10px;
+}
+
+.pc-diagnostics-benchmark {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--active-line);
+  border-radius: 7px;
+  background: var(--active-bg);
+  padding: 10px;
+}
+
+.pc-diagnostics-benchmark > strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.pc-diagnostics-benchmark .ghost-button {
+  justify-self: start;
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pc-diagnostics-benchmark-status {
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pc-diagnostics-benchmark-status.complete {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.pc-diagnostics-benchmark-status.error {
+  color: #8a2d2d;
+  font-weight: 800;
 }
 
 .pc-diagnostics-update {

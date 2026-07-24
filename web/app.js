@@ -163,6 +163,12 @@ const state = {
     searchCapabilities: null,
     pcDiagnostics: null,
   },
+  pcBenchmark: {
+    status: "idle",
+    result: null,
+    error: "",
+  },
+  pcBenchmarkRequestId: 0,
   asrStatus: {
     status: "checking",
     candidates: [],
@@ -5686,6 +5692,60 @@ async function performHealthCheck() {
   return true;
 }
 
+async function startPcBenchmark() {
+  if (state.pcBenchmark.status === "running") return;
+  const model = String(
+    state.appInfo?.pcDiagnostics?.recommendation?.recommended?.standard || "",
+  );
+  if (!model) {
+    state.pcBenchmark = {
+      status: "error",
+      result: null,
+      error: "benchmark_model_not_allowed",
+    };
+    renderSettingsMeta();
+    return;
+  }
+  const requestId = state.pcBenchmarkRequestId + 1;
+  state.pcBenchmarkRequestId = requestId;
+  state.pcBenchmark = {
+    status: "running",
+    result: null,
+    error: "",
+  };
+  renderSettingsMeta();
+  try {
+    const response = await fetch("/api/diagnostics/model-benchmark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok !== true || !data.benchmark) {
+      throw new Error(String(data.error || "benchmark_failed"));
+    }
+    if (requestId !== state.pcBenchmarkRequestId) return;
+    state.pcBenchmark = {
+      status: "complete",
+      result: data.benchmark,
+      error: "",
+    };
+  } catch (error) {
+    if (requestId !== state.pcBenchmarkRequestId) return;
+    const errorCode = String(error?.message || "");
+    state.pcBenchmark = {
+      status: "error",
+      result: null,
+      error: [
+        "benchmark_model_not_allowed",
+        "benchmark_in_progress",
+        "benchmark_localhost_required",
+      ].includes(errorCode) ? errorCode : "benchmark_failed",
+    };
+  }
+  renderSettingsMeta();
+}
+
 function checkHealth() {
   if (healthCheckPromise) return healthCheckPromise;
   healthCheckPromise = performHealthCheck()
@@ -8183,10 +8243,22 @@ els.modelInstaller.addEventListener("click", (event) => {
   startModelPull(pullButton.dataset.modelPull);
 });
 els.pcDiagnostics?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-pc-diagnostics-refresh]");
-  if (!button) return;
-  button.disabled = true;
-  button.textContent = state.language === "en" ? "Checking..." : "診断中...";
+  const benchmarkButton = event.target.closest("[data-pc-benchmark-start]");
+  if (benchmarkButton) {
+    startPcBenchmark();
+    return;
+  }
+  const refreshButton = event.target.closest("[data-pc-diagnostics-refresh]");
+  if (!refreshButton) return;
+  if (state.pcBenchmark.status === "running") return;
+  refreshButton.disabled = true;
+  refreshButton.textContent = state.language === "en" ? "Checking..." : "診断中...";
+  state.pcBenchmarkRequestId += 1;
+  state.pcBenchmark = {
+    status: "idle",
+    result: null,
+    error: "",
+  };
   checkHealth();
 });
 els.contextMemoryRefresh?.addEventListener("click", loadContextMemory);

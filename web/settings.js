@@ -68,9 +68,11 @@ function renderSearchCapabilitiesPanel(deps) {
 
 function renderPcDiagnosticsPanel(deps) {
   const {
+    composerModelLabel,
     els,
     escapeHtml,
     state,
+    t,
   } = deps;
   if (!els.pcDiagnostics) return;
   const diagnostics = state.appInfo?.pcDiagnostics;
@@ -82,6 +84,11 @@ function renderPcDiagnosticsPanel(deps) {
   const system = diagnostics.system || {};
   const recommendation = diagnostics.recommendation || {};
   const recommended = recommendation.recommended || {};
+  const benchmark = state.pcBenchmark || { status: "idle", result: null, error: "" };
+  const translate = (key, ja, en) => {
+    const translated = typeof t === "function" ? t(key) : "";
+    return translated && translated !== key ? translated : (language === "en" ? en : ja);
+  };
   const label = recommendation.label || (language === "en" ? "Unknown" : "不明");
   const title = language === "en" ? "PC diagnosis" : "PC診断";
   const summary = recommendation.summary || "";
@@ -101,6 +108,28 @@ function renderPcDiagnosticsPanel(deps) {
     );
   const availableModels = new Set(Array.isArray(system.availableModels) ? system.availableModels : []);
   const modelAvailability = (model) => Boolean(model) && availableModels.has(model);
+  const benchmarkModel = String(recommended.standard || "");
+  const benchmarkCatalog = Array.isArray(state.serverModels?.pullable) ? state.serverModels.pullable : [];
+  const benchmarkAllowed = modelAvailability(benchmarkModel)
+    && benchmarkCatalog.some((item) => item?.model === benchmarkModel && item?.allowAutoSelect === true);
+  const benchmarkRunning = benchmark.status === "running";
+  const gpuInfo = system.gpuInfo || {};
+  const gpuDetected = Boolean(gpuInfo.detected ?? system.hasGpu);
+  const gpuName = String(gpuInfo.name || system.gpu || "");
+  const gpuMemory = Number(gpuInfo.vramGb || 0);
+  const gpuMemoryLabel = gpuMemory
+    ? gpuInfo.unifiedMemory
+      ? `${translate("settings.pcDiagnosticsUnifiedMemory", "統合メモリ", "Unified memory")} (${language === "en" ? "shared memory" : "共有メモリ"} ${gpuMemory} GB)`
+      : `${translate("settings.pcDiagnosticsVram", "VRAM", "VRAM")} ${gpuMemory} GB`
+    : "";
+  const gpuConfidenceLabel = gpuInfo.vramConfidence === "estimated"
+    ? (language === "en" ? "Reference value reported by the OS" : "OSから取得した参考値")
+    : "";
+  const gpuValue = [
+    gpuName || (gpuDetected ? (language === "en" ? "Available" : "あり") : (language === "en" ? "Not detected" : "情報を取得できませんでした")),
+    gpuMemoryLabel,
+    gpuConfidenceLabel,
+  ].filter(Boolean).join(" / ");
   const availableLabel = language === "en" ? "Available" : "利用可能";
   const missingLabel = language === "en" ? "Not installed" : "未取得";
   const environmentChecks = [
@@ -110,9 +139,9 @@ function renderPcDiagnosticsPanel(deps) {
       ok: Boolean(system.cpu || system.machine),
     },
     {
-      label: "GPU",
-      value: system.hasGpu ? (system.gpu || (language === "en" ? "Available" : "あり")) : (language === "en" ? "None" : "なし"),
-      ok: Boolean(system.hasGpu),
+      label: translate("settings.pcDiagnosticsGpu", "GPU", "GPU"),
+      value: gpuValue,
+      ok: gpuDetected,
     },
     {
       label: language === "en" ? "Memory" : "メモリ",
@@ -148,6 +177,52 @@ function renderPcDiagnosticsPanel(deps) {
     },
   ];
   const warnings = Array.isArray(recommendation.warnings) ? recommendation.warnings.filter(Boolean) : [];
+  let benchmarkStatus = "";
+  if (benchmark.status === "running") {
+    benchmarkStatus = translate(
+      "settings.pcDiagnosticsBenchmarkRunning",
+      "速度テストを実行中です。完了するまでこの画面を開いたままにしてください。",
+      "Running the speed test. Keep this screen open until it completes.",
+    );
+  } else if (benchmark.status === "complete" && benchmark.result) {
+    const result = benchmark.result;
+    const modelLabel = typeof composerModelLabel === "function"
+      ? composerModelLabel(String(result.model || benchmarkModel))
+      : String(result.model || benchmarkModel);
+    benchmarkStatus = `${translate(
+      "settings.pcDiagnosticsBenchmarkComplete",
+      "速度テストが完了しました",
+      "Speed test complete",
+    )}: ${modelLabel} / ${Number(result.elapsedMs || 0)} ms / ${Number(result.tokensPerSecond || 0)} tokens/sec`;
+  } else if (benchmark.status === "error") {
+    if (benchmark.error === "benchmark_model_not_allowed") {
+      benchmarkStatus = language === "en"
+        ? "The selected standard AI is not available for this test."
+        : "速度テストには取得済みの標準AIが必要です。";
+    } else if (benchmark.error === "benchmark_in_progress") {
+      benchmarkStatus = translate(
+        "settings.pcDiagnosticsBenchmarkInProgress",
+        "別の速度テストが実行中です。完了してからやり直してください。",
+        "Another speed test is running. Try again after it completes.",
+      );
+    } else if (benchmark.error === "benchmark_localhost_required") {
+      benchmarkStatus = translate(
+        "settings.pcDiagnosticsBenchmarkLocalOnly",
+        "速度テストはこのPC内のOllamaだけで実行できます。接続先を確認してください。",
+        "The speed test can only use Ollama on this computer. Check the connection address.",
+      );
+    } else {
+      benchmarkStatus = translate(
+        "settings.pcDiagnosticsBenchmarkError",
+        "速度テストを完了できませんでした。Ollamaが起動しているか確認してください。",
+        "The speed test could not be completed. Check that Ollama is running.",
+      );
+    }
+  } else if (!benchmarkAllowed) {
+    benchmarkStatus = language === "en"
+      ? "An installed standard AI is required for the speed test."
+      : "速度テストには取得済みの標準AIが必要です。";
+  }
   els.pcDiagnostics.innerHTML = `
     <div class="pc-diagnostics-title">
       <div>
@@ -155,8 +230,9 @@ function renderPcDiagnosticsPanel(deps) {
         <span>${escapeHtml(language === "en" ? "Checks whether local AI is ready on this computer." : "ローカルAIを使う準備状況を確認します。")}</span>
       </div>
       <div class="pc-diagnostics-actions">
+        <span class="pc-diagnostics-basis">${escapeHtml(translate("settings.pcDiagnosticsTheoretical", "理論上の目安", "Theoretical estimate"))}</span>
         <span class="pc-diagnostics-badge ${escapeHtml(recommendation.level || "unknown")}">${escapeHtml(label)}</span>
-        <button class="ghost-button pc-diagnostics-refresh" type="button" data-pc-diagnostics-refresh>${escapeHtml(language === "en" ? "Check again" : "再診断")}</button>
+        <button class="ghost-button pc-diagnostics-refresh" type="button" data-pc-diagnostics-refresh ${benchmarkRunning ? "disabled" : ""}>${escapeHtml(language === "en" ? "Check again" : "再診断")}</button>
       </div>
     </div>
     ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
@@ -181,6 +257,23 @@ function renderPcDiagnosticsPanel(deps) {
           <small>${escapeHtml(item.value)}</small>
         </div>
       `).join("")}
+    </div>
+    <div class="pc-diagnostics-benchmark">
+      <strong>${escapeHtml(language === "en" ? "Local speed test" : "このPC内の速度テスト")}</strong>
+      <p>${escapeHtml(translate(
+        "settings.pcDiagnosticsBenchmarkConsent",
+        "取得済みAIへ短い固定文を送り、このPC内だけで速度を測ります。モデルの取得・削除はしません。",
+        "Sends a short fixed sentence to an installed AI and measures speed only on this computer. It does not download or delete models.",
+      ))}</p>
+      <button
+        class="ghost-button primary-action"
+        type="button"
+        data-pc-benchmark-start
+        ${benchmarkAllowed && !benchmarkRunning ? "" : "disabled"}
+      >${escapeHtml(benchmarkRunning
+        ? translate("settings.pcDiagnosticsBenchmarkRunning", "速度テスト中...", "Testing...")
+        : translate("settings.pcDiagnosticsBenchmarkStart", "短い速度テストを開始", "Start short speed test"))}</button>
+      ${benchmarkStatus ? `<div class="pc-diagnostics-benchmark-status ${escapeHtml(benchmark.status || "idle")}" aria-live="polite">${escapeHtml(benchmarkStatus)}</div>` : ""}
     </div>
     ${ollamaOutdated ? `
       <div class="pc-diagnostics-update">

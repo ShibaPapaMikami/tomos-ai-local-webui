@@ -415,6 +415,7 @@ OCR_SETUP_JOB: dict[str, object] = {}
 OCR_SETUP_LOCK = threading.Lock()
 INTERNET_LAYER_SETUP_JOB: dict[str, object] = {}
 INTERNET_LAYER_SETUP_LOCK = threading.Lock()
+MODEL_BENCHMARK_LOCK = threading.Lock()
 ASR_WORKER_PROCESS: subprocess.Popen | None = None
 ASR_WORKER_OUTPUTS: queue.Queue[str] = queue.Queue()
 ASR_WORKER_LOCK = threading.Lock()
@@ -1631,6 +1632,74 @@ def installed_ollama_models(force_refresh: bool = False) -> set[str]:
     _OLLAMA_MODELS_CACHE["at"] = now
     _OLLAMA_MODELS_CACHE["models"] = models
     return models
+
+
+def benchmark_ollama_base_url() -> str:
+    return normalize_local_llm_base_url(OLLAMA_URL)
+
+
+def benchmark_available_models(base_url: str | None = None) -> set[str]:
+    safe_base_url = (
+        normalize_local_llm_base_url(base_url)
+        if str(base_url or "").strip()
+        else benchmark_ollama_base_url()
+    )
+    tags = ollama_json("/api/tags", timeout=3, base_url=safe_base_url).get("models", [])
+    return {str(item.get("name", "")) for item in tags if item.get("name")}
+
+
+def model_benchmark_allowed(model: str, available_models: set[str]) -> bool:
+    normalized_model = str(model or "").strip()
+    if not normalized_model or normalized_model not in available_models:
+        return False
+    return any(
+        str(item.get("model") or "") == normalized_model
+        and item.get("allowAutoSelect") is True
+        for item in PULLABLE_MODELS
+    )
+
+
+def run_local_model_benchmark(model: str, base_url: str | None = None) -> dict[str, object]:
+    safe_base_url = (
+        normalize_local_llm_base_url(base_url)
+        if str(base_url or "").strip()
+        else benchmark_ollama_base_url()
+    )
+    payload = {
+        "model": model,
+        "prompt": "日本語で一文だけ、準備できましたと答えてください。",
+        "stream": False,
+        "options": {
+            "temperature": 0,
+            "num_predict": 24,
+        },
+    }
+    started_at = time.monotonic()
+    response = ollama_json(
+        "/api/generate",
+        payload=payload,
+        timeout=90,
+        base_url=safe_base_url,
+    )
+    elapsed_ms = round((time.monotonic() - started_at) * 1000)
+    prompt_tokens = max(0, int(response.get("prompt_eval_count") or 0))
+    output_tokens = max(0, int(response.get("eval_count") or 0))
+    eval_duration_ns = max(0, int(response.get("eval_duration") or 0))
+    load_duration_ns = max(0, int(response.get("load_duration") or 0))
+    tokens_per_second = (
+        round(output_tokens / (eval_duration_ns / 1_000_000_000), 2)
+        if output_tokens > 0 and eval_duration_ns > 0
+        else 0
+    )
+    return {
+        "model": model,
+        "elapsedMs": elapsed_ms,
+        "loadMs": round(load_duration_ns / 1_000_000),
+        "promptTokens": prompt_tokens,
+        "outputTokens": output_tokens,
+        "tokensPerSecond": tokens_per_second,
+        "status": "complete",
+    }
 
 
 def select_translation_model() -> str:
@@ -3648,12 +3717,183 @@ def run_sysctl_value(name: str) -> str:
     return decode_subprocess_output(result.stdout).strip()
 
 
-def local_memory_gb() -> int:
-    value = run_sysctl_value("hw.memsize")
+def memory_gb_from_bytes(value: str | int) -> int:
     try:
-        return max(0, round(int(value) / (1024 ** 3)))
+        byte_count = int(value)
     except (TypeError, ValueError):
         return 0
+    if byte_count <= 0:
+        return 0
+    return max(0, round(byte_count / (1024 ** 3)))
+
+
+def local_memory_gb() -> int:
+    if sys.platform == "darwin":
+        return memory_gb_from_bytes(run_sysctl_value("hw.memsize"))
+    if sys.platform.startswith("linux"):
+        try:
+            page_size = int(os.sysconf("SC_PAGE_SIZE"))
+            page_count = int(os.sysconf("SC_PHYS_PAGES"))
+        except (OSError, TypeError, ValueError):
+            return 0
+        return memory_gb_from_bytes(page_size * page_count)
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+                ],
+                check=False,
+                capture_output=True,
+                timeout=2,
+            )
+        except Exception:
+            return 0
+        if result.returncode != 0:
+            return 0
+        return memory_gb_from_bytes(decode_subprocess_output(result.stdout).strip())
+    return 0
+
+
+def unknown_gpu_info() -> dict[str, object]:
+    return {
+        "detected": False,
+        "name": "",
+        "vendor": "unknown",
+        "vramGb": 0,
+        "vramConfidence": "unknown",
+        "unifiedMemory": False,
+        "source": "unavailable",
+    }
+
+
+def gpu_vendor_from_name(name: str) -> str:
+    normalized = name.lower()
+    if "nvidia" in normalized or "geforce" in normalized or "quadro" in normalized:
+        return "nvidia"
+    if "amd" in normalized or "radeon" in normalized:
+        return "amd"
+    if "intel" in normalized:
+        return "intel"
+    if "apple" in normalized:
+        return "apple"
+    return "unknown"
+
+
+def parse_nvidia_smi_gpu(output: str) -> dict[str, object]:
+    candidates: list[tuple[int, str]] = []
+    for raw_line in str(output or "").splitlines():
+        name, separator, raw_memory = raw_line.rpartition(",")
+        if not separator:
+            continue
+        try:
+            memory_mib = int(raw_memory.strip())
+        except ValueError:
+            continue
+        vram_gb = round(memory_mib / 1024)
+        if not name.strip() or vram_gb <= 0:
+            continue
+        candidates.append((vram_gb, name.strip()))
+    if not candidates:
+        return unknown_gpu_info()
+    vram_gb, name = max(candidates, key=lambda item: item[0])
+    return {
+        "detected": True,
+        "name": name,
+        "vendor": "nvidia",
+        "vramGb": vram_gb,
+        "vramConfidence": "high",
+        "unifiedMemory": False,
+        "source": "nvidia-smi",
+    }
+
+
+def parse_windows_video_controllers(output: str) -> dict[str, object]:
+    try:
+        parsed = json.loads(str(output or ""))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return unknown_gpu_info()
+    controllers = parsed if isinstance(parsed, list) else [parsed]
+    candidates: list[tuple[int, str]] = []
+    for controller in controllers:
+        if not isinstance(controller, dict):
+            continue
+        name = str(controller.get("Name") or "").strip()
+        try:
+            adapter_bytes = int(controller.get("AdapterRAM") or 0)
+        except (TypeError, ValueError):
+            continue
+        vram_gb = memory_gb_from_bytes(adapter_bytes)
+        if not name or vram_gb <= 0 or vram_gb > 64:
+            continue
+        candidates.append((vram_gb, name))
+    if not candidates:
+        return unknown_gpu_info()
+    vram_gb, name = max(candidates, key=lambda item: item[0])
+    return {
+        "detected": True,
+        "name": name,
+        "vendor": gpu_vendor_from_name(name),
+        "vramGb": vram_gb,
+        "vramConfidence": "estimated",
+        "unifiedMemory": False,
+        "source": "powershell",
+    }
+
+
+def local_gpu_info(memory_gb: int | None = None) -> dict[str, object]:
+    machine = (platform.machine() or "").lower()
+    if sys.platform == "darwin" and machine in {"arm64", "aarch64"}:
+        shared_memory_gb = local_memory_gb() if memory_gb is None else max(0, int(memory_gb))
+        return {
+            "detected": True,
+            "name": "Apple Silicon GPU",
+            "vendor": "apple",
+            "vramGb": shared_memory_gb,
+            "vramConfidence": "unified",
+            "unifiedMemory": True,
+            "source": "system",
+        }
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=2,
+        )
+    except Exception:
+        result = None
+    if result is not None and result.returncode == 0:
+        nvidia = parse_nvidia_smi_gpu(decode_subprocess_output(result.stdout))
+        if nvidia["detected"]:
+            return nvidia
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress",
+                ],
+                check=False,
+                capture_output=True,
+                timeout=2,
+            )
+        except Exception:
+            return unknown_gpu_info()
+        if result.returncode == 0:
+            return parse_windows_video_controllers(decode_subprocess_output(result.stdout))
+    return unknown_gpu_info()
 
 
 def local_cpu_name() -> str:
@@ -3669,15 +3909,18 @@ def local_pc_system_info(available_models: set[str] | list[str] | None = None, o
     cpu_name = local_cpu_name()
     machine = platform.machine() or ""
     is_apple_silicon = sys.platform == "darwin" and machine.lower() in {"arm64", "aarch64"}
-    gpu_name = "Apple Silicon GPU" if is_apple_silicon else ""
+    memory_gb = local_memory_gb()
+    gpu_info = local_gpu_info(memory_gb=memory_gb)
+    gpu_name = str(gpu_info.get("name") or "")
     models = sorted(str(model) for model in (available_models or []) if model)
     return {
         "os": platform.platform() or sys.platform,
         "cpu": cpu_name,
         "machine": machine,
-        "memoryGb": local_memory_gb(),
+        "memoryGb": memory_gb,
         "gpu": gpu_name,
-        "hasGpu": bool(gpu_name),
+        "hasGpu": bool(gpu_info.get("detected")),
+        "gpuInfo": gpu_info,
         "isAppleSilicon": is_apple_silicon,
         "ollamaVersion": ollama_version,
         "availableModels": models,
@@ -3719,6 +3962,7 @@ def pc_diagnostics_recommendation(system_info: dict[str, object]) -> dict[str, o
     coding = AGENTIC_CODER_MODEL if has_agentic else standard
 
     return {
+        "basis": "theoretical",
         "level": level,
         "label": label,
         "summary": summary,
@@ -3739,6 +3983,7 @@ def pc_diagnostics_payload(available_models: set[str] | list[str] | None = None,
         "ok": True,
         "system": system_info,
         "recommendation": pc_diagnostics_recommendation(system_info),
+        "benchmark": None,
     }
 
 
@@ -6452,6 +6697,40 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.static_only or (self.mobile_sync_only and not self.path.startswith("/api/mobile/")):
             json_response(self, 403, {"ok": False, "error": "mobile static preview blocks API writes"})
+            return
+        if self.path == "/api/diagnostics/model-benchmark":
+            try:
+                body = read_json_body(self)
+                model = str(body.get("model") or "").strip()
+                base_url = benchmark_ollama_base_url()
+            except LocalLlmCheckError:
+                json_response(self, 400, {"ok": False, "error": "benchmark_localhost_required"})
+                return
+            except Exception:
+                json_response(self, 400, {"ok": False, "error": "benchmark_model_not_allowed"})
+                return
+            if not MODEL_BENCHMARK_LOCK.acquire(blocking=False):
+                json_response(self, 409, {"ok": False, "error": "benchmark_in_progress"})
+                return
+            try:
+                available_models = benchmark_available_models(base_url)
+                if not model_benchmark_allowed(model, available_models):
+                    json_response(self, 400, {"ok": False, "error": "benchmark_model_not_allowed"})
+                    return
+                json_response(
+                    self,
+                    200,
+                    {
+                        "ok": True,
+                        "benchmark": run_local_model_benchmark(model, base_url=base_url),
+                    },
+                )
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            except Exception:
+                json_response(self, 502, {"ok": False, "error": "benchmark_failed"})
+            finally:
+                MODEL_BENCHMARK_LOCK.release()
             return
         if self.path == "/api/search":
             self.handle_search()

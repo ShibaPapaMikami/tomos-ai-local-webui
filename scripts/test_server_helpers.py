@@ -12,6 +12,7 @@ import urllib.error
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -961,6 +962,344 @@ def test_reconstruct_long_note_article_uses_outline_and_ordered_chunks() -> None
     assert all("全体構成" in item["system"] for item in rewrite_calls)
 
 
+def test_memory_gb_from_bytes() -> None:
+    assert server.memory_gb_from_bytes("17179869184") == 16
+    assert server.memory_gb_from_bytes("") == 0
+    assert server.memory_gb_from_bytes("-1") == 0
+
+
+def test_parse_nvidia_smi_gpu() -> None:
+    gpu = server.parse_nvidia_smi_gpu("NVIDIA GeForce RTX 4060, 8188\n")
+    assert gpu == {
+        "detected": True,
+        "name": "NVIDIA GeForce RTX 4060",
+        "vendor": "nvidia",
+        "vramGb": 8,
+        "vramConfidence": "high",
+        "unifiedMemory": False,
+        "source": "nvidia-smi",
+    }
+
+
+def test_parse_nvidia_smi_gpu_uses_largest_valid_vram() -> None:
+    gpu = server.parse_nvidia_smi_gpu(
+        "NVIDIA RTX 3060, 12288\n"
+        "invalid\n"
+        "NVIDIA RTX 4060, 8188\n"
+    )
+    assert gpu["name"] == "NVIDIA RTX 3060"
+    assert gpu["vramGb"] == 12
+    assert server.parse_nvidia_smi_gpu("NVIDIA GPU, 0\n") == server.unknown_gpu_info()
+
+
+def test_parse_windows_video_controllers() -> None:
+    gpu = server.parse_windows_video_controllers(
+        '[{"Name":"AMD Radeon 780M","AdapterRAM":4294967296}]'
+    )
+    assert gpu["detected"] is True
+    assert gpu["name"] == "AMD Radeon 780M"
+    assert gpu["vendor"] == "amd"
+    assert gpu["vramGb"] == 4
+    assert gpu["vramConfidence"] == "estimated"
+    assert gpu["source"] == "powershell"
+
+
+def test_parse_windows_video_controllers_accepts_single_object_and_rejects_invalid_vram() -> None:
+    gpu = server.parse_windows_video_controllers(
+        '{"Name":"Intel Arc A770","AdapterRAM":17179869184}'
+    )
+    assert gpu["vendor"] == "intel"
+    assert gpu["vramGb"] == 16
+    invalid = server.parse_windows_video_controllers(
+        '[{"Name":"Bad GPU","AdapterRAM":69793218560},{"Name":"Zero GPU","AdapterRAM":0}]'
+    )
+    assert invalid == server.unknown_gpu_info()
+
+
+def test_local_gpu_info_unknown_shape() -> None:
+    assert server.unknown_gpu_info() == {
+        "detected": False,
+        "name": "",
+        "vendor": "unknown",
+        "vramGb": 0,
+        "vramConfidence": "unknown",
+        "unifiedMemory": False,
+        "source": "unavailable",
+    }
+
+
+def test_local_gpu_info_apple_silicon_uses_shared_memory() -> None:
+    with patch.object(server.sys, "platform", "darwin"), patch.object(
+        server.platform,
+        "machine",
+        return_value="arm64",
+    ):
+        gpu = server.local_gpu_info(memory_gb=24)
+    assert gpu["name"] == "Apple Silicon GPU"
+    assert gpu["vendor"] == "apple"
+    assert gpu["vramGb"] == 24
+    assert gpu["vramConfidence"] == "unified"
+    assert gpu["unifiedMemory"] is True
+
+
+def test_local_memory_gb_uses_safe_platform_probes() -> None:
+    with patch.object(server.sys, "platform", "darwin"), patch.object(
+        server,
+        "run_sysctl_value",
+        return_value="17179869184",
+    ):
+        assert server.local_memory_gb() == 16
+
+    with patch.object(server.sys, "platform", "linux"), patch.object(
+        server.os,
+        "sysconf",
+        side_effect=lambda name: {
+            "SC_PAGE_SIZE": 4096,
+            "SC_PHYS_PAGES": 4194304,
+        }[name],
+    ):
+        assert server.local_memory_gb() == 16
+
+    powershell_result = SimpleNamespace(returncode=0, stdout=b"17179869184\n")
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.subprocess,
+        "run",
+        return_value=powershell_result,
+    ) as runner:
+        assert server.local_memory_gb() == 16
+    command = runner.call_args.args[0]
+    assert command[:3] == ["powershell", "-NoProfile", "-NonInteractive"]
+    assert "TotalPhysicalMemory" in command[-1]
+    assert runner.call_args.kwargs["timeout"] == 2
+    assert runner.call_args.kwargs["capture_output"] is True
+    assert runner.call_args.kwargs["check"] is False
+    assert runner.call_args.kwargs.get("shell", False) is False
+
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.subprocess,
+        "run",
+        side_effect=FileNotFoundError,
+    ):
+        assert server.local_memory_gb() == 0
+
+
+def test_local_gpu_info_windows_fallback_uses_safe_commands() -> None:
+    nvidia_missing = SimpleNamespace(returncode=1, stdout=b"")
+    powershell_gpu = SimpleNamespace(
+        returncode=0,
+        stdout=b'{"Name":"AMD Radeon 780M","AdapterRAM":4294967296}',
+    )
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.platform,
+        "machine",
+        return_value="AMD64",
+    ), patch.object(
+        server.subprocess,
+        "run",
+        side_effect=[nvidia_missing, powershell_gpu],
+    ) as runner:
+        gpu = server.local_gpu_info()
+    assert gpu["name"] == "AMD Radeon 780M"
+    assert gpu["source"] == "powershell"
+    assert len(runner.call_args_list) == 2
+    assert runner.call_args_list[0].args[0][0] == "nvidia-smi"
+    assert runner.call_args_list[1].args[0][:3] == [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+    ]
+    for call in runner.call_args_list:
+        assert call.kwargs["timeout"] == 2
+        assert call.kwargs.get("shell", False) is False
+
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.platform,
+        "machine",
+        return_value="AMD64",
+    ), patch.object(
+        server.subprocess,
+        "run",
+        side_effect=FileNotFoundError,
+    ):
+        assert server.local_gpu_info() == server.unknown_gpu_info()
+
+
+def test_model_benchmark_rejects_uninstalled_or_hidden_model() -> None:
+    hidden_model = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M"
+    assert server.model_benchmark_allowed("missing:latest", {server.QWEN3_2507_MODEL}) is False
+    assert server.model_benchmark_allowed(hidden_model, {hidden_model}) is False
+
+
+def test_model_benchmark_allows_installed_auto_select_model() -> None:
+    installed = {server.QWEN3_2507_MODEL}
+    assert server.model_benchmark_allowed(server.QWEN3_2507_MODEL, installed) is True
+
+
+def test_model_benchmark_rejects_external_ollama_url_before_request() -> None:
+    with patch.object(server, "OLLAMA_URL", "https://example.com"), patch.object(
+        server,
+        "ollama_json",
+    ) as ollama_mock:
+        try:
+            server.benchmark_ollama_base_url()
+        except server.LocalLlmCheckError as exc:
+            assert exc.code == "non_local_url"
+        else:
+            raise AssertionError("外部Ollama URLは通信前に拒否される必要があります")
+    ollama_mock.assert_not_called()
+
+
+def test_run_local_model_benchmark_shape() -> None:
+    response = {
+        "eval_count": 24,
+        "eval_duration": 1_200_000_000,
+        "prompt_eval_count": 8,
+        "load_duration": 300_000_000,
+    }
+    with patch.object(server, "ollama_json", return_value=response) as ollama_mock:
+        result = server.run_local_model_benchmark(
+            server.QWEN3_2507_MODEL,
+            base_url="http://127.0.0.1:11434",
+        )
+    request_payload = ollama_mock.call_args.kwargs["payload"]
+    assert ollama_mock.call_args.args == ("/api/generate",)
+    assert ollama_mock.call_args.kwargs["timeout"] == 90
+    assert ollama_mock.call_args.kwargs["base_url"] == "http://127.0.0.1:11434"
+    assert request_payload["stream"] is False
+    assert request_payload["options"] == {"temperature": 0, "num_predict": 24}
+    assert result["model"] == server.QWEN3_2507_MODEL
+    assert result["promptTokens"] == 8
+    assert result["outputTokens"] == 24
+    assert result["tokensPerSecond"] == 20.0
+    assert result["status"] == "complete"
+    assert "prompt" not in result
+    assert "response" not in result
+
+
+@contextlib.contextmanager
+def local_handler_endpoint(path: str) -> object:
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}{path}"
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=3)
+        httpd.server_close()
+
+
+def test_model_benchmark_http_rejects_disallowed_model() -> None:
+    benchmark_calls = []
+    with patch.object(
+        server,
+        "benchmark_available_models",
+        return_value={server.QWEN3_2507_MODEL},
+    ), patch.object(
+        server,
+        "run_local_model_benchmark",
+        side_effect=lambda model: benchmark_calls.append(model),
+    ), local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"model": "missing:latest"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            response = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("許可外モデルはHTTP 400で拒否される必要があります")
+    assert response == {"ok": False, "error": "benchmark_model_not_allowed"}
+    assert benchmark_calls == []
+
+
+def test_model_benchmark_http_rejects_external_ollama_before_tags() -> None:
+    with patch.object(server, "OLLAMA_URL", "https://example.com"), patch.object(
+        server,
+        "ollama_json",
+    ) as ollama_mock, local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"model": server.QWEN3_2507_MODEL}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            response = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("外部Ollama URLはtags取得前にHTTP 400で拒否される必要があります")
+    assert response == {"ok": False, "error": "benchmark_localhost_required"}
+    ollama_mock.assert_not_called()
+
+
+def test_model_benchmark_http_runs_allowed_model_once() -> None:
+    result = {
+        "model": server.QWEN3_2507_MODEL,
+        "elapsedMs": 1200,
+        "loadMs": 300,
+        "promptTokens": 8,
+        "outputTokens": 24,
+        "tokensPerSecond": 20.0,
+        "status": "complete",
+    }
+    with patch.object(
+        server,
+        "benchmark_available_models",
+        return_value={server.QWEN3_2507_MODEL},
+    ), patch.object(
+        server,
+        "run_local_model_benchmark",
+        return_value=result,
+    ) as benchmark_mock, local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"model": server.QWEN3_2507_MODEL}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+            payload = json.loads(response.read().decode("utf-8"))
+    assert payload == {"ok": True, "benchmark": result}
+    benchmark_mock.assert_called_once_with(
+        server.QWEN3_2507_MODEL,
+        base_url="http://127.0.0.1:11434",
+    )
+
+
+def test_model_benchmark_http_rejects_concurrent_request() -> None:
+    with patch.object(
+        server,
+        "benchmark_available_models",
+        return_value={server.QWEN3_2507_MODEL},
+    ), local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        assert server.MODEL_BENCHMARK_LOCK.acquire(blocking=False) is True
+        try:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps({"model": server.QWEN3_2507_MODEL}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(request, timeout=5)
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 409
+                response = json.loads(exc.read().decode("utf-8"))
+            else:
+                raise AssertionError("同時ベンチマークはHTTP 409で拒否される必要があります")
+        finally:
+            server.MODEL_BENCHMARK_LOCK.release()
+    assert response == {"ok": False, "error": "benchmark_in_progress"}
+
+
 def test_pc_diagnostics_recommendation_levels() -> None:
     comfortable = server.pc_diagnostics_recommendation({
         "memoryGb": 32,
@@ -1022,8 +1361,11 @@ def test_pc_diagnostics_payload_shape() -> None:
     assert payload["recommendation"]["label"] in {"快適", "重い", "激重い"}
     assert "memoryGb" in payload["system"]
     assert "gpu" in payload["system"]
+    assert "gpuInfo" in payload["system"]
     assert "hasGpu" in payload["system"]
     assert "recommended" in payload["recommendation"]
+    assert payload["recommendation"]["basis"] == "theoretical"
+    assert payload["benchmark"] is None
 
 
 def test_internet_layer_diagnostics_payload_shape() -> None:
@@ -3370,6 +3712,23 @@ if __name__ == "__main__":
     test_context_size_error_message_only_hides_raw_json_and_tokens()
     test_split_note_article_keeps_order_and_limits_chunks()
     test_reconstruct_long_note_article_uses_outline_and_ordered_chunks()
+    test_memory_gb_from_bytes()
+    test_parse_nvidia_smi_gpu()
+    test_parse_nvidia_smi_gpu_uses_largest_valid_vram()
+    test_parse_windows_video_controllers()
+    test_parse_windows_video_controllers_accepts_single_object_and_rejects_invalid_vram()
+    test_local_gpu_info_unknown_shape()
+    test_local_gpu_info_apple_silicon_uses_shared_memory()
+    test_local_memory_gb_uses_safe_platform_probes()
+    test_local_gpu_info_windows_fallback_uses_safe_commands()
+    test_model_benchmark_rejects_uninstalled_or_hidden_model()
+    test_model_benchmark_allows_installed_auto_select_model()
+    test_model_benchmark_rejects_external_ollama_url_before_request()
+    test_run_local_model_benchmark_shape()
+    test_model_benchmark_http_rejects_disallowed_model()
+    test_model_benchmark_http_rejects_external_ollama_before_tags()
+    test_model_benchmark_http_runs_allowed_model_once()
+    test_model_benchmark_http_rejects_concurrent_request()
     test_pc_diagnostics_recommendation_levels()
     test_pc_diagnostics_payload_shape()
     test_internet_layer_diagnostics_payload_shape()
