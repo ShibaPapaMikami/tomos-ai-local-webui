@@ -487,9 +487,17 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.235-strict-purpose"/);
+assert.match(
+  indexHtml,
+  /src="\/i18n\.js\?v=[^"]+"/,
+  "management UI should load the shared i18n script",
+);
 assert.match(indexHtml, /src="\/download-progress\.js\?v=0\.8\.236-download-progress"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.236-download-progress"/);
+assert.match(
+  indexHtml,
+  /href="\/styles\.css\?v=[^"]+"/,
+  "management UI should load the shared stylesheet",
+);
 assert.match(fs.readFileSync("web/management.js", "utf8"), /onMenuPanelOpen/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);

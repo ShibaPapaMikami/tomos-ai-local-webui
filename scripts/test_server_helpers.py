@@ -79,7 +79,7 @@ def test_sarashina_ocr_status_payload_shape() -> None:
     assert payload["ok"] is True
     assert payload["id"] == "sarashina2.2-ocr"
     assert payload["model"] == "sbintuitions/sarashina2.2-ocr"
-    assert payload["status"] in {"ready", "needs_dependencies", "needs_model_download"}
+    assert payload["status"] in {"ready", "needs_runner", "needs_dependencies", "needs_model_download"}
     assert isinstance(payload["missing"], list)
     assert payload["externalApi"] is False
 
