@@ -464,11 +464,33 @@
     els.composerStatus.classList?.toggle("recording", status === "recording" && Boolean(message));
   }
 
-  function renderAsrStatus({ els, t = (key) => key, status = "idle", seconds = 0, message = "" }) {
+  function renderAsrStatus({
+    els,
+    t = (key) => key,
+    status = "idle",
+    seconds = 0,
+    message = "",
+    signalLevel = null,
+  }) {
     const voiceButton = els?.voiceInput;
     if (voiceButton) {
-      voiceButton.classList.toggle("recording", status === "recording" || status === "waiting" || status === "speech" || status === "partial" || status === "live");
+      voiceButton.classList.toggle("recording", status === "recording" || status === "waiting" || status === "input" || status === "speech" || status === "partial" || status === "live");
       if (voiceButton.dataset) voiceButton.dataset.asrStatus = status;
+    }
+    if (els?.composerStatus?.dataset) {
+      const hasSignalLevel = signalLevel !== null && signalLevel !== undefined;
+      const safeSignalLevel = Number(signalLevel);
+      if (
+        hasSignalLevel
+        && Number.isInteger(safeSignalLevel)
+        && safeSignalLevel >= 0
+        && safeSignalLevel <= 4
+        && ["recording", "waiting", "input", "speech", "partial", "live", "finalizing"].includes(status)
+      ) {
+        els.composerStatus.dataset.voiceLevel = String(safeSignalLevel);
+      } else {
+        delete els.composerStatus.dataset.voiceLevel;
+      }
     }
 
     if (status === "checking") {
@@ -481,6 +503,10 @@
     }
     if (status === "waiting") {
       setComposerStatus({ els, message: t("composer.voiceWaitingForSpeech"), status: "recording" });
+      return;
+    }
+    if (status === "input") {
+      setComposerStatus({ els, message: t("composer.voiceInputDetected"), status: "recording" });
       return;
     }
     if (status === "speech") {
@@ -496,7 +522,11 @@
       return;
     }
     if (status === "finalizing") {
-      setComposerStatus({ els, message: message || t("composer.voiceFinalizing") });
+      setComposerStatus({
+        els,
+        message: message || t("composer.voiceFinalizing"),
+        status: signalLevel === null || signalLevel === undefined ? "idle" : "recording",
+      });
       return;
     }
     if (status === "stopped") {
@@ -600,6 +630,7 @@
     onPartialBlob,
     onSpeechStart,
     onFinalizing,
+    onAudioLevel,
     partialIntervalSeconds = PARTIAL_TRANSCRIPTION_INTERVAL_SECONDS,
     stopElement,
     session: providedSession,
@@ -671,6 +702,7 @@
           session.speechStarted = true;
           onSpeechStart?.();
         },
+        onAudioLevel,
         onFinalBlob: (blob) => {
           if (session.stopped || session.finalizing) return;
           session.finalizing = true;
@@ -1061,12 +1093,17 @@
     onPartialBlob,
     onFinalBlob,
     onSpeechStart,
+    onAudioLevel,
     now = () => root.performance?.now?.() ?? Date.now(),
     BlobCtor = Blob,
   } = {}) {
     const AudioContextCtor = root.AudioContext || root.webkitAudioContext;
     if (!stream || !AudioContextCtor) return null;
-    if (typeof onPartialBlob !== "function" && typeof onFinalBlob !== "function") return null;
+    if (
+      typeof onPartialBlob !== "function"
+      && typeof onFinalBlob !== "function"
+      && typeof onAudioLevel !== "function"
+    ) return null;
     let context;
     let source;
     let processor;
@@ -1083,6 +1120,7 @@
     };
     let finalized = false;
     let stopped = false;
+    let lastAudioLevelAtMs = Number.NEGATIVE_INFINITY;
     const safeIntervalSeconds = Math.max(2, Number(intervalSeconds) || PARTIAL_TRANSCRIPTION_INTERVAL_SECONDS);
     const flushPartial = () => {
       if (typeof onPartialBlob !== "function") return;
@@ -1123,13 +1161,35 @@
         const chunk = new Float32Array(input);
         const stats = audioSignalStats(chunk);
         const previousPhase = vadState.phase;
+        const currentNow = now();
         const transition = voiceActivityState({
           state: vadState,
-          nowMs: now(),
+          nowMs: currentNow,
           rms: stats.rms,
           peak: stats.peak,
         });
         vadState = transition.state;
+        const signalLevel = voiceSignalLevel({
+          rms: stats.rms,
+          peak: stats.peak,
+          phase: vadState.phase,
+        });
+        if (
+          typeof onAudioLevel === "function"
+          && (
+            currentNow - lastAudioLevelAtMs >= 100
+            || transition.action !== "none"
+            || previousPhase !== vadState.phase
+          )
+        ) {
+          lastAudioLevelAtMs = currentNow;
+          onAudioLevel({
+            level: signalLevel,
+            rms: stats.rms,
+            peak: stats.peak,
+            phase: vadState.phase,
+          });
+        }
 
         if (previousPhase === "idle") {
           if (vadState.phase === "candidate") {
@@ -1398,11 +1458,13 @@
         t,
         onResize,
         baseText: basePromptValue,
+        lastSignalLevel: 0,
+        lastSignalStatus: "waiting",
       };
       session.cancelHandler = () => cancelVoiceSession(session);
       activeVoiceSession = session;
       setActiveVoiceStop(session.cancelHandler);
-      renderAsrStatus({ els, t, status: "waiting" });
+      renderAsrStatus({ els, t, status: "waiting", signalLevel: 0 });
       let partialText = "";
       let partialBusy = false;
       let elapsedSeconds = 0;
@@ -1478,14 +1540,51 @@
         partialIntervalSeconds: normalizePartialIntervalSeconds(getPartialIntervalSeconds?.()),
         onTick: (seconds) => {
           elapsedSeconds = seconds;
-          renderAsrStatus({ els, t, status: partialBusy ? "partial" : (session.speechStarted ? "speech" : "waiting"), seconds });
+          renderAsrStatus({
+            els,
+            t,
+            status: partialBusy ? "partial" : session.lastSignalStatus,
+            seconds,
+            signalLevel: session.lastSignalLevel,
+          });
         },
         onPartialBlob: handleLocalPartial,
         onSpeechStart: () => {
-          if (!session.stopped) renderAsrStatus({ els, t, status: "speech" });
+          if (!session.stopped) {
+            renderAsrStatus({
+              els,
+              t,
+              status: "speech",
+              signalLevel: session.lastSignalLevel,
+            });
+          }
         },
         onFinalizing: () => {
-          if (!session.stopped) renderAsrStatus({ els, t, status: "finalizing" });
+          if (!session.stopped) {
+            renderAsrStatus({
+              els,
+              t,
+              status: "finalizing",
+              signalLevel: session.lastSignalLevel,
+            });
+          }
+        },
+        onAudioLevel: ({ level, phase }) => {
+          if (
+            session.stopped
+            || session.finalizing
+            || activeVoiceSession?.id !== session.id
+          ) return;
+          session.lastSignalLevel = level;
+          session.lastSignalStatus = phase === "candidate" || phase === "speaking"
+            ? "speech"
+            : (level > 0 ? "input" : "waiting");
+          renderAsrStatus({
+            els,
+            t,
+            status: session.lastSignalStatus,
+            signalLevel: level,
+          });
         },
         stopElement: els?.voiceInput,
         session,
@@ -1500,7 +1599,12 @@
       }
       stopVoiceCapture(session);
       session.finalizing = true;
-      renderAsrStatus({ els, t, status: "finalizing" });
+      renderAsrStatus({
+        els,
+        t,
+        status: "finalizing",
+        signalLevel: session.lastSignalLevel,
+      });
       const resultSessionId = session.id;
       const finalController = createAbortController(speechRoot);
       session.finalAbortController = finalController;

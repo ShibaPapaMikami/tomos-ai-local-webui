@@ -463,6 +463,33 @@ silentHarness.fireIntervals();
 silentCapture.stop();
 assert.equal(silentPartialCount + silentFinalCount, 0);
 
+const signalHarness = createVadHarness();
+const signalUpdates = [];
+const signalCapture = createWavPartialCapture({
+  stream: signalHarness.stream,
+  root: signalHarness.root,
+  now: () => signalHarness.nowMs,
+  onAudioLevel: (value) => signalUpdates.push(value),
+});
+signalCapture.start();
+signalHarness.feed(0, 0);
+signalHarness.feed(100, 0.0015);
+signalHarness.feed(200, 0.05);
+signalHarness.feed(400, 0.005);
+const updatesBeforeThrottleBurst = signalUpdates.length;
+for (let nowMs = 410; nowMs < 500; nowMs += 10) {
+  signalHarness.feed(nowMs, 0.005);
+}
+assert.equal(signalUpdates.length, updatesBeforeThrottleBurst);
+signalHarness.feed(500, 0.05);
+signalCapture.stop();
+assert.deepEqual(signalUpdates.map((item) => item.level), [0, 1, 2, 3, 4]);
+assert.equal(signalUpdates.every((item) => (
+  Number.isFinite(item.rms)
+  && Number.isFinite(item.peak)
+  && ["idle", "candidate", "speaking"].includes(item.phase)
+)), true);
+
 const shortHarness = createVadHarness();
 let shortRequestCount = 0;
 const shortCapture = createWavPartialCapture({
@@ -546,6 +573,22 @@ assert.equal(voiceInput.classList.enabled.has("recording"), true);
 renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "partial", seconds: 4 });
 assert.equal(statusEl.textContent, "composer.voicePartialTranscribing:4");
 assert.equal(voiceInput.classList.enabled.has("recording"), true);
+const signalStatusEl = { textContent: "", hidden: true, dataset: {} };
+renderAsrStatus({
+  els: { composerStatus: signalStatusEl, voiceInput },
+  t,
+  status: "input",
+  signalLevel: 1,
+});
+assert.equal(signalStatusEl.textContent, "composer.voiceInputDetected:");
+assert.equal(signalStatusEl.dataset.voiceLevel, "1");
+renderAsrStatus({
+  els: { composerStatus: signalStatusEl, voiceInput },
+  t,
+  status: "stopped",
+  signalLevel: null,
+});
+assert.equal("voiceLevel" in signalStatusEl.dataset, false);
 renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "waiting" });
 assert.equal(statusEl.textContent, "composer.voiceWaitingForSpeech:");
 assert.equal(voiceInput.classList.enabled.has("recording"), true);
@@ -698,11 +741,32 @@ clickHandler({ preventDefault() {} });
   assert.equal(postedBody.model, "nvidia/nemotron-3.5-asr-streaming-0.6b");
   assert.equal(postedBody.audioBase64, "abc123");
 
+  const recordSignalHarness = createVadHarness();
+  const recordSignalUpdates = [];
+  const recordSignalPromise = recordAudio({
+    root: recordSignalHarness.root,
+    navigatorImpl: {
+      mediaDevices: {
+        getUserMedia: async () => recordSignalHarness.stream,
+      },
+    },
+    mediaRecorderFactory: (stream) => new FakeMediaRecorder(stream),
+    onAudioLevel: (value) => recordSignalUpdates.push(value),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  recordSignalHarness.feed(0, 0);
+  recordSignalHarness.feed(100, 0.0015);
+  recordSignalHarness.feed(200, 0.05);
+  recordSignalHarness.feed(400, 0.005);
+  recordSignalHarness.feed(1100, 0);
+  await recordSignalPromise;
+  assert.deepEqual(recordSignalUpdates.map((item) => item.level), [0, 1, 2, 3, 0]);
+
   const vadFinalHarness = createVadHarness();
   let vadFinalRecorder = null;
   let vadFinalRequestCount = 0;
   let vadFinalTranscript = "";
-  const vadFinalStatusEl = { textContent: "", hidden: true };
+  const vadFinalStatusEl = { textContent: "", hidden: true, dataset: {} };
   const vadFinalResultPromise = handleVoiceInputClick({
     els: {
       prompt: { value: "議事録", focus() {} },
@@ -749,14 +813,22 @@ clickHandler({ preventDefault() {} });
     },
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  vadFinalHarness.feed(0, 0.05);
+  vadFinalHarness.feed(0, 0);
+  assert.equal(vadFinalStatusEl.textContent, "composer.voiceWaitingForSpeech:");
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "0");
+  vadFinalHarness.feed(100, 0.0015);
+  assert.equal(vadFinalStatusEl.textContent, "composer.voiceInputDetected:");
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "1");
   vadFinalHarness.feed(200, 0.05);
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "2");
+  vadFinalHarness.feed(400, 0.005);
   assert.equal(vadFinalStatusEl.textContent, "composer.voiceSpeechDetected:");
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "3");
   vadFinalHarness.fireIntervals();
   assert.equal(vadFinalRequestCount, 0);
-  vadFinalHarness.feed(500, 0);
+  vadFinalHarness.feed(700, 0);
   assert.equal(vadFinalRequestCount, 0);
-  vadFinalHarness.feed(850, 0);
+  vadFinalHarness.feed(1100, 0);
   assert.equal(vadFinalStatusEl.textContent, "composer.voiceFinalizing:");
   const vadFinalResult = await vadFinalResultPromise;
   assert.equal(vadFinalResult.text, "確定結果");
@@ -839,7 +911,7 @@ clickHandler({ preventDefault() {} });
   const cancelHarness = createVadHarness();
   let cancelRequestCount = 0;
   const cancelPrompt = { value: "元の入力", focus() {} };
-  const cancelStatusEl = { textContent: "", hidden: true };
+  const cancelStatusEl = { textContent: "", hidden: true, dataset: {} };
   const cancelResultPromise = handleVoiceInputClick({
     els: {
       prompt: cancelPrompt,
@@ -884,6 +956,9 @@ clickHandler({ preventDefault() {} });
   assert.equal(cancelRequestCount, 0);
   assert.equal(cancelPrompt.value, "元の入力");
   assert.equal(cancelStatusEl.textContent, "composer.voiceStopped:");
+  cancelHarness.feed(1200, 0.05);
+  assert.equal(cancelStatusEl.textContent, "composer.voiceStopped:");
+  assert.equal("voiceLevel" in cancelStatusEl.dataset, false);
   assert.equal(cancelHarness.trackStopCount, 1);
   assert.equal(cancelHarness.closeCount, 1);
 
