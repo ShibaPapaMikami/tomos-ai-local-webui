@@ -5825,15 +5825,22 @@ select:focus {
 .composer-status.recording::before {
   content: "";
   display: block;
-  width: 84px;
+  width: 36px;
   height: 14px;
   background:
-    linear-gradient(90deg, transparent 0 8px, currentColor 8px 10px, transparent 10px 18px) 0 50% / 18px 2px repeat-x,
-    linear-gradient(currentColor, currentColor) 50% 50% / 2px 14px no-repeat,
-    linear-gradient(currentColor, currentColor) 42% 50% / 2px 8px no-repeat,
-    linear-gradient(currentColor, currentColor) 58% 50% / 2px 8px no-repeat;
-  opacity: 0.72;
+    linear-gradient(currentColor, currentColor) 0 50% / 4px var(--voice-bar-1, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 8px 50% / 4px var(--voice-bar-2, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 16px 50% / 4px var(--voice-bar-3, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 24px 50% / 4px var(--voice-bar-4, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 32px 50% / 4px var(--voice-bar-5, 2px) no-repeat;
+  opacity: 0.78;
 }
+
+.composer-status[data-voice-level="0"] { --voice-bar-1: 2px; --voice-bar-2: 2px; --voice-bar-3: 2px; --voice-bar-4: 2px; --voice-bar-5: 2px; }
+.composer-status[data-voice-level="1"] { --voice-bar-1: 4px; --voice-bar-2: 6px; --voice-bar-3: 4px; --voice-bar-4: 6px; --voice-bar-5: 4px; }
+.composer-status[data-voice-level="2"] { --voice-bar-1: 6px; --voice-bar-2: 10px; --voice-bar-3: 8px; --voice-bar-4: 10px; --voice-bar-5: 6px; }
+.composer-status[data-voice-level="3"] { --voice-bar-1: 10px; --voice-bar-2: 14px; --voice-bar-3: 12px; --voice-bar-4: 14px; --voice-bar-5: 10px; }
+.composer-status[data-voice-level="4"] { --voice-bar-1: 14px; --voice-bar-2: 14px; --voice-bar-3: 14px; --voice-bar-4: 14px; --voice-bar-5: 14px; }
 
 .send-button:hover {
   filter: brightness(1.03);
