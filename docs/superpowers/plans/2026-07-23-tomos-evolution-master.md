@@ -108,7 +108,7 @@
 | Gate A0 | Gate 0合格版と依存承認 | Tauri 2依存の承認記録 | Desktop Phase A実装 | 合格 |
 | Gate A | Gate A0承認版 | Tauri専用window、単一起動、runtime所有権 | Phase 1 | 合格 |
 | Gate 1 | Gate A合格版 | GPU診断、理論推薦、承認付き実測 | Phase 2 | 合格 |
-| Gate 2 | Gate 1合格版 | VAD、確定処理、localhost Whisper fallback | Phase 3 | 停止 |
+| Gate 2 | Gate 1合格版 | VAD、確定処理、localhost Whisper fallback | Phase 3 | 検証中 |
 | Gate 3 | Gate 2合格版 | TTS共通境界、fixture、手動再生 | Phase 4 | 停止 |
 | Gate 4 | Gate 3合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment E/VまたはDesktop B | 停止 |
 | Gate V0 / V1 | Gate 4合格版とcandidate承認 | 隔離音声adapter、実測、人評価 | 音声採用の別計画 | 停止 |

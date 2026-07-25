@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import plistlib
 from pathlib import Path
 
 
@@ -17,6 +18,7 @@ def test_required_files_exist() -> None:
         TAURI_ROOT / "Cargo.toml",
         TAURI_ROOT / "build.rs",
         TAURI_ROOT / "tauri.conf.json",
+        TAURI_ROOT / "Info.plist",
         TAURI_ROOT / "capabilities" / "main.json",
         TAURI_ROOT / "icons" / "icon.png",
         TAURI_ROOT / "src" / "main.rs",
@@ -41,7 +43,15 @@ def test_tauri_window_and_bundle_contract() -> None:
     assert config["identifier"] == "com.shibapapastudio.tomos-ai"
     assert config["build"]["frontendDist"] == "../web"
     assert config["app"]["windows"] == []
-    assert config["bundle"]["active"] is False
+    assert config["bundle"]["active"] is True
+
+
+def test_macos_bundle_declares_microphone_usage() -> None:
+    with (TAURI_ROOT / "Info.plist").open("rb") as handle:
+        info = plistlib.load(handle)
+    assert info["NSMicrophoneUsageDescription"] == (
+        "音声入力と文字起こしのためにマイクを使用します。"
+    )
 
 
 def test_capability_has_no_shell_or_external_write_permission() -> None:
@@ -113,6 +123,7 @@ def main() -> None:
         test_required_files_exist,
         test_cargo_dependencies_are_minimal,
         test_tauri_window_and_bundle_contract,
+        test_macos_bundle_declares_microphone_usage,
         test_capability_has_no_shell_or_external_write_permission,
         test_git_ignores_rust_build_output,
         test_runtime_is_local_only_and_does_not_kill_unknown_processes,

@@ -246,6 +246,14 @@ WHISPER_CPP_BINARY = os.environ.get("GEMMA_WHISPER_CPP_BINARY", "").strip()
 WHISPER_CPP_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_MODEL", "").strip()
 WHISPER_CPP_FAST_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_FAST_MODEL", "").strip()
 WHISPER_CPP_ACCURATE_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_ACCURATE_MODEL", "").strip()
+WHISPER_SERVER_URL = os.environ.get("GEMMA_WHISPER_SERVER_URL", "")
+WHISPER_TRANSCRIPTION_ERROR = "音声を文字起こしできませんでした。設定を確認して、もう一度お試しください。"
+
+
+class WhisperTranscriptionError(RuntimeError):
+    pass
+
+
 ASR_MODEL_CANDIDATES = [
     {
         "model": "nvidia/nemotron-3.5-asr-streaming-0.6b",
@@ -1022,6 +1030,41 @@ def whisper_cpp_binary_path() -> str:
     return ""
 
 
+def normalize_local_whisper_server_url(value: str) -> str:
+    raw = value or ""
+    if (
+        not raw
+        or any(character.isspace() or ord(character) < 32 or 127 <= ord(character) <= 159 for character in raw)
+        or "?" in raw
+        or "#" in raw
+    ):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        port = parsed.port
+    except ValueError:
+        return ""
+    hostname = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme.lower() != "http"
+        or hostname not in {"localhost", "127.0.0.1", "::1"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    host = f"[{hostname}]" if hostname == "::1" else hostname
+    authority = f"{host}:{port}" if port is not None else host
+    path = parsed.path.rstrip("/")
+    return urllib.parse.urlunsplit(("http", authority, path, "", ""))
+
+
+class RejectWhisperServerRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
 def normalize_whisper_cpp_model(model: str) -> str:
     requested = (model or "").strip()
     if requested in {"", WHISPER_CPP_MODEL, WHISPER_CPP_FAST_MODEL}:
@@ -1354,6 +1397,49 @@ def clean_whisper_cpp_output(text: str) -> str:
     return " ".join(" ".join(lines).split()).strip()
 
 
+def run_whisper_server_transcription(wav_bytes: bytes, language: str, server_url: str) -> dict[str, object]:
+    normalized_url = normalize_local_whisper_server_url(server_url)
+    if not normalized_url:
+        raise ValueError("Whisper常駐サーバーURLはlocalhostのみ指定できます。")
+
+    boundary = f"----TOMOSWhisper{uuid.uuid4().hex}"
+    parts = [
+        f"--{boundary}\r\n".encode("ascii"),
+        b'Content-Disposition: form-data; name="file"; filename="speech.wav"\r\n',
+        b"Content-Type: audio/wav\r\n\r\n",
+        wav_bytes,
+        b"\r\n",
+    ]
+    clean_language = (language or "").strip()
+    if clean_language:
+        parts.extend([
+            f"--{boundary}\r\n".encode("ascii"),
+            b'Content-Disposition: form-data; name="language"\r\n\r\n',
+            clean_language.encode("utf-8"),
+            b"\r\n",
+        ])
+    parts.append(f"--{boundary}--\r\n".encode("ascii"))
+    request = urllib.request.Request(
+        f"{normalized_url}/inference",
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        RejectWhisperServerRedirects(),
+    )
+    with opener.open(request, timeout=30) as response:
+        try:
+            payload = json.loads(response.read().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Whisper常駐サーバーの応答を読み取れませんでした。") from exc
+    text = payload.get("text") if isinstance(payload, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError("Whisper常駐サーバーの文字起こし結果が空でした。")
+    return {"ok": True, "text": text.strip(), "engine": "whisper-server"}
+
+
 def run_whisper_cpp_transcription(audio_path: Path, mime_type: str, model: str = WHISPER_CPP_FAST_MODEL) -> dict:
     normalized_model = normalize_whisper_cpp_model(model)
     status = whisper_cpp_status(normalized_model)
@@ -1502,7 +1588,26 @@ def run_asr_transcription(audio_base64: str, mime_type: str, model: str) -> dict
         audio_path = Path(handle.name)
     try:
         if is_whisper_cpp_model(model):
-            payload = run_whisper_cpp_transcription(audio_path, mime_type, model)
+            server_url = normalize_local_whisper_server_url(WHISPER_SERVER_URL)
+            if server_url:
+                wav_temp_dir = None
+                try:
+                    wav_path, wav_temp_dir = ensure_wav_audio(audio_path, mime_type)
+                    language = "ja" if ASR_LANGUAGE.lower().startswith("ja") else ASR_LANGUAGE.split("-")[0]
+                    payload = run_whisper_server_transcription(wav_path.read_bytes(), language, server_url)
+                except Exception:
+                    try:
+                        payload = run_whisper_cpp_transcription(audio_path, mime_type, model)
+                    except Exception:
+                        raise WhisperTranscriptionError(WHISPER_TRANSCRIPTION_ERROR) from None
+                finally:
+                    if wav_temp_dir:
+                        shutil.rmtree(wav_temp_dir, ignore_errors=True)
+            else:
+                try:
+                    payload = run_whisper_cpp_transcription(audio_path, mime_type, model)
+                except Exception:
+                    raise WhisperTranscriptionError(WHISPER_TRANSCRIPTION_ERROR) from None
         elif ASR_WORKER:
             payload = run_asr_worker_transcription(audio_path, mime_type, model)
         else:
@@ -7264,6 +7369,8 @@ class Handler(BaseHTTPRequestHandler):
             mime_type = str(body.get("mimeType") or "audio/webm").strip()
             result = run_asr_transcription(audio_base64, mime_type, model)
             json_response(self, 200, result)
+        except WhisperTranscriptionError:
+            json_response(self, 501, {"ok": False, "error": WHISPER_TRANSCRIPTION_ERROR})
         except RuntimeError as exc:
             json_response(self, 501, {"ok": False, "error": str(exc), "asr": asr_status_payload()})
         except ValueError as exc:

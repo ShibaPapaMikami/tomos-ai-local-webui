@@ -51,8 +51,8 @@ VADの戻り値:
 
 ```js
 {
-  minRms: 0.012,
-  minPeak: 0.04,
+  minRms: 0.003,
+  minPeak: 0.01,
   minSpeechMs: 180,
   silenceToFinalizeMs: 650,
 }
@@ -125,7 +125,7 @@ node scripts/test-asr-helpers.js
 - [ ] **Step 3: 純粋関数を実装する**
 
 `web/asr.js` に `voiceActivityState({ state, nowMs, rms, peak,
-minRms = 0.012, minPeak = 0.04, minSpeechMs = 180,
+minRms = 0.003, minPeak = 0.01, minSpeechMs = 180,
 silenceToFinalizeMs = 650 })` を追加し、`window.GEMMA_ASR` からexportする。
 
 遷移規則:

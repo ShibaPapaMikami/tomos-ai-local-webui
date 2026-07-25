@@ -10,7 +10,7 @@ import urllib.request
 import zipfile
 import urllib.error
 from datetime import datetime, timezone
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -304,6 +304,387 @@ def test_whisper_cpp_status_shape() -> None:
     assert "binary" in status
     assert "modelPath" in status
     assert "modelSizeText" in status
+
+
+def test_normalize_local_whisper_server_url() -> None:
+    assert server.normalize_local_whisper_server_url("http://127.0.0.1:8178") == "http://127.0.0.1:8178"
+    assert server.normalize_local_whisper_server_url("http://localhost:8178/") == "http://localhost:8178"
+    assert server.normalize_local_whisper_server_url("http://[::1]:8178/") == "http://[::1]:8178"
+    assert server.normalize_local_whisper_server_url("https://localhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://example.com:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://192.168.1.5:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://user@localhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://localhost:8178?language=ja") == ""
+    assert server.normalize_local_whisper_server_url("http://localhost:8178#inference") == ""
+    assert server.normalize_local_whisper_server_url("http://local\nhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://local\thost:8178") == ""
+    assert server.normalize_local_whisper_server_url(" http://localhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://localhost:8178 ") == ""
+
+
+def test_whisper_server_request_uses_wav_multipart() -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return json.dumps({"text": "こんにちは"}).encode("utf-8")
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+    with patch.object(server.urllib.request, "urlopen", side_effect=FakeOpener().open), patch.object(
+        server.urllib.request,
+        "build_opener",
+        return_value=FakeOpener(),
+    ):
+        payload = server.run_whisper_server_transcription(
+            b"RIFF-real-wav-bytes",
+            "ja",
+            "http://127.0.0.1:8178",
+        )
+
+    request = captured["request"]
+    body = request.data
+    assert request.full_url == "http://127.0.0.1:8178/inference"
+    assert request.get_method() == "POST"
+    assert captured["timeout"] == 30
+    assert b'name="file"; filename="speech.wav"' in body
+    assert b"Content-Type: audio/wav" in body
+    assert b"RIFF-real-wav-bytes" in body
+    assert b'name="language"' in body
+    assert b"\r\nja\r\n" in body
+    assert payload == {"ok": True, "text": "こんにちは", "engine": "whisper-server"}
+
+
+def test_whisper_server_ipv6_request_omits_empty_language() -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"text":"IPv6 success"}'
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            captured["request"] = request
+            return FakeResponse()
+
+    with patch.object(server.urllib.request, "urlopen", side_effect=FakeOpener().open), patch.object(
+        server.urllib.request,
+        "build_opener",
+        return_value=FakeOpener(),
+    ):
+        payload = server.run_whisper_server_transcription(
+            b"RIFF-real-wav-bytes",
+            "",
+            "http://[::1]:8178/",
+        )
+
+    request = captured["request"]
+    assert request.full_url == "http://[::1]:8178/inference"
+    assert b'name="language"' not in request.data
+    assert payload["text"] == "IPv6 success"
+
+
+def test_whisper_server_does_not_follow_redirects() -> None:
+    target_requests = []
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        def record_request(self):
+            target_requests.append(self.path)
+            body = b'{"text":"redirected"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = record_request
+        do_POST = record_request
+
+        def log_message(self, format, *args):
+            pass
+
+    target_server = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                f"http://127.0.0.1:{target_server.server_port}/inference",
+            )
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    target_thread = threading.Thread(target=target_server.serve_forever, daemon=True)
+    redirect_thread = threading.Thread(target=redirect_server.serve_forever, daemon=True)
+    target_thread.start()
+    redirect_thread.start()
+    try:
+        try:
+            server.run_whisper_server_transcription(
+                b"RIFF-real-wav-bytes",
+                "ja",
+                f"http://127.0.0.1:{redirect_server.server_port}",
+            )
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 302
+        else:
+            raise AssertionError("Whisper常駐サーバーのredirectを追従してはいけません")
+    finally:
+        redirect_server.shutdown()
+        target_server.shutdown()
+        redirect_thread.join(timeout=3)
+        target_thread.join(timeout=3)
+        redirect_server.server_close()
+        target_server.server_close()
+
+    assert target_requests == []
+
+
+def test_whisper_server_falls_back_to_cli_once() -> None:
+    calls = []
+    previous_url = getattr(server, "WHISPER_SERVER_URL", None)
+    previous_server = getattr(server, "run_whisper_server_transcription", None)
+    previous_cli = server.run_whisper_cpp_transcription
+
+    def fail_server(wav_bytes, language, server_url):
+        assert wav_bytes == b"RIFF-real-wav-bytes"
+        calls.append("server")
+        raise RuntimeError("resident unavailable")
+
+    def succeed_cli(*args, **kwargs):
+        calls.append("cli")
+        return {"ok": True, "text": "こんにちは", "engine": "whisper.cpp"}
+
+    try:
+        server.WHISPER_SERVER_URL = "http://127.0.0.1:8178"
+        server.run_whisper_server_transcription = fail_server
+        server.run_whisper_cpp_transcription = succeed_cli
+        result = server.run_asr_transcription(
+            base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+            "audio/wav",
+            server.WHISPER_CPP_FAST_MODEL,
+        )
+    finally:
+        if previous_url is None:
+            delattr(server, "WHISPER_SERVER_URL")
+        else:
+            server.WHISPER_SERVER_URL = previous_url
+        if previous_server is None:
+            delattr(server, "run_whisper_server_transcription")
+        else:
+            server.run_whisper_server_transcription = previous_server
+        server.run_whisper_cpp_transcription = previous_cli
+
+    assert result["ok"] is True
+    assert result["text"] == "こんにちは"
+    assert calls == ["server", "cli"]
+
+
+def test_whisper_server_success_skips_cli() -> None:
+    calls = []
+    previous_url = getattr(server, "WHISPER_SERVER_URL", None)
+    previous_server = getattr(server, "run_whisper_server_transcription", None)
+    previous_cli = server.run_whisper_cpp_transcription
+
+    def succeed_server(wav_bytes, language, server_url):
+        assert wav_bytes == b"RIFF-real-wav-bytes"
+        calls.append("server")
+        return {"ok": True, "text": "常駐成功", "engine": "whisper-server"}
+
+    def fail_if_called(*args, **kwargs):
+        calls.append("cli")
+        raise AssertionError("resident成功時にCLIを呼んではいけません")
+
+    try:
+        server.WHISPER_SERVER_URL = "http://localhost:8178/"
+        server.run_whisper_server_transcription = succeed_server
+        server.run_whisper_cpp_transcription = fail_if_called
+        result = server.run_asr_transcription(
+            base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+            "audio/wav",
+            server.WHISPER_CPP_FAST_MODEL,
+        )
+    finally:
+        if previous_url is None:
+            delattr(server, "WHISPER_SERVER_URL")
+        else:
+            server.WHISPER_SERVER_URL = previous_url
+        if previous_server is None:
+            delattr(server, "run_whisper_server_transcription")
+        else:
+            server.run_whisper_server_transcription = previous_server
+        server.run_whisper_cpp_transcription = previous_cli
+
+    assert result["text"] == "常駐成功"
+    assert calls == ["server"]
+
+
+def test_whisper_without_server_url_calls_cli_only() -> None:
+    calls = []
+    previous_url = getattr(server, "WHISPER_SERVER_URL", None)
+    previous_server = getattr(server, "run_whisper_server_transcription", None)
+    previous_cli = server.run_whisper_cpp_transcription
+
+    def fail_if_called(*args, **kwargs):
+        calls.append("server")
+        raise AssertionError("URL未設定時にresidentを呼んではいけません")
+
+    def succeed_cli(*args, **kwargs):
+        calls.append("cli")
+        return {"ok": True, "text": "CLI成功", "engine": "whisper.cpp"}
+
+    try:
+        server.WHISPER_SERVER_URL = ""
+        server.run_whisper_server_transcription = fail_if_called
+        server.run_whisper_cpp_transcription = succeed_cli
+        result = server.run_asr_transcription(
+            base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+            "audio/wav",
+            server.WHISPER_CPP_FAST_MODEL,
+        )
+    finally:
+        if previous_url is None:
+            delattr(server, "WHISPER_SERVER_URL")
+        else:
+            server.WHISPER_SERVER_URL = previous_url
+        if previous_server is None:
+            delattr(server, "run_whisper_server_transcription")
+        else:
+            server.run_whisper_server_transcription = previous_server
+        server.run_whisper_cpp_transcription = previous_cli
+
+    assert result["text"] == "CLI成功"
+    assert calls == ["cli"]
+
+
+def test_whisper_api_error_hides_resident_and_cli_details() -> None:
+    calls = []
+    sensitive_details = (
+        "録音本文=社外秘 /private/tmp/gemma4-asr/input.wav "
+        "model=/Users/student/models/ggml.bin token=secret-token stderr/raw stdout/raw"
+    )
+    safe_error = "音声を文字起こしできませんでした。設定を確認して、もう一度お試しください。"
+
+    def fail_server(*args, **kwargs):
+        calls.append("server")
+        raise RuntimeError("resident response with private text")
+
+    def fail_cli(*args, **kwargs):
+        calls.append("cli")
+        raise RuntimeError(sensitive_details)
+
+    with patch.object(server, "WHISPER_SERVER_URL", "http://127.0.0.1:8178"), patch.object(
+        server,
+        "run_whisper_server_transcription",
+        side_effect=fail_server,
+    ), patch.object(
+        server,
+        "run_whisper_cpp_transcription",
+        side_effect=fail_cli,
+    ), patch.object(
+        server,
+        "normalize_asr_model",
+        return_value=server.WHISPER_CPP_FAST_MODEL,
+    ), patch.object(
+        server,
+        "asr_status_payload",
+        return_value={
+            "ok": False,
+            "modelCache": {"modelPath": "/Users/student/models/ggml.bin"},
+        },
+    ), local_handler_endpoint("/api/asr/transcribe") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({
+                "audioBase64": base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+                "mimeType": "audio/wav",
+                "model": server.WHISPER_CPP_FAST_MODEL,
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 501
+            response = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("residentとCLIの両方が失敗した時はHTTP 501を返す必要があります")
+
+    assert response == {"ok": False, "error": safe_error}
+    serialized = json.dumps(response, ensure_ascii=False)
+    for secret in ("社外秘", "/private/tmp", "/Users/student", "secret-token", "stderr/raw", "stdout/raw"):
+        assert secret not in serialized
+    assert calls == ["server", "cli"]
+
+
+def test_whisper_resident_wav_cleanup_on_success_and_failure() -> None:
+    for resident_succeeds in (True, False):
+        wav_paths = []
+        calls = []
+
+        def fake_ensure_wav_audio(audio_path, mime_type):
+            assert audio_path.is_file()
+            wav_dir = Path(tempfile.mkdtemp(prefix="tomos-whisper-cleanup-"))
+            wav_path = wav_dir / "input.wav"
+            wav_path.write_bytes(b"RIFF-converted-wav-bytes")
+            wav_paths.append(wav_path)
+            return wav_path, wav_dir
+
+        def resident(wav_bytes, language, server_url):
+            assert wav_bytes == b"RIFF-converted-wav-bytes"
+            calls.append("server")
+            if not resident_succeeds:
+                raise RuntimeError("resident unavailable")
+            return {"ok": True, "text": "常駐成功", "engine": "whisper-server"}
+
+        def cli(*args, **kwargs):
+            calls.append("cli")
+            return {"ok": True, "text": "CLI成功", "engine": "whisper.cpp"}
+
+        with patch.object(server, "WHISPER_SERVER_URL", "http://127.0.0.1:8178"), patch.object(
+            server,
+            "ensure_wav_audio",
+            side_effect=fake_ensure_wav_audio,
+        ), patch.object(
+            server,
+            "run_whisper_server_transcription",
+            side_effect=resident,
+        ), patch.object(
+            server,
+            "run_whisper_cpp_transcription",
+            side_effect=cli,
+        ):
+            result = server.run_asr_transcription(
+                base64.b64encode(b"browser-audio").decode("ascii"),
+                "audio/webm",
+                server.WHISPER_CPP_FAST_MODEL,
+            )
+
+        assert result["text"] == ("常駐成功" if resident_succeeds else "CLI成功")
+        assert calls == (["server"] if resident_succeeds else ["server", "cli"])
+        assert len(wav_paths) == 1
+        assert not wav_paths[0].parent.exists()
 
 
 def test_asr_status_detects_nemotron_incompatible_nemo() -> None:
@@ -3674,6 +4055,15 @@ if __name__ == "__main__":
     test_asr_status_payload_shape()
     test_asr_model_normalization()
     test_whisper_cpp_status_shape()
+    test_normalize_local_whisper_server_url()
+    test_whisper_server_request_uses_wav_multipart()
+    test_whisper_server_ipv6_request_omits_empty_language()
+    test_whisper_server_does_not_follow_redirects()
+    test_whisper_server_falls_back_to_cli_once()
+    test_whisper_server_success_skips_cli()
+    test_whisper_without_server_url_calls_cli_only()
+    test_whisper_api_error_hides_resident_and_cli_details()
+    test_whisper_resident_wav_cleanup_on_success_and_failure()
     test_asr_status_detects_nemotron_incompatible_nemo()
     test_asr_runner_missing_is_clear()
     test_asr_suffix_for_mime()
