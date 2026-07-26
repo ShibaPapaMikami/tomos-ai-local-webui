@@ -12,6 +12,7 @@
 
 - 正本の構想は `docs/tomos-adoption-candidates-research-2026-07-23.ja.md` とする。
 - デスクトップアプリの正本設計は `docs/superpowers/specs/2026-07-24-tomos-desktop-app-evolution-design.md` とする。
+- Apple Silicon版の製品runtime・データ移行・Mac配布設計は `docs/superpowers/specs/2026-07-26-tomos-macos-portable-runtime-and-notarized-pkg-design.md` とする。
 - 全体順序と工程の入口はこのファイルを唯一の正本とする。
 - 各工程の実装詳細は、このファイルから参照する工程別計画を正本とする。
 - 現在の未コミット変更を編集、整形、削除、移動、commit対象へ追加しない。
@@ -98,7 +99,8 @@
 9. Memoryへ自動保存しない。
 10. PC版はTauri、スマートフォン版はPWAとする。
 11. Tauriは既存 `web/` と `server.py` を再利用し、UIを全面的に作り直さない。
-12. Desktop AとPhase 1からPhase 4を並行実装しない。
+12. Desktop A、Phase 1からPhase 3、Desktop B1からC、Phase 4を並行実装しない。
+13. 最初の配布可能なTauriアプリはApple Silicon専用 `0.8.233` とし、Gate Cと実機インストール確認後にPhase 4へ戻る。
 
 ## 進行台帳
 
@@ -109,12 +111,14 @@
 | Gate A | Gate A0承認版 | Tauri専用window、単一起動、runtime所有権 | Phase 1 | 合格 |
 | Gate 1 | Gate A合格版 | GPU診断、理論推薦、承認付き実測 | Phase 2 | 合格 |
 | Gate 2 | Gate 1合格版 | VAD、確定処理、localhost Whisper fallback | Phase 3 | 合格 |
-| Gate 3 | Gate 2合格版 | TTS共通境界、fixture、手動再生 | Phase 4 | 合格 |
-| Gate 4 | Gate 3合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment E/VまたはDesktop B | 停止 |
+| Gate 3 | Gate 2合格版 | TTS共通境界、fixture、手動再生 | Desktop B1 | 合格 |
+| Gate B1 | Gate 3合格版 | Apple Silicon用Python同梱、app内resource | Desktop B2 | 停止 |
+| Gate B2 | Gate B1合格版 | localhost API session保護 | Desktop B3 | 停止 |
+| Gate B3 | Gate B2合格版 | app data、プレビュー、承認コピー移行 | Desktop C | 停止 |
+| Gate C | Gate B3合格版 | 署名・公証済みApple Silicon Mac PKG | 実機インストール確認 | 停止 |
+| Gate 4 | Gate C実機確認合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment E/VまたはDesktop D | 停止 |
 | Gate V0 / V1 | Gate 4合格版とcandidate承認 | 隔離音声adapter、実測、人評価 | 音声採用の別計画 | 停止 |
 | Gate E0 / E1 | Gate 4合格版とartifact承認 | local-onlyモデル比較結果 | モデル採用の別計画 | 停止 |
-| Gate B | Gate 4合格版 | Python同梱、API token、app data移行 | Desktop C | 停止 |
-| Gate C | Gate B合格版 | 署名・公証済みMac PKG | Desktop D | 停止 |
 | Gate D | Gate C合格版 | 署名済みWindows MSI | PCアプリ正式候補 | 停止 |
 
 台帳の状態は `未着手 | 実装中 | 検証中 | 差し戻し | 合格 | 停止` の6値だけを使う。工程開始時とGate判定時にこの表を更新する。状態変更だけのcommitもDirector承認がない限り作成しない。
@@ -129,11 +133,13 @@
 | Phase 2 音声入力 | `web/asr.js`、ASR部分の`server.py` | PC診断、TTS、Skill実装 |
 | Phase 3 TTS | 新規TTSファイル、TTS部分の`server.py`、`web/app.js` | PC診断、ASR内部、Skill実装 |
 | Phase 4 Skill Manager | 新規Skillファイル、`web/management.js`、`web/app.js` | Voice、PC診断 |
-| Desktop B 製品化 | `src-tauri/**`、runtime packaging、API token、移行adapter | モデル・音声engine採用 |
+| Desktop B1 ポータブルruntime | `src-tauri/**`、runtime packaging、resource manifest | API token、移行、モデル・音声engine採用 |
+| Desktop B2 API保護 | `src-tauri/**`、`server.py`、session adapterとテスト | 移行、モデル・音声engine採用 |
+| Desktop B3 app data・移行 | data path adapter、移行adapter、管理UI | モデル・音声engine採用 |
 | Desktop C Mac配布 | Tauri bundle、Mac署名、公証、PKG文書 | Windows配布、機能コード |
 | Desktop D Windows配布 | Tauri MSI、Windows署名、移行文書 | Mac配布、機能コード |
 
-共有ファイルを触る工程は必ず直列に実行する。Desktop A、Phase 1からPhase 4、Desktop BからDを並行実装しない。
+共有ファイルを触る工程は必ず直列に実行する。Desktop A、Phase 1からPhase 3、Desktop B1からC、Phase 4、Desktop Dを並行実装しない。
 
 ## Phase Order
 
@@ -149,20 +155,24 @@ Phase 0 基準線安定化
   -> Gate 2 アプリ/PWAでSTT回帰・無音・重複・停止確認
   -> Phase 3 TTS共通基盤と比較PoC
   -> Gate 3 アプリ/PWAで手動再生・停止・割り込み・外部通信確認
+  -> Desktop Phase B1 Apple Silicon用Python同梱・app内resource
+  -> Gate B1 別path・Pythonなし環境で製品runtime確認
+  -> Desktop Phase B2 localhost API session保護
+  -> Gate B2 token・Host・Origin・Content-Type確認
+  -> Desktop Phase B3 app data・保存移行
+  -> Gate B3 新規・移行・rollback確認
+  -> Desktop Phase C macOS署名・公証・PKG
+  -> Gate C Mac新規/移行実機確認
   -> Phase 4 Markdown Skill Manager
   -> Gate 4 手動承認・固定評価・Memory非自動保存確認
   -> Director承認時だけ任意で Experiment V または Experiment E
   -> 実験する場合は選んだ実験のGateを閉じる
-  -> Desktop Phase B Python同梱・API token・保存移行
-  -> Gate B 製品runtimeとデータ境界確認
-  -> Desktop Phase C macOS署名・公証・PKG
-  -> Gate C Mac新規/移行実機確認
   -> Desktop Phase D Windows署名・MSI
   -> Gate D Windows新規/移行実機確認
   -> 将来Gate P2P / Company Memory / VRMを別設計
 ```
 
-Experiment E / Vは任意で、Desktop Phase Bの必須条件ではない。実験する場合は1つずつ実行し、Desktop Phase Bと同時に進めない。実験を見送る場合はGate 4からDesktop Phase Bの設計承認へ直接進む。
+Experiment E / Vは任意で、Desktop Phase B1からCの必須条件ではない。実験する場合は1つずつ実行し、Desktop B1からC、Phase 4と同時に進めない。
 
 ## PWA資産版の進め方
 
@@ -342,28 +352,28 @@ Experiment E / Vは任意で、Desktop Phase Bの必須条件ではない。実�
 
 正本設計:
 
-`docs/superpowers/specs/2026-07-24-tomos-desktop-app-evolution-design.md`
+`docs/superpowers/specs/2026-07-26-tomos-macos-portable-runtime-and-notarized-pkg-design.md`
 
 開始条件:
 
-- Gate 4が合格している。
+- Gate 3が合格している。
 - Experiment EまたはVを実行中でない。
-- Python runtime同梱方法、再配布license、容量、macOS/Windowsのbuild方法を別設計書で固定している。
-- localhost API tokenと既存ブラウザーfallbackの両立方法を別設計書で固定している。
-- localStorage移行の読み取り元、書き込み先、プレビュー、rollbackを別設計書で固定している。
+- Apple Silicon用Python runtime同梱方法、再配布license、容量、SHA-256を設計書で固定している。
+- localhost API tokenと既存ブラウザーfallbackの両立方法を設計書で固定している。
+- localStorage移行の読み取り元、書き込み先、プレビュー、rollbackを設計書で固定している。
 - Desktop Phase B専用の実装計画を作成し、Directorが承認している。
 
 完了条件:
 
 - 利用者へPythonの事前インストールを要求しない。
-- app runtimeは署名対象の固定artifactとしてmacOS/Windows別に生成する。
+- app runtimeは署名対象の固定artifactとしてApple Silicon向けに生成する。
 - localhostの状態変更APIは起動ごとのsession token不一致を拒否する。
 - Host、Origin、Content-Typeを検証し、localhost以外へ待ち受けない。
 - app-managed data directoryを導入し、移行前に件数と対象をプレビューする。
 - 移行はユーザー承認後のコピー方式で、元データを削除しない。
 - 既存ブラウザーfallbackと `gemma4.*` 互換読込を維持する。
 - アプリ終了時はowned processだけを停止する。
-- runtime、API、移行、rollbackのMac/Windows自動テストが合格する。
+- runtime、API、移行、rollbackのMac自動テストが合格する。
 
 ### Desktop Phase C: macOS署名・公証・PKG
 
@@ -376,7 +386,7 @@ Experiment E / Vは任意で、Desktop Phase Bの必須条件ではない。実�
 
 開始条件:
 
-- Gate Bが合格している。
+- Gate B1、Gate B2、Gate B3が合格している。
 - `docs/superpowers/plans/2026-07-21-macos-app-launcher.md` は実行せず、署名・移行条件だけを参照する。
 - Tauri app bundle用の新しいMac配布計画を作成し、Directorが承認している。
 - 署名、公証、保存済みnotary profileの使用をDirectorが個別承認している。
@@ -596,7 +606,7 @@ docs: record TOMOS evolution verification
 
 ## Master Completion Criteria
 
-- Phase 0、Desktop A、Phase 1から4、Desktop BからDの全Gateが合格している。
+- Phase 0、Desktop A、Phase 1から3、Desktop B1からC、Phase 4、Desktop Dの全Gateが合格している。
 - PCの標準導線でブラウザーが開かず、Tauri専用windowにTOMOSが表示される。
 - スマートフォンPWAと問題調査用ブラウザーfallbackが維持されている。
 - アプリ終了時にowned processだけを停止し、ポート競合プロセスを停止しない。
