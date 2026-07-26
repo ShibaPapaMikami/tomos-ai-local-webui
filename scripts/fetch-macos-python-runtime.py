@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
 from typing import BinaryIO, Callable, Iterator
@@ -113,14 +114,79 @@ def install_verified_runtime(
         raise
 
 
+def _require_real_directory(path: Path, label: str) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label}が見つかりません: {path}") from exc
+    if stat.S_ISLNK(metadata.st_mode):
+        raise ValueError(f"{label} symlinkは許可されません: {path}")
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError(f"{label}はdirectoryではありません: {path}")
+
+
+def replace_with_verified_runtime(
+    archive: BinaryIO,
+    destination: Path,
+    runtime_verifier: Callable[[Path], str] = verify_runtime_cpu_and_version,
+) -> Path:
+    """Atomically replace an existing runtime with a freshly verified extraction.
+
+    The archive descriptor has already been hash-verified by
+    ``open_verified_artifact``.  Staging beside the destination and replacing it
+    only after CPU/version checks prevents a previously ignored runtime tree from
+    becoming the Tauri resource source.
+    """
+    destination = Path(destination)
+    _require_real_directory(destination.parent, "runtime parent")
+    try:
+        destination_stat = destination.lstat()
+    except FileNotFoundError:
+        return install_verified_runtime(archive, destination, runtime_verifier)
+    if stat.S_ISLNK(destination_stat.st_mode):
+        raise ValueError(f"runtime destination symlinkは許可されません: {destination}")
+    if not stat.S_ISDIR(destination_stat.st_mode):
+        raise ValueError(f"runtime destinationはdirectoryではありません: {destination}")
+
+    staging_root = stage_runtime(archive, destination)
+    backup_root: Path | None = None
+    try:
+        runtime_verifier(staging_root / "bin/python3")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.backup.", dir=destination.parent
+        )
+        os.close(descriptor)
+        backup_root = Path(temporary_name)
+        backup_root.unlink()
+        os.replace(destination, backup_root)
+        try:
+            os.replace(staging_root, destination)
+        except Exception:
+            os.replace(backup_root, destination)
+            raise
+        shutil.rmtree(backup_root)
+        return destination
+    except Exception:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="固定macOS Python runtimeを取得・検証します")
     parser.add_argument("--archive-cache", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="既存runtimeを固定artifactからfresh extractionへatomicに置き換える。",
+    )
     args = parser.parse_args()
 
     with open_verified_artifact(args.archive_cache) as archive:
-        install_verified_runtime(archive, args.output)
+        if args.replace_existing:
+            replace_with_verified_runtime(archive, args.output)
+        else:
+            install_verified_runtime(archive, args.output)
 
 
 if __name__ == "__main__":

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -146,6 +148,10 @@ def test_staged_tree_excludes_private_state_and_records_fixed_release_metadata()
         result = module.stage_resources(ROOT, destination)
         names = set(result["files"])
         manifest = json.loads((destination.parent / "build-manifest.json").read_text(encoding="utf-8"))
+        staged_hashes = {
+            name: hashlib.sha256((destination / name).read_bytes()).hexdigest()
+            for name in result["files"]
+        }
 
     expected_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
@@ -164,6 +170,9 @@ def test_staged_tree_excludes_private_state_and_records_fixed_release_metadata()
     assert manifest["bundleId"] == "com.shibapapastudio.tomos-ai"
     assert manifest["pkgIdentifier"] == "jp.local.gemma4-12b"
     assert {name: manifest["pythonArtifact"][name] for name in EXPECTED_ARTIFACT} == EXPECTED_ARTIFACT
+    assert manifest["resourceHashes"] == staged_hashes
+    assert set(manifest["resourceHashes"]) == names
+    assert all(re.fullmatch(r"[0-9a-f]{64}", digest) for digest in manifest["resourceHashes"].values())
 
 
 def test_stage_rejects_leaf_parent_and_root_symlinks() -> None:

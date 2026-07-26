@@ -247,6 +247,39 @@ def test_cpu_failure_does_not_publish_destination(tmp_path: Path) -> None:
     assert not list(tmp_path.glob(".runtime.*"))
 
 
+def test_replace_verified_runtime_rejects_symlink_destination(tmp_path: Path) -> None:
+    module = _load_fetch_module()
+    archive = make_valid_runtime_tar(tmp_path)
+    destination = tmp_path / "runtime-symlink"
+    external = tmp_path / "external"
+    external.mkdir()
+    destination.symlink_to(external, target_is_directory=True)
+
+    try:
+        with archive.open("rb") as source:
+            module.replace_with_verified_runtime(source, destination, lambda _python: "Python 3.11.15")
+    except ValueError as exc:
+        assert "symlink" in str(exc)
+    else:
+        raise AssertionError("runtime destination symlink was accepted")
+
+
+def test_replace_verified_runtime_atomically_replaces_existing_tree(tmp_path: Path) -> None:
+    module = _load_fetch_module()
+    archive = make_valid_runtime_tar(tmp_path)
+    destination = tmp_path / "runtime-replace"
+    destination.mkdir()
+    (destination / "unverified.txt").write_text("old", encoding="utf-8")
+
+    with archive.open("rb") as source:
+        result = module.replace_with_verified_runtime(source, destination, lambda _python: "Python 3.11.15")
+
+    assert result == destination
+    assert (destination / "bin/python3").is_symlink()
+    assert not (destination / "unverified.txt").exists()
+    assert not list(tmp_path.glob(".*.backup.*"))
+
+
 def _load_fetch_module():
     module_path = Path(__file__).with_name("fetch-macos-python-runtime.py")
     spec = importlib.util.spec_from_file_location("fetch_macos_python_runtime", module_path)
@@ -273,6 +306,8 @@ def main() -> None:
         test_verified_file_descriptor_survives_path_replacement(tmp_path)
         test_staging_failure_cleans_up_and_does_not_publish(tmp_path)
         test_cpu_failure_does_not_publish_destination(tmp_path)
+        test_replace_verified_runtime_rejects_symlink_destination(tmp_path)
+        test_replace_verified_runtime_atomically_replaces_existing_tree(tmp_path)
     print("macOS Python runtime tests passed")
 
 

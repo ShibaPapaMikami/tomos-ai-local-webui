@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -178,7 +179,15 @@ def _read_bundle_metadata(root: Path) -> tuple[str, str]:
     return bundle_id, match.group(1)
 
 
-def _build_manifest(root: Path, files: list[str]) -> dict[str, Any]:
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _build_manifest(root: Path, files: list[str], resource_hashes: dict[str, str]) -> dict[str, Any]:
     bundle_id, pkg_identifier = _read_bundle_metadata(root)
     return {
         "appVersion": _read_app_version(root),
@@ -188,6 +197,7 @@ def _build_manifest(root: Path, files: list[str]) -> dict[str, Any]:
         "pythonArtifact": _load_python_artifact(root),
         "sourceCommit": _run_git(root, "rev-parse", "HEAD"),
         "files": files,
+        "resourceHashes": resource_hashes,
         "hostArchitecture": platform.machine(),
     }
 
@@ -265,7 +275,12 @@ def stage_resources(root: Path, destination: Path) -> dict[str, Any]:
         files = sorted(path.relative_to(staging).as_posix() for path in staging.rglob("*") if path.is_file())
         if files != sorted(validated_files) or any(_is_forbidden(name) for name in files):
             raise ValueError("staging resource allowlist検証に失敗しました")
-        manifest = _build_manifest(root, files)
+        resource_hashes = {name: _sha256_file(staging / name) for name in files}
+        if set(resource_hashes) != set(files) or any(
+            not re.fullmatch(r"[0-9a-f]{64}", digest) for digest in resource_hashes.values()
+        ):
+            raise ValueError("staging resource hash検証に失敗しました")
+        manifest = _build_manifest(root, files, resource_hashes)
         manifest_staging.write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
