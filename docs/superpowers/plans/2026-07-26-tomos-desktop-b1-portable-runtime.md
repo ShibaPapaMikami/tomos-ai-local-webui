@@ -245,17 +245,19 @@ Expected: 全コマンドexit 0、禁止file 0件。
 ### Task 4: Rust runtimeをapp resource基準へ変更
 
 **Files:**
+- Modify: `src-tauri/Cargo.toml`
 - Modify: `src-tauri/src/runtime.rs`
 - Modify: `src-tauri/src/lib.rs`
+- Modify: `web/desktop-starting.js`
 - Modify: `scripts/test-desktop-shell-contract.py`
 
 **Interfaces:**
 - Produces:
-  - `RuntimePaths { resource_root: PathBuf, python: PathBuf }`
+- `RuntimePaths { resource_root: PathBuf, python: PathBuf, server: PathBuf }`
   - `resolve_runtime_paths(resource_dir: &Path, development_override: Option<&Path>) -> Result<RuntimePaths, RuntimeError>`
   - `RuntimeError::InvalidBundledRuntime`
 
-- [ ] **Step 1: bundle外pathと不足runtimeを拒否するRust testを書く**
+- [ ] **Step 1: bundle外path・symlink・不足runtimeを拒否するRust testを書く**
 
 ```rust
 #[test]
@@ -274,6 +276,15 @@ fn rejects_python_outside_resource_dir() {
         Err(RuntimeError::InvalidBundledRuntime)
     );
 }
+
+#[test]
+fn rejects_python_parent_symlink() {
+    let fixture = RuntimeFixture::with_python_parent_symlink();
+    assert_eq!(
+        resolve_runtime_paths(fixture.resources(), None),
+        Err(RuntimeError::InvalidBundledRuntime)
+    );
+}
 ```
 
 - [ ] **Step 2: REDを確認する**
@@ -282,13 +293,15 @@ Run: `cargo test --manifest-path src-tauri/Cargo.toml runtime::tests`
 
 Expected: `resolve_runtime_paths`未定義でcompile失敗。
 
-- [ ] **Step 3: release用path解決を実装する**
+- [ ] **Step 3: featureで明示した開発overrideとrelease用path解決を実装する**
 
-`app.path().resource_dir()`を`lib.rs`から渡す。`TOMOS_RESOURCE_ROOT`はdebug buildまたはtestだけで許可する。releaseでは`Resources/tomos/server.py`と`Resources/python/bin/python3`をcanonicalizeし、両方がresource directory内であることを確認する。
+`app.path().resource_dir()`を`lib.rs`から渡す。`TOMOS_RESOURCE_ROOT`はCargo feature `development-runtime-override` を明示したbuildだけで読む。通常・配布release buildはfeatureなしで作り、override文字列と分岐を含めない。開発overrideを使う起動は `TOMOS_RESOURCE_ROOT=<resource-base> cargo run --manifest-path src-tauri/Cargo.toml --features development-runtime-override` とする。
+
+releaseでは`Resources/tomos/server.py`と`Resources/python/bin/python3`をcanonicalizeし、各source componentのsymlinkを拒否する。Pythonの固定allowlist内の最終symlinkだけは、canonical pathがresource directory内かつ実行可能な場合に許可する。
 
 - [ ] **Step 4: Python起動を固定pathへ変更する**
 
-`RuntimeSupervisor::start(&RuntimePaths)`へ変更し、`Command::new(&paths.python)`と`current_dir(&paths.resource_root)`を使用する。release buildから`python3` fallbackを削除する。
+`RuntimeSupervisor::start(&RuntimePaths)`へ変更し、`Command::new(&paths.python)`、絶対化済み`paths.server`、`current_dir(&paths.resource_root)`を使用する。release buildから`python3` fallbackを削除する。`invalid_bundled_runtime`は起動画面で再インストール案内へ対応付ける。
 
 - [ ] **Step 5: GREENを確認する**
 
@@ -298,9 +311,10 @@ Run:
 cargo test --manifest-path src-tauri/Cargo.toml
 python3 scripts/test-desktop-shell-contract.py
 cargo build --release --manifest-path src-tauri/Cargo.toml
+strings src-tauri/target/release/tomos-desktop | rg 'TOMOS_RESOURCE_ROOT|TOMOS_PYTHON|CARGO_MANIFEST_DIR'
 ```
 
-Expected: Rust 7件以上を含め全件合格。
+Expected: Rust 14件以上を含め全件合格。release binaryからfeatureなしのoverride/fallback文字列は出ない。
 
 ---
 

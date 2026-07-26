@@ -8,13 +8,25 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(feature = "development-runtime-override")]
+use std::{env, path::PathBuf};
 use tauri::{
     webview::PageLoadEvent, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
-use runtime::{resolve_resource_root, RuntimeSupervisor};
+use runtime::{resolve_runtime_paths, RuntimeError, RuntimeSupervisor};
 
 const SECOND_INSTANCE_FOCUS_DELAY_MS: u64 = 250;
+
+#[cfg(feature = "development-runtime-override")]
+fn development_resource_override() -> Option<PathBuf> {
+    env::var_os("TOMOS_RESOURCE_ROOT").map(PathBuf::from)
+}
+
+#[cfg(not(feature = "development-runtime-override"))]
+fn development_resource_override() -> Option<std::path::PathBuf> {
+    None
+}
 
 fn refocus_after_second_instance(window: tauri::WebviewWindow) {
     let _ = window.show();
@@ -42,6 +54,14 @@ pub fn run() {
         }))
         .setup(move |app| {
             let runtime = Arc::clone(&setup_supervisor);
+            let development_override = development_resource_override();
+            let runtime_paths = app
+                .path()
+                .resource_dir()
+                .map_err(|_| RuntimeError::InvalidBundledRuntime)
+                .and_then(|resource_dir| {
+                    resolve_runtime_paths(&resource_dir, development_override.as_deref())
+                });
             WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -66,8 +86,9 @@ pub fn run() {
                     return;
                 }
                 let runtime = Arc::clone(&runtime);
+                let runtime_paths = runtime_paths.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    let result = resolve_resource_root().and_then(|root| runtime.start(&root));
+                    let result = runtime_paths.and_then(|paths| runtime.start(&paths));
                     match result {
                         Ok(_) => {
                             let url = "http://127.0.0.1:54876/"

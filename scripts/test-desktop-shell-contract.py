@@ -35,6 +35,8 @@ def test_cargo_dependencies_are_minimal() -> None:
     assert 'tauri-plugin-single-instance = "2"' in cargo
     assert "tauri-plugin-shell" not in cargo
     assert "reqwest" not in cargo
+    assert "[features]" in cargo
+    assert "development-runtime-override = []" in cargo
 
 
 def test_tauri_window_and_bundle_contract() -> None:
@@ -71,6 +73,19 @@ def test_runtime_is_local_only_and_does_not_kill_unknown_processes() -> None:
     runtime = read(TAURI_ROOT / "src" / "runtime.rs")
     assert 'pub const TOMOS_HOST: &str = "127.0.0.1";' in runtime
     assert "pub const TOMOS_PORT: u16 = 54876;" in runtime
+    assert "pub struct RuntimePaths" in runtime
+    assert "pub server: PathBuf" in runtime
+    assert "pub fn resolve_runtime_paths(" in runtime
+    assert "InvalidBundledRuntime" in runtime
+    assert 'join("tomos")' in runtime
+    assert 'join("python/bin/python3")' in runtime
+    assert "Command::new(&paths.python)" in runtime
+    assert ".arg(&paths.server)" in runtime
+    assert ".current_dir(&paths.resource_root)" in runtime
+    assert "TOMOS_PYTHON" not in runtime
+    assert "CARGO_MANIFEST_DIR" not in runtime
+    assert "debug_assertions" not in runtime
+    assert '#[cfg(feature = "development-runtime-override")]' in runtime
     assert "PortState::Occupied => return Err(RuntimeError::PortInUse)" in runtime
     assert "kill_port" not in runtime
     assert "pkill" not in runtime
@@ -89,6 +104,10 @@ def test_lifecycle_uses_single_instance_and_owned_cleanup() -> None:
     assert ".on_page_load(move |window, payload|" in lib
     assert 'get_webview_window("main")' in lib
     assert "RuntimeSupervisor::default()" in lib
+    assert "app.path().resource_dir()" in compact
+    assert "resolve_runtime_paths(&resource_dir, development_override.as_deref())" in lib
+    assert "debug_assertions" not in lib
+    assert '#[cfg(feature = "development-runtime-override")]' in lib
     assert "supervisor.stop_owned()" in lib
     assert "WindowEvent::CloseRequested" in lib
     assert "WindowEvent::Destroyed" in lib
@@ -110,6 +129,9 @@ def test_startup_page_has_fixed_japanese_errors() -> None:
     assert 'id="desktop-startup-title"' in html
     assert 'id="desktop-startup-message"' in html
     assert "TOMOSを起動しています" in html
+    assert 'const reinstallMessage = "TOMOSの実行環境を確認できませんでした。再インストールしてください。"' in script
+    assert '"invalid_bundled_runtime": reinstallMessage' in script
+    assert '"missing_resource_root": reinstallMessage' in script
     assert '"missing_python"' in script
     assert '"port_in_use"' in script
     assert '"server_exited"' in script

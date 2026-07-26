@@ -1,7 +1,9 @@
 (() => {
+  const reinstallMessage = "TOMOSの実行環境を確認できませんでした。再インストールしてください。";
   const messages = {
-    "missing_resource_root": "TOMOSの実行環境を確認できませんでした。再インストールしてください。",
-    "missing_python": "TOMOSの実行環境を確認できませんでした。再インストールしてください。",
+    "invalid_bundled_runtime": reinstallMessage,
+    "missing_resource_root": reinstallMessage,
+    "missing_python": reinstallMessage,
     "port_in_use": "TOMOSが使う場所を別のアプリが使用しています。ほかのTOMOSを終了して、もう一度開いてください。",
     "server_exited": "TOMOSを起動できませんでした。診断情報を確認してください。",
     "timeout": "TOMOSの起動に時間がかかっています。Ollamaを確認して、もう一度開いてください。",

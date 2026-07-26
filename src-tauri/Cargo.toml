@@ -12,6 +12,9 @@ crate-type = ["lib", "cdylib", "staticlib"]
 name = "tomos-desktop"
 path = "src/main.rs"
 
+[features]
+development-runtime-override = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
