@@ -5081,7 +5081,9 @@ select:focus {
 
 .message-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  max-width: 100%;
 }
 
 .message-actions button {
@@ -5098,6 +5100,11 @@ select:focus {
 .message-actions button:hover {
   border-color: var(--active-line);
   color: var(--accent);
+}
+
+.message-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .message-actions .icon-action {

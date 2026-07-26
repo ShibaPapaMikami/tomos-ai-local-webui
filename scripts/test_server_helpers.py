@@ -9,6 +9,7 @@ import threading
 import urllib.request
 import zipfile
 import urllib.error
+import os
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -19,6 +20,68 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server
 import sarashina_ocr_runner
+
+
+def test_tts_status_payload_defaults_to_disabled() -> None:
+    with patch.dict(os.environ, {
+        "GEMMA_TTS_ENGINE": "off",
+        "GEMMA_TTS_WORKER": "",
+        "GEMMA_TTS_WORKER_PYTHON": "",
+    }, clear=False):
+        payload = server.tts_status_payload()
+    assert payload["ok"] is True
+    assert payload["tts"]["enabled"] is False
+    assert payload["tts"]["ready"] is False
+    assert payload["tts"]["reason"] == "not_configured"
+
+
+def test_tts_long_text_is_rejected_before_worker() -> None:
+    with patch.object(server.tts_engine, "run_tts_worker") as run_worker:
+        status, payload = server.tts_synthesize_payload({
+            "requestId": "tts-long",
+            "text": "あ" * 1001,
+            "voice": "default",
+            "language": "ja",
+        })
+    assert status == 400
+    assert payload["error"] == "tts_text_too_long"
+    run_worker.assert_not_called()
+
+
+def test_tts_ready_fixture_synthesizes_audio() -> None:
+    worker = Path(__file__).resolve().parent / "tts_fixture_worker.py"
+    with patch.dict(os.environ, {
+        "GEMMA_TTS_ENGINE": "fixture",
+        "GEMMA_TTS_WORKER": str(worker),
+        "GEMMA_TTS_WORKER_PYTHON": sys.executable,
+    }, clear=False):
+        status, payload = server.tts_synthesize_payload({
+            "requestId": "tts-server-fixture",
+            "text": "こんにちは",
+            "voice": "default",
+            "language": "ja",
+        })
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["requestId"] == "tts-server-fixture"
+    assert payload["audio"]["mimeType"] == "audio/wav"
+
+
+def test_tts_stream_rejects_non_streaming_engine() -> None:
+    worker = Path(__file__).resolve().parent / "tts_fixture_worker.py"
+    with patch.dict(os.environ, {
+        "GEMMA_TTS_ENGINE": "qwen3-tts",
+        "GEMMA_TTS_WORKER": str(worker),
+        "GEMMA_TTS_WORKER_PYTHON": sys.executable,
+    }, clear=False):
+        status, payload = server.tts_stream_validation_payload({
+            "requestId": "tts-no-stream",
+            "text": "こんにちは",
+            "voice": "default",
+            "language": "ja",
+        })
+    assert status == 409
+    assert payload["error"] == "tts_streaming_unsupported"
 
 
 def test_person_photo_upload_saves_to_local_folder() -> None:
@@ -4039,6 +4102,10 @@ def test_parse_ollama_pull_progress_and_download_jobs() -> None:
 
 
 if __name__ == "__main__":
+    test_tts_status_payload_defaults_to_disabled()
+    test_tts_long_text_is_rejected_before_worker()
+    test_tts_ready_fixture_synthesizes_audio()
+    test_tts_stream_rejects_non_streaming_engine()
     test_contract_pdf_import_status_payload_shape()
     test_contract_pdf_import_connection_test_payload_shape()
     test_sarashina_ocr_status_payload_shape()

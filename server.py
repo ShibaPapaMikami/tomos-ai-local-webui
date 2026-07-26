@@ -74,6 +74,7 @@ from contract_ledger import (
 )
 from sarashina_ocr_runner import sarashina_compare_page_payload, sarashina_ocr_status
 from study_pack_manager import build_catalog, install_pack, remove_pack
+import tts_engine
 
 try:
     import segno
@@ -621,6 +622,80 @@ def stream_json_event(handler: BaseHTTPRequestHandler, payload: dict) -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
     handler.wfile.write(body)
     handler.wfile.flush()
+
+
+def current_tts_config() -> dict[str, object]:
+    return tts_engine.normalize_tts_config(dict(os.environ))
+
+
+def tts_status_payload() -> dict[str, object]:
+    config = current_tts_config()
+    public_status = {
+        key: config[key]
+        for key in (
+            "enabled",
+            "engine",
+            "ready",
+            "supportsStreaming",
+            "supportsCancel",
+            "reason",
+        )
+    }
+    return {"ok": True, "tts": public_status}
+
+
+def tts_synthesize_payload(payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    request = tts_engine.validate_tts_request(payload)
+    if not request["ok"]:
+        return 400, request
+    config = current_tts_config()
+    if not config["ready"]:
+        return 503, {"ok": False, "error": "tts_unavailable"}
+    result = tts_engine.run_tts_worker(config, request)
+    return (200 if result["ok"] else 502), result
+
+
+def tts_stream_validation_payload(payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    request = tts_engine.validate_tts_request(payload)
+    if not request["ok"]:
+        return 400, request
+    config = current_tts_config()
+    if not config["ready"]:
+        return 503, {"ok": False, "error": "tts_unavailable"}
+    if not config["supportsStreaming"]:
+        return 409, {"ok": False, "error": "tts_streaming_unsupported"}
+    return 200, {"ok": True, "request": request, "config": config}
+
+
+def tts_stream_response(handler: BaseHTTPRequestHandler, payload: dict[str, object]) -> None:
+    status, validation = tts_stream_validation_payload(payload)
+    if status != 200:
+        json_response(handler, status, validation)
+        return
+    request = validation["request"]
+    config = validation["config"]
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    try:
+        for event in tts_engine.iter_tts_worker_events(config, request):
+            stream_json_event(handler, event)
+    except (BrokenPipeError, ConnectionResetError):
+        tts_engine.cancel_tts_request(str(request["requestId"]))
+
+
+def tts_cancel_payload(payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    request_id = payload.get("requestId")
+    if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 128:
+        return 400, {"ok": False, "error": "tts_request_id_invalid"}
+    cancelled = tts_engine.cancel_tts_request(request_id)
+    return 200, {
+        "ok": True,
+        "requestId": request_id,
+        "cancelled": cancelled,
+    }
 
 
 def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
@@ -6694,6 +6769,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/asr/status":
             json_response(self, 200, asr_status_payload())
             return
+        if parsed.path == "/api/tts/status":
+            json_response(self, 200, tts_status_payload())
+            return
         if parsed.path == "/api/asr/setup/status":
             json_response(self, 200, asr_setup_status())
             return
@@ -6892,6 +6970,32 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/asr/transcribe":
             self.handle_asr_transcribe()
+            return
+        if self.path == "/api/tts/synthesize":
+            try:
+                body = read_json_body(self)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                json_response(self, 400, {"ok": False, "error": "tts_request_json_invalid"})
+                return
+            status, payload = tts_synthesize_payload(body)
+            json_response(self, status, payload)
+            return
+        if self.path == "/api/tts/stream":
+            try:
+                body = read_json_body(self)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                json_response(self, 400, {"ok": False, "error": "tts_request_json_invalid"})
+                return
+            tts_stream_response(self, body)
+            return
+        if self.path == "/api/tts/cancel":
+            try:
+                body = read_json_body(self)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                json_response(self, 400, {"ok": False, "error": "tts_request_json_invalid"})
+                return
+            status, payload = tts_cancel_payload(body)
+            json_response(self, status, payload)
             return
         if self.path == "/api/asr/setup":
             self.handle_asr_setup()

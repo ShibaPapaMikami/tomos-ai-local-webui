@@ -15,6 +15,9 @@ function renderGemmaMessages(deps) {
     saveWorkspaceTranscript,
     state,
     t,
+    playTts,
+    stopTts,
+    replayTts,
   } = deps;
   const character = state.character || {};
   const characterName = character.name || "Gemma";
@@ -274,6 +277,33 @@ function renderGemmaMessages(deps) {
         actions.append(createSaveTranscriptButton(message.workspaceTranscript, saveWorkspaceTranscript, t));
       }
       if (message.role === "assistant") {
+        const isActiveTtsMessage = state.ttsPlayback?.messageIndex === messageIndex;
+        const ttsState = isActiveTtsMessage ? state.ttsPlayback.status : "";
+        const ttsPlay = document.createElement("button");
+        ttsPlay.type = "button";
+        ttsPlay.textContent = ttsState === "preparing"
+          ? t("chat.ttsPreparing")
+          : (ttsState === "error" ? t("chat.ttsError") : t("chat.ttsPlay"));
+        ttsPlay.disabled = !state.ttsStatus?.ready || ttsState === "preparing" || ttsState === "playing";
+        ttsPlay.title = ttsState === "error"
+          ? t("chat.ttsError")
+          : (state.ttsStatus?.ready ? t("chat.ttsPlay") : t("chat.ttsUnavailable"));
+        ttsPlay.addEventListener("click", () => playTts?.(messageIndex, message));
+        actions.append(ttsPlay);
+        if (ttsState === "preparing" || ttsState === "playing") {
+          const ttsStop = document.createElement("button");
+          ttsStop.type = "button";
+          ttsStop.textContent = t("chat.ttsStop");
+          ttsStop.addEventListener("click", () => stopTts?.());
+          actions.append(ttsStop);
+        } else if (ttsState === "completed" || ttsState === "stopped") {
+          const ttsReplay = document.createElement("button");
+          ttsReplay.type = "button";
+          ttsReplay.textContent = t("chat.ttsReplay");
+          ttsReplay.disabled = !state.ttsStatus?.ready;
+          ttsReplay.addEventListener("click", () => replayTts?.());
+          actions.append(ttsReplay);
+        }
         const correct = document.createElement("button");
         correct.type = "button";
         correct.textContent = t("training.correct");

@@ -166,7 +166,7 @@ stream=trueの時はPublic Contractのstart、audio、done eventを1行ずつ返
 - Create: `tts_engine.py`
 - Create: `scripts/test_tts_engine.py`
 
-- [ ] **Step 1: 失敗テストを作成する**
+- [x] **Step 1: 失敗テストを作成する**
 
 `scripts/test_tts_engine.py` に次を含める。
 
@@ -220,7 +220,7 @@ def test_worker_event_rejects_skipped_sequence() -> None:
     assert result["error"] == "tts_stream_sequence_invalid"
 ```
 
-- [ ] **Step 2: 未実装失敗を確認する**
+- [x] **Step 2: 未実装失敗を確認する**
 
 ```bash
 python3 scripts/test_tts_engine.py
@@ -228,7 +228,7 @@ python3 scripts/test_tts_engine.py
 
 期待結果: `ModuleNotFoundError: No module named 'tts_engine'`。
 
-- [ ] **Step 3: `tts_engine.py` を実装する**
+- [x] **Step 3: `tts_engine.py` を実装する**
 
 公開関数:
 
@@ -254,7 +254,7 @@ python3 scripts/test_tts_engine.py
 - cancelは対象processだけを終了する。
 - textとaudioをlogへ出さない。
 
-- [ ] **Step 4: テストを合格させる**
+- [x] **Step 4: テストを合格させる**
 
 ```bash
 python3 scripts/test_tts_engine.py
@@ -272,11 +272,11 @@ python3 -m py_compile tts_engine.py
 - Modify: `scripts/test_server_helpers.py`
 - Test: `scripts/test_tts_engine.py`
 
-- [ ] **Step 1: fixture workerを作る**
+- [x] **Step 1: fixture workerを作る**
 
 fixtureは依存なしで、stream=falseでは44-byte WAV headerと短い無音PCMを返す。stream=trueではstart、2つのaudio、doneを順番に返す。engineが `fixture` 以外ならerrorを返す。外部通信とファイル保存をしない。
 
-- [ ] **Step 2: fixture integration testを追加する**
+- [x] **Step 2: fixture integration testを追加する**
 
 追加するtest関数名は `test_fixture_worker_round_trip()` とする。
 
@@ -289,7 +289,7 @@ fixtureは依存なしで、stream=falseでは44-byte WAV headerと短い無音P
 - 10 MiB以下。
 - workerが終了コード0。
 
-- [ ] **Step 3: server helper testを追加する**
+- [x] **Step 3: server helper testを追加する**
 
 `scripts/test_server_helpers.py` に次を追加する。
 
@@ -302,7 +302,7 @@ fixtureは依存なしで、stream=falseでは44-byte WAV headerと短い無音P
 - requestId不一致を拒否する。
 - cancelは対象requestだけに作用する。
 
-- [ ] **Step 4: server APIを実装する**
+- [x] **Step 4: server APIを実装する**
 
 `server.py` から `tts_engine` をimportし、
 `tts_status_payload() -> dict[str, object]`、
@@ -320,7 +320,7 @@ route:
 
 TTSがoffまたはunavailableの時、synthesizeとstreamはHTTP 503と `tts_unavailable`。stream responseは各eventごとにflushする。client切断時は対応workerをterminateする。チャットAPIの状態とresponseは変更しない。
 
-- [ ] **Step 5: Python testを合格させる**
+- [x] **Step 5: Python testを合格させる**
 
 ```bash
 python3 scripts/test_tts_engine.py
@@ -344,7 +344,7 @@ python3 -m py_compile tts_engine.py server.py scripts/tts_fixture_worker.py
 - Modify: `web/sw.js`
 - Modify: `scripts/test-pwa-assets.js`
 
-- [ ] **Step 1: controllerの失敗テストを追加する**
+- [x] **Step 1: controllerの失敗テストを追加する**
 
 `scripts/test-tts-helpers.js` で次を検証する。
 
@@ -372,7 +372,7 @@ assert.equal(validateTtsStreamEvent({
 }).ok, false);
 ```
 
-- [ ] **Step 2: 未実装失敗を確認する**
+- [x] **Step 2: 未実装失敗を確認する**
 
 ```bash
 node scripts/test-tts-helpers.js
@@ -380,7 +380,7 @@ node scripts/test-tts-helpers.js
 
 期待結果: `ENOENT` または `normalizeTtsText` 未定義。
 
-- [ ] **Step 3: `web/tts.js` を実装する**
+- [x] **Step 3: `web/tts.js` を実装する**
 
 export:
 
@@ -431,7 +431,7 @@ controller.dispose();
 - autoplayは行わない。
 - audio dataをlocalStorageへ保存しない。
 
-- [ ] **Step 4: UIを接続する**
+- [x] **Step 4: UIを接続する**
 
 assistant messageの操作列へ次を追加する。
 
@@ -448,7 +448,7 @@ assistant messageの操作列へ次を追加する。
 - assistant response確定前にはTTSを呼ばない。
 - 自動読み上げ設定は初期OFF。Phase 3ではON toggleを追加しない。
 
-- [ ] **Step 5: 文言を追加する**
+- [x] **Step 5: 文言を追加する**
 
 key:
 
@@ -464,7 +464,7 @@ settings.ttsEngine
 settings.ttsManualOnly
 ```
 
-- [ ] **Step 6: Web testと構文を合格させる**
+- [x] **Step 6: Web testと構文を合格させる**
 
 ```bash
 node scripts/test-tts-helpers.js
@@ -474,7 +474,7 @@ node --check web/app.js
 
 期待結果: 終了コード0。
 
-- [ ] **Step 7: PWA資産版を更新する**
+- [x] **Step 7: PWA資産版を更新する**
 
 `tts.js`、`app.js`、`i18n.js`、`styles.css`、`pwa.js`、`web/sw.js` を `0.8.233-tts-boundary` に揃える。`scripts/test-pwa-assets.js` に `TTS_ASSET_VERSION` を追加し、更新対象だけをこの定数で検証する。models、settings、asr、managementの既存版は変更しない。
 
@@ -491,7 +491,7 @@ node scripts/test-pwa-assets.js
 - Create: `docs/tts-comparison-protocol.ja.md`
 - Create: `docs/tts-comparison-results.ja.md`
 
-- [ ] **Step 1: 比較条件を固定する**
+- [x] **Step 1: 比較条件を固定する**
 
 両engineへ同じ10文を使う。
 
@@ -508,7 +508,7 @@ node scripts/test-pwa-assets.js
 - 停止から無音までのms
 - Windows CPUのみ、Windows GPU、Apple Siliconの成否
 
-- [ ] **Step 2: 合格基準を固定する**
+- [x] **Step 2: 合格基準を固定する**
 
 標準音声候補の合格条件:
 
@@ -525,7 +525,7 @@ node scripts/test-pwa-assets.js
 - 10文中の読み間違い2件以下。
 - 許諾のない音声を使わない。
 
-- [ ] **Step 3: 実engine導入Gateを明記する**
+- [x] **Step 3: 実engine導入Gateを明記する**
 
 VibeVoiceまたはQwen3-TTSを実際に取得する前にDirectorへ次を提示する。
 
@@ -545,7 +545,7 @@ download size:
 
 ## Task 5: 回帰とブラウザー確認を行う
 
-- [ ] **Step 1: マスター計画のGlobal Verification Matrixへ次を追加して全実行する**
+- [x] **Step 1: マスター計画のGlobal Verification Matrixへ次を追加して全実行する**
 
 ```bash
 node scripts/test-tts-helpers.js
@@ -554,14 +554,14 @@ node --check web/tts.js
 python3 -m py_compile tts_engine.py scripts/tts_fixture_worker.py
 ```
 
-- [ ] **Step 2: TTS offで確認する**
+- [x] **Step 2: TTS offで確認する**
 
 - チャット送信、停止、履歴が通常通り動く。
 - 読み上げbuttonはdisabled。
 - Console errorなし。
 - TTS API failureがチャットerrorにならない。
 
-- [ ] **Step 3: fixtureで確認する**
+- [x] **Step 3: fixtureで確認する**
 
 - 1messageを手動再生できる。
 - fixture streamではdoneを待たず最初のaudio chunkから再生が始まる。
@@ -572,11 +572,11 @@ python3 -m py_compile tts_engine.py scripts/tts_fixture_worker.py
 - 連打しても同時再生しない。
 - 画面遷移で止まる。
 
-- [ ] **Step 4: PC幅とスマホ幅で確認する**
+- [x] **Step 4: PC幅とスマホ幅で確認する**
 
 1440×900と390×844でbuttonがmessage本文を隠さず、横方向へはみ出さない。
 
-- [ ] **Step 5: Tauri appで再生と終了を確認する**
+- [x] **Step 5: Tauri appで再生と終了を確認する**
 
 `1280 × 820` と `960 × 640` でplay、stop、replay、マイク開始時interruptを確認する。app終了時にaudio、worker、requestが残らず、TTS engine未導入でもappが終了できることを確認する。
 

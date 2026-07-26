@@ -16,6 +16,8 @@ assert.match(index, new RegExp(`src="/i18n\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION
 assert.match(index, new RegExp(`src="/asr\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/models\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/settings\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"`));
+assert.match(index, new RegExp(`src="/tts\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"`));
+assert.match(index, new RegExp(`src="/messages\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/pwa\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"`));
 assert.match(index, /id="composer-status" hidden aria-live="polite"/);
 assert.match(i18n, /"composer\.voiceInputDetected": "音を受け取っています。"/);
@@ -77,12 +79,14 @@ assert.match(sw, new RegExp(`const CACHE_NAME = "gemma4-pwa-${DOWNLOAD_PROGRESS_
 assert.match(sw, new RegExp(`/styles\\.css\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/i18n\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/asr\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
+assert.match(sw, new RegExp(`/tts\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/models\\.js\\?v=${CHAT_CONTEXT_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/settings\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
 assert.match(sw, new RegExp(`/management\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/download-progress\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
+assert.match(sw, new RegExp(`/messages\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/pwa\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, new RegExp(`/app\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}`));
 assert.match(sw, /\/search\.js\?v=0\.8\.227-youtube-grounded/);

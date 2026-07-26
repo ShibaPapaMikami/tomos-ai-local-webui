@@ -569,7 +569,10 @@ assert.match(appSource, /hasImages: images\.length > 0/);
 assert.match(appSource, /"chat\.imageModelRequired"/);
 assert.match(appSource, /"chat\.standardModelRequired"/);
 assert.match(appSource, /if \(!canSendModelRequest\(requestOptions, requestModel\)\)/);
-assert.match(appSource, /async function sendMessage\(text\) \{\s*if \(state\.busy \|\| !\(await prepareComposerMessageForSend\(text\)\)\) return false;/);
+assert.match(
+  appSource,
+  /els\.composer\.addEventListener\("submit", async \(event\) => \{[\s\S]*?if \(\(!text[\s\S]*?\|\| state\.busy\) return;\s*stopTtsPlayback\(\{ discard: true \}\);/,
+);
 assert.match(appSource, /if \(state\.composerModel\) return modelForTask\("coding", true\);/);
 assert.match(appSource, /function shouldKeepNoteArticleInChat\(text\)/);
 assert.match(appSource, /function noteArticleRequestBudget\(text, baseContext\)/);
