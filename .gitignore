@@ -47,6 +47,8 @@ downloads/
 dist/
 Asset/
 tmp/
+build/cache/
+build/macos-runtime/
 *.zip
 *.tar
 *.tar.gz

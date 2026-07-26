@@ -152,11 +152,11 @@ ARTIFACT = RuntimeArtifact(
 )
 ```
 
-tar memberは絶対path、`..`、symlink、hardlinkを拒否する。展開先を一時directoryへ作り、`python/bin/python3`とライセンスを確認してからatomic renameする。
+tar memberは絶対path、`..`、hardlinkを拒否する。symlinkは固定artifactに実在する9件のpath→target完全一致allowlistだけを許可し、絶対target、`..`でarchive外へ出るtarget、未登録symlinkは拒否する。展開先を一時directoryへ作り、`python/bin/python3`と`python/lib/python3.11/LICENSE.txt`を確認してからatomic renameする。
 
 - [ ] **Step 4: downloaderを実装する**
 
-`fetch-macos-python-runtime.py`は`--archive-cache`と`--output`を受け取る。cacheがない場合だけ固定URLへ接続し、一時fileへdownloadしてからhashを検証する。redirect後のhostも`github.com`または`objects.githubusercontent.com`だけを許可する。
+`fetch-macos-python-runtime.py`は`--archive-cache`と`--output`を受け取る。cacheがない場合だけ固定URLへ接続し、一時fileへdownloadしてからhashを検証する。redirect後のhostはHTTPSかつ完全一致の`github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`だけを許可する。suffixやwildcardは許可しない。
 
 - [ ] **Step 5: GREENを確認する**
 
