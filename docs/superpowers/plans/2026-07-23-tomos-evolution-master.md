@@ -45,6 +45,8 @@
 | 構想 | `docs/tomos-adoption-candidates-research-2026-07-23.ja.md` | 何を目指すか |
 | 全体順序 | `docs/superpowers/plans/2026-07-23-tomos-evolution-master.md` | どの順で進むか |
 | デスクトップアプリ設計 | `docs/superpowers/specs/2026-07-24-tomos-desktop-app-evolution-design.md` | PC版の完成形と安全境界 |
+| Apple Silicon配布設計 | `docs/superpowers/specs/2026-07-26-tomos-macos-portable-runtime-and-notarized-pkg-design.md` | Desktop B1からCの固定判断 |
+| Apple Silicon配布実装 | `docs/superpowers/plans/2026-07-26-tomos-desktop-b1-portable-runtime.md`、`2026-07-26-tomos-desktop-b2-api-session.md`、`2026-07-26-tomos-desktop-b3-data-migration.md`、`2026-07-26-tomos-desktop-c-macos-signing-pkg.md` | B1、B2、B3、Cの実装順序とGate |
 | Tauri最小Shell | `docs/superpowers/plans/2026-07-24-tomos-tauri-desktop-shell.md` | ブラウザーを開かない最小アプリ |
 | 現行モデルルーター | `web/models.js`、`server.py` | モデル選択と分類 |
 | PC診断 | `server.py::local_pc_system_info()`、`pc_diagnostics_recommendation()` | 理論診断 |
@@ -354,6 +356,12 @@ Experiment E / Vは任意で、Desktop Phase B1からCの必須条件ではな�
 
 `docs/superpowers/specs/2026-07-26-tomos-macos-portable-runtime-and-notarized-pkg-design.md`
 
+工程別計画:
+
+1. `docs/superpowers/plans/2026-07-26-tomos-desktop-b1-portable-runtime.md`
+2. `docs/superpowers/plans/2026-07-26-tomos-desktop-b2-api-session.md`
+3. `docs/superpowers/plans/2026-07-26-tomos-desktop-b3-data-migration.md`
+
 開始条件:
 
 - Gate 3が合格している。
@@ -376,6 +384,10 @@ Experiment E / Vは任意で、Desktop Phase B1からCの必須条件ではな�
 - runtime、API、移行、rollbackのMac自動テストが合格する。
 
 ### Desktop Phase C: macOS署名・公証・PKG
+
+正本計画:
+
+`docs/superpowers/plans/2026-07-26-tomos-desktop-c-macos-signing-pkg.md`
 
 引き継ぐ既存条件:
 
