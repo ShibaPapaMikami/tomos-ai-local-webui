@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
 
+const DESKTOP_RELEASE_VERSION = "0.8.233";
 const DOWNLOAD_PROGRESS_ASSET_VERSION = "0.8.236-download-progress";
 const CHAT_CONTEXT_ASSET_VERSION = "0.8.235-strict-purpose";
 const index = fs.readFileSync("web/index.html", "utf8");
@@ -278,6 +279,7 @@ const currentVersionMatch = serverSource.match(
 );
 assert.ok(currentVersionMatch, "server.py should define the default app version");
 const currentAppVersion = currentVersionMatch[1];
+assert.equal(currentAppVersion, DESKTOP_RELEASE_VERSION);
 
 [
   "Gemma4_12B_Web.command",

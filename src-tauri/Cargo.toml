@@ -1,6 +1,6 @@
 [package]
 name = "tomos-desktop"
-version = "0.8.219"
+version = "0.8.233"
 description = "TOMOS AI desktop shell"
 edition = "2021"
 
