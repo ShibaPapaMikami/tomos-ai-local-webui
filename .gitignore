@@ -48,6 +48,7 @@ dist/
 Asset/
 tmp/
 build/cache/
+# Generated portable runtime resources and release manifest.
 build/macos-runtime/
 *.zip
 *.tar
