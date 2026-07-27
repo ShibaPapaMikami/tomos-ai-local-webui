@@ -169,6 +169,23 @@ fn probe_port() -> PortState {
     classify_health_response(&response)
 }
 
+fn build_server_command(paths: &RuntimePaths) -> Command {
+    let mut command = Command::new(&paths.python);
+    command
+        .arg("-B")
+        .arg(&paths.server)
+        .arg("--host")
+        .arg(TOMOS_HOST)
+        .arg("--port")
+        .arg(TOMOS_PORT.to_string())
+        .current_dir(&paths.resource_root)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
 impl RuntimeSupervisor {
     pub fn start(&self, paths: &RuntimePaths) -> Result<RuntimeOwnership, RuntimeError> {
         match probe_port() {
@@ -180,16 +197,7 @@ impl RuntimeSupervisor {
             PortState::Free => {}
         }
 
-        let child = Command::new(&paths.python)
-            .arg(&paths.server)
-            .arg("--host")
-            .arg(TOMOS_HOST)
-            .arg("--port")
-            .arg(TOMOS_PORT.to_string())
-            .current_dir(&paths.resource_root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+        let child = build_server_command(paths)
             .spawn()
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::NotFound {
@@ -487,6 +495,21 @@ mod tests {
     fn accepts_tomos_health_when_ollama_is_offline() {
         let response = "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"ok\":false,\"appVersion\":\"0.8.219\",\"ollama\":\"offline\"}";
         assert_eq!(classify_health_response(response), PortState::TomosReady);
+    }
+
+    #[test]
+    fn server_command_disables_bytecode_writes() {
+        let fixture = RuntimeFixture::valid();
+        let paths = resolve_runtime_paths(&fixture.resources(), None).expect("resolve fixture");
+        let command = build_server_command(&paths);
+        let args: Vec<_> = command.get_args().collect();
+        let envs: Vec<_> = command.get_envs().collect();
+
+        assert_eq!(args.first().and_then(|value| value.to_str()), Some("-B"));
+        assert!(envs.iter().any(|(key, value)| {
+            key.to_str() == Some("PYTHONDONTWRITEBYTECODE")
+                && value.and_then(|item| item.to_str()) == Some("1")
+        }));
     }
 
     #[test]
