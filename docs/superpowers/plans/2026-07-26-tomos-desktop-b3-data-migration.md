@@ -17,6 +17,8 @@
 - プレビュー前に書き込みを行わない。
 - Memory、Knowledge、契約書、教材パックの責務とscopeを変えない。
 - localStorageは明示export/importだけを許可し、ブラウザー領域を直接探索しない。
+- localStorage transfer fileはserverへ送信せず、`docs/superpowers/specs/2026-07-27-tomos-localstorage-transfer-design.md`の完全一致allowlistだけを扱う。
+- 未知key、API key、password、session token、Cookie、secret、workspace path、microphone device ID、外部LLM URL、plugin認証、mobile接続情報をlocalStorage移行へ含めない。
 - UIは`DESIGN.md`、保存境界は`MEMORY.md`に従う。
 - commitはDirectorの明示承認後だけ実行する。
 
@@ -267,7 +269,86 @@ Browser確認: `1280×820`、`960×640`、`390×844`で文字の重なり・横o
 
 ---
 
-### Task 6: Gate B3
+### Task 6: localStorageの明示export/import
+
+**Files:**
+- Create: `web/local-storage-transfer.js`
+- Create: `scripts/test-local-storage-transfer.js`
+- Modify: `web/management.js`
+- Modify: `web/index.html`
+- Modify: `web/styles.css`
+- Modify: `web/i18n.js`
+- Modify: `scripts/test-management-helpers.js`
+- Modify: `scripts/test-pwa-assets.js`
+
+**Interfaces:**
+- Produces:
+  - `TOMOS_LOCAL_STORAGE_EXPORT_TYPE = "tomos-local-storage-export"`
+  - `TOMOS_LOCAL_STORAGE_EXPORT_VERSION = 1`
+  - `TOMOS_LOCAL_STORAGE_ALLOWED_KEYS`
+  - `buildTomosLocalStorageExport(storage, nowIso) -> object`
+  - `previewTomosLocalStorageImport(payload) -> {status, acceptedKeys, rejectedCount, exportedAt}`
+  - `applyTomosLocalStorageImport(storage, preview, approved) -> {status, importedCount}`
+
+- [ ] **Step 1: allowlist、zero-write、rollback testを書く**
+
+```js
+const payload = buildTomosLocalStorageExport(storage, "2026-07-27T00:00:00.000Z");
+assert.equal(payload.type, "tomos-local-storage-export");
+assert.equal(payload.version, 1);
+assert.equal(payload.values["gemma4.theme"], "light");
+assert.equal(payload.values["gemma4.externalLlmUrl"], undefined);
+
+const preview = previewTomosLocalStorageImport({
+  type: "tomos-local-storage-export",
+  version: 1,
+  exportedAt: "2026-07-27T00:00:00.000Z",
+  values: {
+    "gemma4.theme": "dark",
+    "gemma4.unknownFutureKey": "ignored",
+    "gemma4.sessionToken": "ignored"
+  }
+});
+assert.deepEqual(preview.acceptedKeys, ["gemma4.theme"]);
+assert.equal(preview.rejectedCount, 2);
+assert.equal(storage.writes.length, 0);
+```
+
+write途中で例外を発生させ、反映前snapshotへ戻るtestも同じfileへ追加する。
+
+- [ ] **Step 2: REDを確認する**
+
+Run: `node scripts/test-local-storage-transfer.js`
+
+Expected: `web/local-storage-transfer.js`未作成で失敗。
+
+- [ ] **Step 3: pure helperを実装する**
+
+allowlistは設計書記載の33 keyを完全一致で定義する。exportはallowlist対象かつ文字列valueだけを返す。previewはfile形式、version、文字列valueを検証し、未知keyの値をreturnしない。applyは`approved === true`だけを許可し、現在値snapshotとwrite失敗時rollbackを実装する。
+
+- [ ] **Step 4: 管理画面へ手動transfer UIを追加する**
+
+旧ブラウザー側のexportは同一画面のlocalStorageだけを利用者click時に読み、JSON fileをdownloadする。importは利用者が選んだfileをbrowser memory内だけでparseする。server API、WebKit profile探索、ブラウザーprofile探索を使わない。
+
+previewには対象件数、除外件数、file作成日時だけを表示する。export前に「会話や設定がファイルへ含まれます」、import前に「現在のアプリ設定へ上書きされます」を表示する。成功・失敗は独立status領域へ出し、二重送信を無効化する。
+
+- [ ] **Step 5: GREENとresponsive確認**
+
+Run:
+
+```bash
+node scripts/test-local-storage-transfer.js
+node scripts/test-management-helpers.js
+node scripts/test-pwa-assets.js
+node --check web/local-storage-transfer.js
+node --check web/management.js
+```
+
+Browser確認: `1280×820`、`960×640`、`390×844`で文字の重なり・横overflow 0件。
+
+---
+
+### Task 7: Gate B3
 
 - [ ] **Step 1: 新規profileを確認する**
 
@@ -292,6 +373,7 @@ python3 scripts/test_server_helpers.py
 python3 scripts/test_context_core.py
 python3 scripts/test_knowledge_layer.py
 python3 scripts/test_study_pack_manager.py
+node scripts/test-local-storage-transfer.js
 node scripts/test-management-helpers.js
 node scripts/test-pwa-assets.js
 git diff --check
