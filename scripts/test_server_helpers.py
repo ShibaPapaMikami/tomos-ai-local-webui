@@ -1,4 +1,5 @@
 import sys
+import ast
 from pathlib import Path
 import base64
 import contextlib
@@ -10,6 +11,7 @@ import urllib.request
 import zipfile
 import urllib.error
 import os
+import subprocess
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
@@ -20,6 +22,276 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server
 import sarashina_ocr_runner
+
+
+def test_desktop_session_token_reads_configured_value() -> None:
+    with patch.dict(os.environ, {"GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64}, clear=False):
+        assert server.desktop_session_token() == "a" * 64
+
+
+def test_desktop_guard_rejects_missing_token() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/context/memory/save",
+        {
+            "Host": "127.0.0.1:54876",
+            "Origin": "http://127.0.0.1:54876",
+            "Content-Type": "application/json",
+        },
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_session_required"
+
+
+def test_desktop_guard_accepts_matching_session() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {
+            "Host": "127.0.0.1:54876",
+            "Origin": "http://127.0.0.1:54876",
+            "Content-Type": "application/json; charset=utf-8",
+            "X-TOMOS-Session": "a" * 64,
+        },
+        expected_token="a" * 64,
+    )
+    assert allowed
+    assert error == ""
+
+
+def test_desktop_guard_rejects_untrusted_host_and_origin() -> None:
+    base_headers = {
+        "Content-Type": "application/json",
+        "X-TOMOS-Session": "a" * 64,
+    }
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {**base_headers, "Host": "example.test:54876", "Origin": "http://127.0.0.1:54876"},
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_origin_required"
+
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {**base_headers, "Host": "localhost:54876", "Origin": "http://example.test:54876"},
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_origin_required"
+
+
+def test_desktop_guard_rejects_untrusted_host_for_get() -> None:
+    allowed, error = server.desktop_request_guard(
+        "GET",
+        "/api/context/memory/list",
+        {"Host": "example.test:54876"},
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_origin_required"
+
+
+def test_desktop_guard_allows_trusted_host_get_without_session_token() -> None:
+    allowed, error = server.desktop_request_guard(
+        "GET",
+        "/api/health",
+        {"Host": "127.0.0.1:54876"},
+        expected_token="a" * 64,
+    )
+    assert allowed
+    assert error == ""
+
+
+def test_desktop_guard_requires_json_only_for_explicit_json_endpoint() -> None:
+    headers = {
+        "Host": "localhost:54876",
+        "Origin": "http://localhost:54876",
+        "X-TOMOS-Session": "a" * 64,
+    }
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        headers,
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/asr/transcribe",
+        headers,
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+    assert server.desktop_json_content_type_required("/api/chat") is True
+    assert server.desktop_json_content_type_required("/api/asr/transcribe") is True
+
+
+def test_desktop_guard_requires_json_for_tts_stream_and_workspace_pick() -> None:
+    headers = {
+        "Host": "localhost:54876",
+        "Origin": "http://localhost:54876",
+        "Content-Type": "text/plain",
+        "X-TOMOS-Session": "a" * 64,
+    }
+    for path in ("/api/tts/stream", "/api/workspace/pick"):
+        allowed, error = server.desktop_request_guard(
+            "POST",
+            path,
+            headers,
+            expected_token="a" * 64,
+        )
+        assert not allowed
+        assert error == "desktop_json_required"
+
+
+def test_desktop_child_env_removes_only_session_token_and_keeps_overrides() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+            "TOMOS_UNRELATED_TEST_VALUE": "kept",
+        },
+        clear=False,
+    ):
+        child_env = server.desktop_child_env({"TOMOS_OVERRIDE_TEST_VALUE": "override"})
+    assert "GEMMA_DESKTOP_SESSION_TOKEN" not in child_env
+    assert child_env["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
+    assert child_env["TOMOS_OVERRIDE_TEST_VALUE"] == "override"
+
+
+def test_desktop_child_env_prevents_override_from_restoring_session_token() -> None:
+    child_env = server.desktop_child_env({"GEMMA_DESKTOP_SESSION_TOKEN": "b" * 64})
+    assert "GEMMA_DESKTOP_SESSION_TOKEN" not in child_env
+
+
+def test_desktop_child_process_cannot_observe_session_token() -> None:
+    with patch.dict(os.environ, {"GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64}, clear=False):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os, sys; "
+                    "sys.exit(1 if 'GEMMA_DESKTOP_SESSION_TOKEN' in os.environ else 0)"
+                ),
+            ],
+            env=server.desktop_child_env(),
+            check=False,
+        )
+    assert result.returncode == 0
+
+
+def test_all_server_subprocesses_use_sanitized_desktop_child_env() -> None:
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    subprocess_calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if not (
+            isinstance(function, ast.Attribute)
+            and isinstance(function.value, ast.Name)
+            and function.value.id == "subprocess"
+            and function.attr in {"run", "Popen"}
+        ):
+            continue
+        subprocess_calls.append(node)
+        env_keyword = next((item for item in node.keywords if item.arg == "env"), None)
+        assert env_keyword is not None, f"server.py:{node.lineno} subprocess has no sanitized env"
+        assert (
+            isinstance(env_keyword.value, ast.Call)
+            and isinstance(env_keyword.value.func, ast.Name)
+            and env_keyword.value.func.id == "desktop_child_env"
+        ), f"server.py:{node.lineno} subprocess bypasses desktop_child_env"
+    assert subprocess_calls
+
+
+def test_all_production_default_runner_calls_use_sanitized_desktop_child_env() -> None:
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    runner_calls = []
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        positional = [*function.args.posonlyargs, *function.args.args]
+        defaults = [None] * (len(positional) - len(function.args.defaults)) + list(function.args.defaults)
+        default_runner_names = {
+            argument.arg
+            for argument, default in zip(positional, defaults)
+            if (
+                isinstance(default, ast.Attribute)
+                and isinstance(default.value, ast.Name)
+                and default.value.id == "subprocess"
+                and default.attr == "run"
+            )
+        }
+        for node in ast.walk(function):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in default_runner_names
+            ):
+                continue
+            runner_calls.append(node)
+            env_keyword = next((item for item in node.keywords if item.arg == "env"), None)
+            assert env_keyword is not None, f"server.py:{node.lineno} default runner has no sanitized env"
+            assert (
+                isinstance(env_keyword.value, ast.Call)
+                and isinstance(env_keyword.value.func, ast.Name)
+                and env_keyword.value.func.id == "desktop_child_env"
+            ), f"server.py:{node.lineno} default runner bypasses desktop_child_env"
+    assert len(runner_calls) == 5
+
+
+def test_desktop_guard_rejects_text_plain_for_tts_synthesize() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/tts/synthesize",
+        {
+            "Host": "localhost:54876",
+            "Origin": "http://localhost:54876",
+            "Content-Type": "text/plain",
+            "X-TOMOS-Session": "a" * 64,
+        },
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+
+
+def test_desktop_guard_rejects_text_plain_for_tts_cancel() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/tts/cancel",
+        {
+            "Host": "localhost:54876",
+            "Origin": "http://localhost:54876",
+            "Content-Type": "text/plain",
+            "X-TOMOS-Session": "a" * 64,
+        },
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+
+
+def test_desktop_guard_keeps_browser_fallback_when_token_is_unset() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {},
+        expected_token="",
+    )
+    assert allowed
+    assert error == ""
 
 
 def test_tts_status_payload_defaults_to_disabled() -> None:
@@ -1914,11 +2186,21 @@ def test_agent_reach_doctor_payload_reads_runner_output() -> None:
 
     def fake_runner(*args, **kwargs):
         assert args[0][-2:] == ["doctor", "--json"]
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
         return FakeRunResult()
 
     try:
         server.AGENT_REACH_COMMAND_CANDIDATES = ["python3"]
-        payload = server.agent_reach_doctor_payload(runner=fake_runner)
+        with patch.dict(
+            os.environ,
+            {
+                "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+                "TOMOS_UNRELATED_TEST_VALUE": "kept",
+            },
+            clear=False,
+        ):
+            payload = server.agent_reach_doctor_payload(runner=fake_runner)
     finally:
         server.AGENT_REACH_COMMAND_CANDIDATES = previous
     assert payload["ok"] is True
@@ -3724,6 +4006,8 @@ def test_github_repo_result_uses_gh_runner(monkeypatch=None) -> None:
     def fake_runner(command, **kwargs):
         assert command[:3] == ["gh", "repo", "view"]
         assert command[3] == "Panniantong/Agent-Reach"
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
 
         class FakeRunResult:
             returncode = 0
@@ -3732,7 +4016,15 @@ def test_github_repo_result_uses_gh_runner(monkeypatch=None) -> None:
 
         return FakeRunResult()
 
-    result = server.github_repo_result("Panniantong/Agent-Reach", runner=fake_runner)
+    with patch.dict(
+        os.environ,
+        {
+            "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+            "TOMOS_UNRELATED_TEST_VALUE": "kept",
+        },
+        clear=False,
+    ):
+        result = server.github_repo_result("Panniantong/Agent-Reach", runner=fake_runner)
     assert result is not None
     assert result["title"] == "GitHubリポジトリ: Panniantong/Agent-Reach"
     assert "Internet router" in result["snippet"]
@@ -3742,6 +4034,8 @@ def test_github_repo_result_uses_gh_runner(monkeypatch=None) -> None:
 def test_github_search_results_uses_gh_runner(monkeypatch=None) -> None:
     def fake_runner(command, **kwargs):
         assert command[:3] == ["gh", "search", "repos"]
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
 
         class FakeRunResult:
             returncode = 0
@@ -3750,7 +4044,15 @@ def test_github_search_results_uses_gh_runner(monkeypatch=None) -> None:
 
         return FakeRunResult()
 
-    results = server.github_search_results("github coding agent", runner=fake_runner, limit=1)
+    with patch.dict(
+        os.environ,
+        {
+            "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+            "TOMOS_UNRELATED_TEST_VALUE": "kept",
+        },
+        clear=False,
+    ):
+        results = server.github_search_results("github coding agent", runner=fake_runner, limit=1)
     assert len(results) == 1
     assert results[0]["url"] == "https://github.com/openai/codex"
     assert "coding agent" in results[0]["snippet"]
@@ -3832,6 +4134,8 @@ def test_youtube_transcript_result_uses_runner_output(monkeypatch=None) -> None:
 
     def fake_runner(command, **kwargs):
         calls.append(command)
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
         if "--dump-json" in command:
             return FakeRunResult(stdout=b'{"id":"vid123","title":"Demo Video","description":"Demo description"}\n')
         output_template = command[command.index("-o") + 1]
@@ -3845,7 +4149,15 @@ def test_youtube_transcript_result_uses_runner_output(monkeypatch=None) -> None:
     previous = server.agent_reach_venv_ytdlp_command
     try:
         server.agent_reach_venv_ytdlp_command = lambda: ["python", "-m", "yt_dlp"]
-        result = server.youtube_transcript_result("https://www.youtube.com/watch?v=vid123", runner=fake_runner)
+        with patch.dict(
+            os.environ,
+            {
+                "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+                "TOMOS_UNRELATED_TEST_VALUE": "kept",
+            },
+            clear=False,
+        ):
+            result = server.youtube_transcript_result("https://www.youtube.com/watch?v=vid123", runner=fake_runner)
     finally:
         server.agent_reach_venv_ytdlp_command = previous
     assert result is not None
@@ -4102,6 +4414,22 @@ def test_parse_ollama_pull_progress_and_download_jobs() -> None:
 
 
 if __name__ == "__main__":
+    test_desktop_session_token_reads_configured_value()
+    test_desktop_guard_rejects_missing_token()
+    test_desktop_guard_accepts_matching_session()
+    test_desktop_guard_rejects_untrusted_host_and_origin()
+    test_desktop_guard_rejects_untrusted_host_for_get()
+    test_desktop_guard_allows_trusted_host_get_without_session_token()
+    test_desktop_guard_requires_json_only_for_explicit_json_endpoint()
+    test_desktop_guard_requires_json_for_tts_stream_and_workspace_pick()
+    test_desktop_child_env_removes_only_session_token_and_keeps_overrides()
+    test_desktop_child_env_prevents_override_from_restoring_session_token()
+    test_desktop_child_process_cannot_observe_session_token()
+    test_all_server_subprocesses_use_sanitized_desktop_child_env()
+    test_all_production_default_runner_calls_use_sanitized_desktop_child_env()
+    test_desktop_guard_rejects_text_plain_for_tts_synthesize()
+    test_desktop_guard_rejects_text_plain_for_tts_cancel()
+    test_desktop_guard_keeps_browser_fallback_when_token_is_unset()
     test_tts_status_payload_defaults_to_disabled()
     test_tts_long_text_is_rejected_before_worker()
     test_tts_ready_fixture_synthesizes_audio()

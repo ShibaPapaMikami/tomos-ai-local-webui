@@ -6,6 +6,7 @@ import base64
 import binascii
 from dataclasses import dataclass
 import hashlib
+import hmac
 import importlib.util
 import ipaddress
 import io
@@ -36,6 +37,7 @@ import uuid
 import webbrowser
 import zipfile
 import xml.etree.ElementTree as ET
+from typing import Mapping
 
 from search_tools import build_search_context, search_web
 from agent_reach_adapter import DoctorCache, RouteDecision, run_exa_search, select_route
@@ -107,6 +109,46 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/webp": ".webp",
 }
 APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.233")
+DESKTOP_GUARD_HOSTS = frozenset({"127.0.0.1:54876", "localhost:54876"})
+DESKTOP_GUARD_ORIGINS = frozenset({"http://127.0.0.1:54876", "http://localhost:54876"})
+DESKTOP_JSON_CONTENT_TYPE_PATHS = frozenset({
+    "/api/attachment/read",
+    "/api/asr/transcribe",
+    "/api/chat",
+    "/api/context/memory/forget",
+    "/api/context/memory/save",
+    "/api/context/memory/update",
+    "/api/contracts/delete",
+    "/api/contracts/extract",
+    "/api/contracts/import-gaps",
+    "/api/contracts/pdf-import/auto",
+    "/api/contracts/pdf-import/sarashina/compare-page",
+    "/api/contracts/pdf-import/try-page",
+    "/api/contracts/save",
+    "/api/diagnostics/model-benchmark",
+    "/api/image/generate",
+    "/api/knowledge/index",
+    "/api/knowledge/search",
+    "/api/llm/check",
+    "/api/models/pull",
+    "/api/models/remove",
+    "/api/note-article/reconstruct",
+    "/api/person-photo/upload",
+    "/api/search",
+    "/api/tts/cancel",
+    "/api/tts/stream",
+    "/api/tts/synthesize",
+    "/api/weather",
+    "/api/workspace/codegraph/init",
+    "/api/workspace/codegraph/read",
+    "/api/workspace/pick",
+    "/api/workspace/read",
+    "/api/workspace/reveal",
+    "/api/workspace/search",
+    "/api/workspace/tree",
+    "/api/workspace/validate",
+    "/api/workspace/write",
+})
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
@@ -776,6 +818,7 @@ def local_lan_ipv4_addresses() -> list[str]:
     try:
         result = subprocess.run(
             ["ifconfig"],
+            env=desktop_child_env(),
             capture_output=True,
             text=True,
             timeout=2,
@@ -955,6 +998,54 @@ def static_preview_get_api_allowed(path: str, allow_mobile_sync: bool = False) -
     return allow_mobile_sync and path.startswith("/api/mobile/")
 
 
+def desktop_session_token() -> str:
+    return os.environ.get("GEMMA_DESKTOP_SESSION_TOKEN", "").strip()
+
+
+def desktop_child_env(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
+    child_env = dict(os.environ)
+    child_env.pop("GEMMA_DESKTOP_SESSION_TOKEN", None)
+    if overrides:
+        child_env.update({str(key): str(value) for key, value in overrides.items()})
+        child_env.pop("GEMMA_DESKTOP_SESSION_TOKEN", None)
+    return child_env
+
+
+def desktop_json_content_type_required(path: str) -> bool:
+    return path in DESKTOP_JSON_CONTENT_TYPE_PATHS
+
+
+def _desktop_header(headers: Mapping[str, str], name: str) -> str:
+    expected_name = name.lower()
+    for key, value in headers.items():
+        if str(key).lower() == expected_name:
+            return str(value).strip()
+    return ""
+
+
+def desktop_request_guard(
+    method: str,
+    path: str,
+    headers: Mapping[str, str],
+    expected_token: str,
+) -> tuple[bool, str]:
+    if not expected_token:
+        return True, ""
+    if _desktop_header(headers, "Host").lower() not in DESKTOP_GUARD_HOSTS:
+        return False, "desktop_origin_required"
+    if str(method or "").upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return True, ""
+    if not hmac.compare_digest(_desktop_header(headers, "X-TOMOS-Session"), expected_token):
+        return False, "desktop_session_required"
+    if _desktop_header(headers, "Origin").lower() not in DESKTOP_GUARD_ORIGINS:
+        return False, "desktop_origin_required"
+    if desktop_json_content_type_required(path):
+        content_type = _desktop_header(headers, "Content-Type").lower().split(";", 1)[0].strip()
+        if content_type != "application/json":
+            return False, "desktop_json_required"
+    return True, ""
+
+
 def is_loopback_client(host: str) -> bool:
     normalized = str(host or "").lower()
     return normalized == "localhost" or normalized == "::1" or normalized.startswith("127.")
@@ -1029,6 +1120,7 @@ def asr_python_environment_status() -> dict[str, object]:
         result = subprocess.run(
             [*command, "-c", script],
             cwd=str(ROOT),
+            env=desktop_child_env(),
             capture_output=True,
             check=False,
             text=True,
@@ -1447,6 +1539,7 @@ def ensure_wav_audio(audio_path: Path, mime_type: str) -> tuple[Path, Path | Non
             "16000",
             str(wav_path),
         ],
+        env=desktop_child_env(),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1542,6 +1635,7 @@ def run_whisper_cpp_transcription(audio_path: Path, mime_type: str, model: str =
         result = subprocess.run(
             command,
             cwd=ROOT,
+            env=desktop_child_env(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1583,6 +1677,7 @@ def start_asr_worker_process() -> subprocess.Popen:
     process = subprocess.Popen(
         command,
         cwd=ROOT,
+        env=desktop_child_env(),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -1699,6 +1794,7 @@ def run_asr_transcription(audio_base64: str, mime_type: str, model: str) -> dict
             result = subprocess.run(
                 command,
                 cwd=ROOT,
+                env=desktop_child_env(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1904,6 +2000,7 @@ def app_commit() -> str:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=ROOT,
+            env=desktop_child_env(),
             check=True,
             capture_output=True,
             text=True,
@@ -2406,6 +2503,7 @@ def pick_workspace_folder() -> dict:
         script = 'POSIX path of (choose folder with prompt "フォルダーを選択")'
         result = subprocess.run(
             ["osascript", "-e", script],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             text=True,
@@ -2446,6 +2544,7 @@ def pick_contract_pdf_import_file() -> dict[str, object]:
         script = 'POSIX path of (choose file with prompt "PDFファイルを選択")'
         result = subprocess.run(
             ["osascript", "-e", script],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             text=True,
@@ -3324,7 +3423,7 @@ def reveal_workspace_path(root: str, relative_path: str) -> dict:
         args = ["explorer", f"/select,{path}"] if path.exists() else ["explorer", str(target)]
     else:
         args = ["xdg-open", str(target if target.is_dir() else target.parent)]
-    subprocess.Popen(args)
+    subprocess.Popen(args, env=desktop_child_env())
     return {"path": path.relative_to(root_path).as_posix() if path != root_path else "", "opened": str(target)}
 
 
@@ -3348,6 +3447,7 @@ def node_check(source: str, suffix: str = ".js") -> list[str]:
     try:
         result = subprocess.run(
             ["node", "--check", temp_path],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             text=True,
@@ -3886,6 +3986,7 @@ def run_sysctl_value(name: str) -> str:
     try:
         result = subprocess.run(
             ["sysctl", "-n", name],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             timeout=2,
@@ -3927,6 +4028,7 @@ def local_memory_gb() -> int:
                     "-Command",
                     "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
                 ],
+                env=desktop_child_env(),
                 check=False,
                 capture_output=True,
                 timeout=2,
@@ -4045,6 +4147,7 @@ def local_gpu_info(memory_gb: int | None = None) -> dict[str, object]:
                 "--query-gpu=name,memory.total",
                 "--format=csv,noheader,nounits",
             ],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             timeout=2,
@@ -4065,6 +4168,7 @@ def local_gpu_info(memory_gb: int | None = None) -> dict[str, object]:
                     "-Command",
                     "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress",
                 ],
+                env=desktop_child_env(),
                 check=False,
                 capture_output=True,
                 timeout=2,
@@ -5536,7 +5640,13 @@ def github_repo_result(repo: str, runner=subprocess.run) -> dict[str, str] | Non
         "--json",
         "nameWithOwner,description,url,stargazerCount,primaryLanguage",
     ]
-    result = runner(command, check=False, capture_output=True, timeout=GITHUB_TIMEOUT_SECONDS)
+    result = runner(
+        command,
+        env=desktop_child_env(),
+        check=False,
+        capture_output=True,
+        timeout=GITHUB_TIMEOUT_SECONDS,
+    )
     if getattr(result, "returncode", 1) != 0:
         raise RuntimeError(decode_subprocess_output(getattr(result, "stderr", "")) or "GitHubリポジトリ情報を取得できませんでした。")
     payload = json.loads(decode_subprocess_output(getattr(result, "stdout", "")) or "{}")
@@ -5574,7 +5684,13 @@ def github_search_results(query: str, runner=subprocess.run, limit: int = 5) -> 
         "--json",
         "fullName,description,url,stargazersCount",
     ]
-    result = runner(command, check=False, capture_output=True, timeout=GITHUB_TIMEOUT_SECONDS)
+    result = runner(
+        command,
+        env=desktop_child_env(),
+        check=False,
+        capture_output=True,
+        timeout=GITHUB_TIMEOUT_SECONDS,
+    )
     if getattr(result, "returncode", 1) != 0:
         raise RuntimeError(decode_subprocess_output(getattr(result, "stderr", "")) or "GitHub検索に失敗しました。")
     payload = json.loads(decode_subprocess_output(getattr(result, "stdout", "")) or "[]")
@@ -5702,6 +5818,7 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
         return None
     metadata_result = runner(
         [*command_base, *YOUTUBE_YTDLP_CLIENT_ARGS, "--dump-json", "--skip-download", "--no-warnings", url],
+        env=desktop_child_env(),
         check=False,
         capture_output=True,
         timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
@@ -5733,6 +5850,7 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
                     output_template,
                     url,
                 ],
+                env=desktop_child_env(),
                 check=False,
                 capture_output=True,
                 timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
@@ -6066,6 +6184,7 @@ def agent_reach_doctor_payload(runner=subprocess.run) -> dict[str, object]:
     try:
         result = runner(
             command,
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             timeout=AGENT_REACH_DOCTOR_TIMEOUT_SECONDS,
@@ -6165,6 +6284,7 @@ def run_internet_layer_setup_command(command: list[str], message: str, step: int
     process = subprocess.Popen(
         command,
         cwd=ROOT,
+        env=desktop_child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -6448,6 +6568,7 @@ def run_model_pull(model: str) -> None:
     try:
         process = subprocess.Popen(
             ["ollama", "pull", model],
+            env=desktop_child_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -6529,6 +6650,7 @@ def remove_model(model: str) -> dict:
     normalized = validate_model_remove(model)
     process = subprocess.run(
         ["ollama", "rm", normalized],
+        env=desktop_child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -6565,6 +6687,7 @@ def run_asr_setup() -> None:
         process = subprocess.Popen(
             ["bash", str(script)],
             cwd=ROOT,
+            env=desktop_child_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -6631,6 +6754,7 @@ def run_ocr_setup() -> None:
         process = subprocess.Popen(
             ["bash", str(script)],
             cwd=ROOT,
+            env=desktop_child_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -6711,6 +6835,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if not self.mobile_sync_only:
+            allowed, error = desktop_request_guard(
+                "GET",
+                parsed.path,
+                self.headers,
+                desktop_session_token(),
+            )
+            if not allowed:
+                json_response(self, 403, {"ok": False, "error": "desktop_session_required"})
+                return
         if parsed.path.startswith("/api/mobile/") and not mobile_api_access_allowed(
             "GET",
             parsed.path,
@@ -6871,6 +7005,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        request_path = urllib.parse.urlparse(self.path).path
+        if not self.mobile_sync_only:
+            allowed, error = desktop_request_guard(
+                "POST",
+                request_path,
+                self.headers,
+                desktop_session_token(),
+            )
+            if not allowed:
+                json_response(self, 403, {"ok": False, "error": "desktop_session_required"})
+                return
         if self.path.startswith("/api/mobile/") and not mobile_api_access_allowed(
             "POST",
             self.path,

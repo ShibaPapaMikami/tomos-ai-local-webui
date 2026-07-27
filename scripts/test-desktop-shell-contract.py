@@ -23,6 +23,7 @@ def test_required_files_exist() -> None:
         TAURI_ROOT / "icons" / "icon.png",
         TAURI_ROOT / "src" / "main.rs",
         TAURI_ROOT / "src" / "lib.rs",
+        TAURI_ROOT / "src" / "session.rs",
     ]
     missing = [str(path.relative_to(ROOT)) for path in required if not path.is_file()]
     assert not missing, f"missing desktop shell files: {missing}"
@@ -86,7 +87,7 @@ def test_runtime_is_local_only_and_does_not_kill_unknown_processes() -> None:
     assert "CARGO_MANIFEST_DIR" not in runtime
     assert "debug_assertions" not in runtime
     assert '#[cfg(feature = "development-runtime-override")]' in runtime
-    assert "PortState::Occupied => return Err(RuntimeError::PortInUse)" in runtime
+    assert "PortState::TomosReady | PortState::Occupied => Err(RuntimeError::PortInUse)" in runtime
     assert "kill_port" not in runtime
     assert "pkill" not in runtime
     assert "killall" not in runtime
@@ -123,6 +124,41 @@ def test_lifecycle_uses_single_instance_and_owned_cleanup() -> None:
     assert "shell" not in lib.lower()
 
 
+def test_webview_session_wrapper_is_local_only_and_keeps_token_private() -> None:
+    lib = read(TAURI_ROOT / "src" / "lib.rs")
+    session = read(TAURI_ROOT / "src" / "session.rs")
+    session_implementation = session.split("#[cfg(test)]", maxsplit=1)[0]
+    compact = "".join(lib.split())
+
+    assert "mod session;" in lib
+    assert lib.count("generate_session_token()") == 1
+    assert "initialization_script(&session_token)" in lib
+    assert ".initialization_script(initialization_script)" in lib
+    assert "runtime_session_token = session_token.clone()" in lib
+    assert "TOMOSを安全に起動できませんでした。もう一度開いてください。" in lib
+    assert "RuntimeError::SessionToken" not in lib
+    assert "WebviewWindowBuilder::new(app,\"main\"" in compact
+
+    assert "X-TOMOS-Session" in session_implementation
+    assert "127.0.0.1:54876" in session_implementation
+    assert "input instanceof Request" in session_implementation
+    assert "input.url" in session_implementation
+    assert "init?.method" in session_implementation
+    assert "new URL" in session_implementation
+    assert "new Headers(request.headers)" in session_implementation
+    assert 'new Set(["POST", "PUT", "PATCH", "DELETE"])' in session_implementation
+    assert "requestUrl.origin === window.location.origin" in session_implementation
+    assert 'requestUrl.pathname.startsWith("/api/")' in session_implementation
+    assert "originalFetch.call(window, input, init)" in session_implementation
+    assert "new Request(request, {{ headers }})" in session_implementation
+    assert session_implementation.index("if (!isLocalApi") < session_implementation.index(
+        "const request = inputIsRequest"
+    )
+    assert "localStorage" not in session_implementation
+    assert "console." not in session_implementation
+    assert "window.TOMOS" not in session_implementation
+
+
 def test_startup_page_has_fixed_japanese_errors() -> None:
     html = read(ROOT / "web" / "desktop-starting.html")
     script = read(ROOT / "web" / "desktop-starting.js")
@@ -150,6 +186,7 @@ def main() -> None:
         test_git_ignores_rust_build_output,
         test_runtime_is_local_only_and_does_not_kill_unknown_processes,
         test_lifecycle_uses_single_instance_and_owned_cleanup,
+        test_webview_session_wrapper_is_local_only_and_keeps_token_private,
         test_startup_page_has_fixed_japanese_errors,
     ]
     for test in tests:

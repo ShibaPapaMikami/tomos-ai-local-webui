@@ -19,7 +19,6 @@ pub enum PortState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeOwnership {
-    Reused,
     Owned,
 }
 
@@ -28,6 +27,7 @@ pub enum RuntimeError {
     InvalidBundledRuntime,
     MissingPython,
     PortInUse,
+    SessionToken,
     ServerExited,
     Timeout,
 }
@@ -38,6 +38,7 @@ impl RuntimeError {
             Self::InvalidBundledRuntime => "invalid_bundled_runtime",
             Self::MissingPython => "missing_python",
             Self::PortInUse => "port_in_use",
+            Self::SessionToken => "session_token",
             Self::ServerExited => "server_exited",
             Self::Timeout => "timeout",
         }
@@ -54,6 +55,12 @@ pub struct RuntimePaths {
 pub struct RuntimeSupervisor {
     child: Mutex<Option<Child>>,
     ownership: Mutex<Option<RuntimeOwnership>>,
+}
+
+pub fn generate_session_token() -> Result<String, RuntimeError> {
+    let mut bytes = [0_u8; 32];
+    getrandom::fill(&mut bytes).map_err(|_| RuntimeError::SessionToken)?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 impl Default for RuntimeSupervisor {
@@ -169,7 +176,14 @@ fn probe_port() -> PortState {
     classify_health_response(&response)
 }
 
-fn build_server_command(paths: &RuntimePaths) -> Command {
+fn port_allows_new_desktop_session(port_state: PortState) -> Result<(), RuntimeError> {
+    match port_state {
+        PortState::Free => Ok(()),
+        PortState::TomosReady | PortState::Occupied => Err(RuntimeError::PortInUse),
+    }
+}
+
+fn build_server_command(paths: &RuntimePaths, session_token: &str) -> Command {
     let mut command = Command::new(&paths.python);
     command
         .arg("-B")
@@ -179,6 +193,7 @@ fn build_server_command(paths: &RuntimePaths) -> Command {
         .arg("--port")
         .arg(TOMOS_PORT.to_string())
         .current_dir(&paths.resource_root)
+        .env("GEMMA_DESKTOP_SESSION_TOKEN", session_token)
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -187,17 +202,14 @@ fn build_server_command(paths: &RuntimePaths) -> Command {
 }
 
 impl RuntimeSupervisor {
-    pub fn start(&self, paths: &RuntimePaths) -> Result<RuntimeOwnership, RuntimeError> {
-        match probe_port() {
-            PortState::TomosReady => {
-                *self.ownership.lock().expect("ownership lock") = Some(RuntimeOwnership::Reused);
-                return Ok(RuntimeOwnership::Reused);
-            }
-            PortState::Occupied => return Err(RuntimeError::PortInUse),
-            PortState::Free => {}
-        }
+    pub fn start(
+        &self,
+        paths: &RuntimePaths,
+        session_token: &str,
+    ) -> Result<RuntimeOwnership, RuntimeError> {
+        port_allows_new_desktop_session(probe_port())?;
 
-        let child = build_server_command(paths)
+        let child = build_server_command(paths, session_token)
             .spawn()
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::NotFound {
@@ -498,10 +510,18 @@ mod tests {
     }
 
     #[test]
+    fn refuses_existing_tomos_for_a_new_desktop_session() {
+        assert_eq!(
+            port_allows_new_desktop_session(PortState::TomosReady),
+            Err(RuntimeError::PortInUse)
+        );
+    }
+
+    #[test]
     fn server_command_disables_bytecode_writes() {
         let fixture = RuntimeFixture::valid();
         let paths = resolve_runtime_paths(&fixture.resources(), None).expect("resolve fixture");
-        let command = build_server_command(&paths);
+        let command = build_server_command(&paths, "test-session-token");
         let args: Vec<_> = command.get_args().collect();
         let envs: Vec<_> = command.get_envs().collect();
 
@@ -510,6 +530,34 @@ mod tests {
             key.to_str() == Some("PYTHONDONTWRITEBYTECODE")
                 && value.and_then(|item| item.to_str()) == Some("1")
         }));
+    }
+
+    #[test]
+    fn server_command_passes_session_token_to_python_child() {
+        let fixture = RuntimeFixture::valid();
+        let paths = resolve_runtime_paths(&fixture.resources(), None).expect("resolve fixture");
+        let command = build_server_command(&paths, "test-session-token");
+        let envs: Vec<_> = command.get_envs().collect();
+
+        assert!(envs.iter().any(|(key, value)| {
+            key.to_str() == Some("GEMMA_DESKTOP_SESSION_TOKEN")
+                && value.and_then(|item| item.to_str()) == Some("test-session-token")
+        }));
+    }
+
+    #[test]
+    fn generates_64_character_hex_session_token() {
+        let token = generate_session_token().unwrap();
+        assert_eq!(token.len(), 64);
+        assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn creates_a_new_token_for_each_launch() {
+        assert_ne!(
+            generate_session_token().unwrap(),
+            generate_session_token().unwrap()
+        );
     }
 
     #[test]
@@ -532,6 +580,7 @@ mod tests {
         );
         assert_eq!(RuntimeError::MissingPython.code(), "missing_python");
         assert_eq!(RuntimeError::PortInUse.code(), "port_in_use");
+        assert_eq!(RuntimeError::SessionToken.code(), "session_token");
         assert_eq!(RuntimeError::ServerExited.code(), "server_exited");
         assert_eq!(RuntimeError::Timeout.code(), "timeout");
     }

@@ -114,8 +114,8 @@
 | Gate 1 | Gate A合格版 | GPU診断、理論推薦、承認付き実測 | Phase 2 | 合格 |
 | Gate 2 | Gate 1合格版 | VAD、確定処理、localhost Whisper fallback | Phase 3 | 合格 |
 | Gate 3 | Gate 2合格版 | TTS共通境界、fixture、手動再生 | Desktop B1 | 合格 |
-| Gate B1 | Gate 3合格版 | Apple Silicon用Python同梱、app内resource | Desktop B2 | 停止 |
-| Gate B2 | Gate B1合格版 | localhost API session保護 | Desktop B3 | 停止 |
+| Gate B1 | Gate 3合格版 | Apple Silicon用Python同梱、app内resource | Desktop B2 | 合格 |
+| Gate B2 | Gate B1合格版 | localhost API session保護 | Desktop B3 | 合格 |
 | Gate B3 | Gate B2合格版 | app data、プレビュー、承認コピー移行 | Desktop C | 停止 |
 | Gate C | Gate B3合格版 | 署名・公証済みApple Silicon Mac PKG | 実機インストール確認 | 停止 |
 | Gate 4 | Gate C実機確認合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment E/VまたはDesktop D | 停止 |
@@ -124,6 +124,8 @@
 | Gate D | Gate C合格版 | 署名済みWindows MSI | PCアプリ正式候補 | 停止 |
 
 台帳の状態は `未着手 | 実装中 | 検証中 | 差し戻し | 合格 | 停止` の6値だけを使う。工程開始時とGate判定時にこの表を更新する。状態変更だけのcommitもDirector承認がない限り作成しない。
+
+Gate B2の検証証跡は [TOMOS Desktop Gate B2 検証報告](../../tomos-desktop-b2-gate-report-2026-07-27.ja.md) を正本とする。
 
 ## Ownership Boundary
 

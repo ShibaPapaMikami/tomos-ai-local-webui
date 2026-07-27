@@ -1,4 +1,5 @@
 mod runtime;
+mod session;
 
 use std::{
     sync::{
@@ -14,7 +15,8 @@ use tauri::{
     webview::PageLoadEvent, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
-use runtime::{resolve_runtime_paths, RuntimeError, RuntimeSupervisor};
+use runtime::{generate_session_token, resolve_runtime_paths, RuntimeError, RuntimeSupervisor};
+use session::initialization_script;
 
 const SECOND_INSTANCE_FOCUS_DELAY_MS: u64 = 250;
 
@@ -54,6 +56,13 @@ pub fn run() {
         }))
         .setup(move |app| {
             let runtime = Arc::clone(&setup_supervisor);
+            let session_token = generate_session_token().map_err(|_| {
+                Box::new(std::io::Error::other(
+                    "TOMOSを安全に起動できませんでした。もう一度開いてください。",
+                )) as Box<dyn std::error::Error>
+            })?;
+            let initialization_script = initialization_script(&session_token);
+            let runtime_session_token = session_token.clone();
             let development_override = development_resource_override();
             let runtime_paths = app
                 .path()
@@ -67,6 +76,7 @@ pub fn run() {
                 "main",
                 WebviewUrl::App("desktop-starting.html".into()),
             )
+            .initialization_script(initialization_script)
             .title("TOMOS AI")
             .inner_size(1280.0, 820.0)
             .min_inner_size(960.0, 640.0)
@@ -87,8 +97,11 @@ pub fn run() {
                 }
                 let runtime = Arc::clone(&runtime);
                 let runtime_paths = runtime_paths.clone();
+                let session_token = runtime_session_token.clone();
                 tauri::async_runtime::spawn_blocking(move || {
-                    let result = runtime_paths.and_then(|paths| runtime.start(&paths));
+                    let result = runtime_paths.and_then(|paths| {
+                        runtime.start(&paths, &session_token)
+                    });
                     match result {
                         Ok(_) => {
                             let url = "http://127.0.0.1:54876/"

@@ -3735,6 +3735,7 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 name = "tomos-desktop"
 version = "0.8.233"
 dependencies = [
+ "getrandom 0.3.4",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
