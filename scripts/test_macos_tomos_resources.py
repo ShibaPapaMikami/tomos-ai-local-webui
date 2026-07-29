@@ -173,6 +173,7 @@ def test_staged_tree_excludes_private_state_and_records_fixed_release_metadata()
     assert manifest["architecture"] == "arm64"
     assert manifest["bundleId"] == "com.shibapapastudio.tomos-ai"
     assert manifest["pkgIdentifier"] == "jp.local.gemma4-12b"
+    assert manifest["pythonVersion"] == "3.11.15"
     assert {name: manifest["pythonArtifact"][name] for name in EXPECTED_ARTIFACT} == EXPECTED_ARTIFACT
     assert manifest["resourceHashes"] == staged_hashes
     assert set(manifest["resourceHashes"]) == names

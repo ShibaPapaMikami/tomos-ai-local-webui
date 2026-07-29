@@ -14,7 +14,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from macos_python_runtime import ARTIFACT, stage_runtime, verify_artifact_file
+from macos_python_runtime import (
+    ARTIFACT,
+    normalized_runtime_tree_entries,
+    runtime_tree_entries,
+    stage_runtime,
+    verify_artifact_file,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -214,24 +220,19 @@ def _assert_python_runtime_matches_verified_archive(python_root: Path) -> None:
             verify_artifact_file(source, ARTIFACT)
             expected_root = stage_runtime(source, expected_destination)
         try:
-            actual = _tree_entries(python_root, "bundle Python")
-            expected = _tree_entries(expected_root, "verified Python")
-            expected_root_resolved = expected_root.resolve(strict=True)
-            for name, (kind, _mode, target) in tuple(expected.items()):
-                if kind != "symlink":
-                    continue
-                target_path = (expected_root / name).parent.joinpath(target).resolve(strict=True)
-                try:
-                    target_path.relative_to(expected_root_resolved)
-                except ValueError as exc:
-                    raise AssertionError(f"verified Python symlinkがroot外です: {name}") from exc
-                target_stat = target_path.stat()
-                assert stat.S_ISREG(target_stat.st_mode), f"verified Python symlink targetがfileではありません: {name}"
-                expected[name] = (
-                    "file",
-                    stat.S_IMODE(target_stat.st_mode),
-                    hashlib.sha256(target_path.read_bytes()).hexdigest(),
-                )
+            expected_entries = runtime_tree_entries(expected_root)
+            candidate_entries = runtime_tree_entries(python_root)
+            approved_symlinks = {
+                name: target
+                for name, (kind, _mode, target) in expected_entries.items()
+                if kind == "symlink"
+            }
+            actual = normalized_runtime_tree_entries(
+                python_root, candidate_entries, approved_symlinks
+            )
+            expected = normalized_runtime_tree_entries(
+                expected_root, expected_entries, approved_symlinks
+            )
             assert actual == expected, (
                 "bundle Pythonが検証済みarchive由来のruntime treeと一致しません: "
                 f"extra={sorted(actual.keys() - expected.keys())[:5]}, "

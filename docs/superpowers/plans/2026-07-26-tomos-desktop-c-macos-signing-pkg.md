@@ -25,13 +25,13 @@
 ### Task 1: release候補の静的監査を固定
 
 **Files:**
-- Create: `scripts/audit-macos-tauri-release.py`
+- Create: `scripts/audit_macos_tauri_release.py`
 - Create: `scripts/test_audit_macos_tauri_release.py`
 
 **Interfaces:**
 - Produces: `audit_app(app_path: Path, expected_version: str, expected_commit: str) -> list[str]`。
 
-- [ ] **Step 1: identifier、CPU、禁止fileの失敗testを書く**
+- [x] **Step 1: identifier、CPU、禁止fileの失敗testを書く**
 
 ```python
 def test_rejects_wrong_bundle_identifier(tmp_path):
@@ -43,17 +43,17 @@ def test_rejects_private_or_mutable_payload(tmp_path):
     assert "forbidden_payload" in audit_app(app, "0.8.233", "a" * 40)
 ```
 
-- [ ] **Step 2: REDを確認する**
+- [x] **Step 2: REDを確認する**
 
 Run: `python3 scripts/test_audit_macos_tauri_release.py`
 
 Expected: audit module未作成で失敗。
 
-- [ ] **Step 3: auditを実装する**
+- [x] **Step 3: auditを実装する**
 
 Info.plist、Mach-O architecture、Python version、build manifest、source commit、resource allowlist、`.git`、`.env`、DB、log、model、token-like fileを確認する。ファイル本文をterminalへ表示しない。
 
-- [ ] **Step 4: GREENを確認する**
+- [x] **Step 4: GREENを確認する**
 
 Run: `python3 scripts/test_audit_macos_tauri_release.py`
 
@@ -72,7 +72,7 @@ Expected: 全件合格。
 - Consumes: `dist/candidate/TOMOS AI.app`。
 - Produces: `dist/signed/TOMOS AI.app`。
 
-- [ ] **Step 1: 署名順序と必須optionのcontract testを書く**
+- [x] **Step 1: 署名順序と必須optionのcontract testを書く**
 
 ```python
 def test_signs_nested_code_before_app():
@@ -83,13 +83,13 @@ def test_signs_nested_code_before_app():
     assert "Developer ID Application:" in script
 ```
 
-- [ ] **Step 2: REDを確認する**
+- [x] **Step 2: REDを確認する**
 
 Run: `python3 scripts/test_sign_macos_tauri_app.py`
 
 Expected: sign script未作成で失敗。
 
-- [ ] **Step 3: 明示的nested signingを実装する**
+- [x] **Step 3: 明示的nested signingを実装する**
 
 `find`で実行可能file、`.dylib`、`.so`を収集し、pathをsortして内側から署名する。symlinkは署名対象にせず、解決先がapp外なら失敗する。最後にmain executableとapp bundleを署名する。`--deep`は検証補助にだけ使い、署名処理を`--deep`任せにしない。
 

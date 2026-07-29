@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import shutil
+import stat
 import tarfile
 import tempfile
 from typing import BinaryIO
@@ -132,6 +133,89 @@ def publish_runtime(staging_root: Path, destination: Path) -> Path:
         raise ValueError(f"展開先が既に存在します: {destination}")
     os.replace(staging_root, destination)
     return destination
+
+
+def runtime_tree_entries(root: Path) -> dict[str, tuple[str, int, str]]:
+    """Return the exact, stream-hashed runtime tree without following links."""
+    try:
+        root_stat = root.lstat()
+    except OSError as exc:
+        raise ValueError("Python runtime rootがありません") from exc
+    if not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode):
+        raise ValueError("Python runtime rootが不正です")
+
+    entries: dict[str, tuple[str, int, str]] = {}
+
+    def digest_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        try:
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            raise ValueError("Python runtime fileを読み取れません") from exc
+        return digest.hexdigest()
+
+    def visit(directory: Path, relative: Path) -> None:
+        try:
+            with os.scandir(directory) as children:
+                items = list(children)
+        except OSError as exc:
+            raise ValueError("Python runtime directoryを読み取れません") from exc
+        for child in items:
+            path = Path(child.path)
+            child_relative = relative / child.name
+            try:
+                metadata = child.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ValueError("Python runtime entryを読み取れません") from exc
+            mode = stat.S_IMODE(metadata.st_mode)
+            key = child_relative.as_posix()
+            if stat.S_ISLNK(metadata.st_mode):
+                try:
+                    entries[key] = ("symlink", 0, os.readlink(path))
+                except OSError as exc:
+                    raise ValueError("Python runtime symlinkを読み取れません") from exc
+            elif stat.S_ISDIR(metadata.st_mode):
+                entries[key] = ("directory", mode, "")
+                visit(path, child_relative)
+            elif stat.S_ISREG(metadata.st_mode):
+                entries[key] = ("file", mode, digest_file(path))
+            else:
+                raise ValueError("Python runtimeに通常file以外があります")
+
+    visit(root, Path())
+    return entries
+
+
+def normalized_runtime_tree_entries(
+    root: Path,
+    entries: dict[str, tuple[str, int, str]],
+    approved_symlinks: dict[str, str],
+) -> dict[str, tuple[str, int, str]]:
+    """Normalize only expected symlinks to their materialized file entries."""
+    normalized = entries.copy()
+    resolved_root = root.resolve(strict=True)
+    for name, target in approved_symlinks.items():
+        if normalized.get(name) != ("symlink", 0, target):
+            continue
+        try:
+            target_path = (root / name).parent.joinpath(target).resolve(strict=True)
+            target_path.relative_to(resolved_root)
+            target_stat = target_path.stat()
+        except (OSError, ValueError) as exc:
+            raise ValueError("Python runtime symlink targetが不正です") from exc
+        if not stat.S_ISREG(target_stat.st_mode):
+            raise ValueError("Python runtime symlink targetがfileではありません")
+        digest = hashlib.sha256()
+        try:
+            with target_path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            raise ValueError("Python runtime symlink targetを読み取れません") from exc
+        normalized[name] = ("file", stat.S_IMODE(target_stat.st_mode), digest.hexdigest())
+    return normalized
 
 
 def extract_runtime(archive: Path, destination: Path) -> Path:

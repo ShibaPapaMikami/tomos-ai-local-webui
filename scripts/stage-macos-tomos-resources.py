@@ -197,6 +197,7 @@ def _build_manifest(root: Path, files: list[str], resource_hashes: dict[str, str
         "architecture": "arm64",
         "bundleId": bundle_id,
         "pkgIdentifier": pkg_identifier,
+        "pythonVersion": "3.11.15",
         "pythonArtifact": _load_python_artifact(root),
         "sourceCommit": _run_git(root, "rev-parse", "HEAD"),
         "files": files,
