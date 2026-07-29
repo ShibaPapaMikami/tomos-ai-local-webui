@@ -21,9 +21,11 @@ from typing import Any
 # repository-wide copy: TOMOS stores models and user data beside the app.
 RESOURCE_FILES: tuple[str, ...] = (
     "agent_reach_adapter.py",
+    "app_paths.py",
     "context_core.py",
     "contract_ledger.py",
     "knowledge_layer.py",
+    "migration_manager.py",
     "packages/__init__.py",
     "packages/local_context_core/__init__.py",
     "pdf_reader.py",
@@ -55,6 +57,7 @@ RESOURCE_FILES: tuple[str, ...] = (
     "web/icons/icon.svg",
     "web/image-tools.js",
     "web/index.html",
+    "web/local-storage-transfer.js",
     "web/local-tools.js",
     "web/management.js",
     "web/manifest.webmanifest",

@@ -26,6 +26,7 @@ const APP_SHELL = [
   "/messages.js?v=0.8.236-download-progress",
   "/sidebar.js?v=0.8.219-searchfix",
   "/settings.js?v=0.8.236-download-progress",
+  "/local-storage-transfer.js?v=0.8.236-download-progress",
   "/management.js?v=0.8.236-download-progress",
   "/download-progress.js?v=0.8.236-download-progress",
   "/router.js?v=0.8.209-tomos53",

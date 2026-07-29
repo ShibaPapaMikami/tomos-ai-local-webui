@@ -39,6 +39,20 @@ import zipfile
 import xml.etree.ElementTree as ET
 from typing import Mapping
 
+from app_paths import TomosPaths, ensure_data_directories, tomos_data_root
+from migration_manager import (
+    MigrationApprovalError,
+    MigrationNotFoundError,
+    MigrationPreviewStaleError,
+    MigrationValidationError,
+    apply_migration,
+    build_migration_preview,
+    detect_legacy_sources,
+    managed_data_write,
+    prepare_managed_data_startup,
+    rollback_migration,
+    snapshot_id_for_migration,
+)
 from search_tools import build_search_context, search_web
 from agent_reach_adapter import DoctorCache, RouteDecision, run_exa_search, select_route
 from pdf_reader import (
@@ -52,14 +66,8 @@ from pdf_reader import (
     pdf_page_count,
     usable_pdf_text,
 )
-from knowledge_layer import (
-    default_db_path,
-    index_folder as index_knowledge_folder,
-    knowledge_status,
-    search_knowledge,
-)
+from knowledge_layer import index_folder as index_knowledge_folder, knowledge_status, search_knowledge
 from context_core import build_context as build_local_context
-from context_core import context_db_path
 from context_core import forget_context_record
 from context_core import knowledge_result_to_records
 from context_core import list_context_records
@@ -67,13 +75,7 @@ from context_core import profile as context_profile
 from context_core import remember
 from context_core import save_context_record
 from context_core import update_context_record
-from contract_ledger import (
-    default_contract_db_path,
-    delete_contract,
-    extract_contract_candidate,
-    list_contracts,
-    save_contract,
-)
+from contract_ledger import delete_contract, extract_contract_candidate, list_contracts, save_contract
 from sarashina_ocr_runner import sarashina_compare_page_payload, sarashina_ocr_status
 from study_pack_manager import build_catalog, install_pack, remove_pack
 import tts_engine
@@ -86,13 +88,13 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_SUPPORT_DIR = os.environ.get("TOMOS_APP_SUPPORT_DIR", "").strip()
-PERSISTENT_ROOT = Path(APP_SUPPORT_DIR).expanduser() if APP_SUPPORT_DIR else ROOT
-KNOWLEDGE_DB_PATH = default_db_path(PERSISTENT_ROOT)
-CONTEXT_DB_PATH = context_db_path(PERSISTENT_ROOT)
-CONTRACT_DB_PATH = default_contract_db_path(PERSISTENT_ROOT)
-PERSON_PHOTO_DIR = PERSISTENT_ROOT / "data" / "person-photos"
-STUDY_PACK_INSTALL_ROOT = PERSISTENT_ROOT / ".gemma4-data" / "study-packs"
+LEGACY_HOME = Path.home()
+TOMOS_PATHS = TomosPaths.from_root(tomos_data_root())
+KNOWLEDGE_DB_PATH = TOMOS_PATHS.knowledge_db
+CONTEXT_DB_PATH = TOMOS_PATHS.context_db
+CONTRACT_DB_PATH = TOMOS_PATHS.contracts_db
+PERSON_PHOTO_DIR = TOMOS_PATHS.person_photos
+STUDY_PACK_INSTALL_ROOT = TOMOS_PATHS.study_packs
 NOTE_ARTICLE_PACK_VERSION = "0.1.0"
 NOTE_ARTICLE_PACK_RELEASE_URL = (
     "https://github.com/ShibaPapaMikami/tomos-ai-local-webui/releases/download/"
@@ -130,6 +132,8 @@ DESKTOP_JSON_CONTENT_TYPE_PATHS = frozenset({
     "/api/knowledge/index",
     "/api/knowledge/search",
     "/api/llm/check",
+    "/api/desktop/migration/apply",
+    "/api/desktop/migration/rollback",
     "/api/models/pull",
     "/api/models/remove",
     "/api/note-article/reconstruct",
@@ -199,11 +203,13 @@ def run_note_article_pack_install() -> None:
                     "totalBytes": total,
                 })
 
-        result = install_pack(
-            entry,
-            install_root=STUDY_PACK_INSTALL_ROOT,
-            progress_callback=update_progress,
-        )
+        with managed_data_write(TOMOS_PATHS):
+            ensure_data_directories(TOMOS_PATHS)
+            result = install_pack(
+                entry,
+                install_root=STUDY_PACK_INSTALL_ROOT,
+                progress_callback=update_progress,
+            )
         with STUDY_PACK_INSTALL_LOCK:
             STUDY_PACK_INSTALL_JOB.update({
                 "status": "done",
@@ -247,7 +253,10 @@ def install_note_article_pack_payload() -> dict:
 
 
 def remove_note_article_pack_payload() -> dict:
-    return remove_pack("note-article-writing", install_root=STUDY_PACK_INSTALL_ROOT)
+    return remove_pack(
+        "note-article-writing",
+        install_root=STUDY_PACK_INSTALL_ROOT,
+    )
 
 SUBPROCESS_OUTPUT_ENCODINGS = tuple(dict.fromkeys(
     encoding
@@ -512,7 +521,7 @@ IGNORED_DIRS = {
 }
 CODEGRAPH_DIR_NAME = ".codegraph"
 CODEGRAPH_SUMMARY_FILE = "summary.json"
-CODEGRAPH_APP_CACHE_DIR = PERSISTENT_ROOT / ".gemma4-data" / "codegraph"
+CODEGRAPH_APP_CACHE_DIR = TOMOS_PATHS.codegraph
 CODEGRAPH_MAX_FILES = 350
 CODEGRAPH_MAX_FILE_BYTES = 220_000
 CODEGRAPH_MAX_SYMBOLS_PER_FILE = 24
@@ -748,6 +757,105 @@ def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
     return json.loads(raw.decode("utf-8"))
 
 
+def migration_preview_payload() -> dict[str, object]:
+    preview = build_migration_preview(
+        detect_legacy_sources([LEGACY_HOME, ROOT], TOMOS_PATHS)
+    )
+    items = [
+        {
+            "kind": item["kind"],
+            "totalFiles": item["totalFiles"],
+            "totalBytes": item["totalBytes"],
+            "latestMtime": item["latestMtime"],
+            "conflict": bool(item.get("conflict", False)),
+            "excludedCount": item["excludedCount"],
+            "errorCount": item["errorCount"],
+        }
+        for item in preview["items"]
+    ]
+    return {
+        "ok": True,
+        "preview": {
+            "previewId": preview["previewId"],
+            "totalFiles": preview["totalFiles"],
+            "totalBytes": preview["totalBytes"],
+            "latestMtime": preview["latestMtime"],
+            "excludedCount": preview["excludedCount"],
+            "errorCount": preview["errorCount"],
+            "items": items,
+        },
+    }
+
+
+def migration_error_response(
+    error: Exception,
+) -> tuple[int, dict[str, object]]:
+    if isinstance(error, MigrationApprovalError):
+        status, code = 400, "migration_approval_required"
+    elif isinstance(error, MigrationPreviewStaleError):
+        status, code = 409, "migration_preview_stale"
+    elif isinstance(error, MigrationNotFoundError):
+        status, code = 404, "migration_not_found"
+    else:
+        status, code = 400, "migration_validation_failed"
+    return status, {"ok": False, "error": code}
+
+
+def migration_apply_payload(body: object) -> dict:
+    if not isinstance(body, dict):
+        raise MigrationApprovalError(
+            "migration approval is required"
+        )
+    approved_items = body.get("approvedItems")
+    if (
+        not isinstance(approved_items, list)
+        or not approved_items
+        or any(
+            not isinstance(item, str) or not item.strip()
+            for item in approved_items
+        )
+    ):
+        raise MigrationApprovalError(
+            "migration approval is required"
+        )
+    preview_id = body.get("previewId")
+    if not isinstance(preview_id, str) or not preview_id.strip():
+        raise MigrationPreviewStaleError(
+            "migration preview is unavailable"
+        )
+    return {
+        "ok": True,
+        "migration": apply_migration(
+            preview_id,
+            approved_items,
+            TOMOS_PATHS,
+        ),
+    }
+
+
+def migration_rollback_payload(body: object) -> dict:
+    if not isinstance(body, dict):
+        raise MigrationNotFoundError(
+            "migration was not found"
+        )
+    migration_id = body.get("migrationId")
+    if not isinstance(migration_id, str) or not migration_id.strip():
+        raise MigrationNotFoundError(
+            "migration was not found"
+        )
+    snapshot_id = snapshot_id_for_migration(
+        migration_id,
+        TOMOS_PATHS,
+    )
+    return {
+        "ok": True,
+        "migration": rollback_migration(
+            snapshot_id,
+            TOMOS_PATHS,
+        ),
+    }
+
+
 def person_photo_upload_payload(name: str, mime: str, base64_value: str) -> dict:
     normalized_mime = (mime or "").split(";")[0].strip().lower()
     suffix = PERSON_PHOTO_MIME_EXTENSIONS.get(normalized_mime)
@@ -766,9 +874,10 @@ def person_photo_upload_payload(name: str, mime: str, base64_value: str) -> dict
         return {"ok": False, "error": "empty image data"}
     if len(body) > PERSON_PHOTO_MAX_BYTES:
         return {"ok": False, "error": "image too large"}
-    PERSON_PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-    stored_name = f"{uuid.uuid4().hex}{suffix}"
-    (PERSON_PHOTO_DIR / stored_name).write_bytes(body)
+    with managed_data_write(TOMOS_PATHS):
+        ensure_data_directories(TOMOS_PATHS)
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        (PERSON_PHOTO_DIR / stored_name).write_bytes(body)
     return {
         "ok": True,
         "file": stored_name,
@@ -3281,8 +3390,12 @@ def build_codegraph_summary(root: str) -> dict:
         storage = "app"
         output_path = codegraph_cache_path(root_path)
         try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            with managed_data_write(TOMOS_PATHS):
+                ensure_data_directories(TOMOS_PATHS)
+                output_path.write_text(
+                    json.dumps(summary, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
         except OSError as cache_error:
             raise ValueError(
                 "コード理解の解析結果を保存できませんでした。"
@@ -3698,7 +3811,11 @@ def context_memory_forget_payload(body: dict[str, object]) -> dict[str, object]:
     record_id = str(body.get("id") or "").strip()
     if not record_id:
         return {"ok": False, "error": "id is required"}
-    return forget_context_record(CONTEXT_DB_PATH, record_id, reason=str(body.get("reason") or ""))
+    return forget_context_record(
+        CONTEXT_DB_PATH,
+        record_id,
+        reason=str(body.get("reason") or ""),
+    )
 
 
 def context_memory_update_payload(body: dict[str, object]) -> dict[str, object]:
@@ -3706,7 +3823,11 @@ def context_memory_update_payload(body: dict[str, object]) -> dict[str, object]:
     if not record_id:
         return {"ok": False, "error": "id is required"}
     updates = body.get("updates") if isinstance(body.get("updates"), dict) else body
-    return update_context_record(CONTEXT_DB_PATH, record_id, updates if isinstance(updates, dict) else {})
+    return update_context_record(
+        CONTEXT_DB_PATH,
+        record_id,
+        updates if isinstance(updates, dict) else {},
+    )
 
 
 def object_choice(object_info: dict, node: str, field: str, fallback: str) -> list[str]:
@@ -6900,6 +7021,22 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/mobile/imports":
             json_response(self, 200, {"ok": True, "imports": mobile_pending_imports()})
             return
+        if parsed.path == "/api/desktop/migration/preview":
+            try:
+                json_response(self, 200, migration_preview_payload())
+            except MigrationValidationError as exc:
+                status, payload = migration_error_response(exc)
+                json_response(self, status, payload)
+            except Exception:
+                json_response(
+                    self,
+                    500,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            return
         if parsed.path == "/api/asr/status":
             json_response(self, 200, asr_status_payload())
             return
@@ -7025,6 +7162,79 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.static_only or (self.mobile_sync_only and not self.path.startswith("/api/mobile/")):
             json_response(self, 403, {"ok": False, "error": "mobile static preview blocks API writes"})
+            return
+        if self.path == "/api/desktop/migration/apply":
+            try:
+                json_response(
+                    self,
+                    200,
+                    migration_apply_payload(read_json_body(self)),
+                )
+            except (
+                json.JSONDecodeError,
+                UnicodeDecodeError,
+                ValueError,
+            ):
+                json_response(
+                    self,
+                    400,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            except (
+                MigrationApprovalError,
+                MigrationPreviewStaleError,
+                MigrationValidationError,
+            ) as exc:
+                status, payload = migration_error_response(exc)
+                json_response(self, status, payload)
+            except Exception:
+                json_response(
+                    self,
+                    500,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            return
+        if self.path == "/api/desktop/migration/rollback":
+            try:
+                json_response(
+                    self,
+                    200,
+                    migration_rollback_payload(read_json_body(self)),
+                )
+            except (
+                json.JSONDecodeError,
+                UnicodeDecodeError,
+                ValueError,
+            ):
+                json_response(
+                    self,
+                    400,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            except (
+                MigrationNotFoundError,
+                MigrationValidationError,
+            ) as exc:
+                status, payload = migration_error_response(exc)
+                json_response(self, status, payload)
+            except Exception:
+                json_response(
+                    self,
+                    500,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
             return
         if self.path == "/api/diagnostics/model-benchmark":
             try:
@@ -7828,11 +8038,17 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, 200, contract_import_gap_payload(root, folder_id))
                 return
             if self.path == "/api/contracts/save":
-                saved = save_contract(CONTRACT_DB_PATH, body.get("contract", body))
+                saved = save_contract(
+                    CONTRACT_DB_PATH,
+                    body.get("contract", body),
+                )
                 json_response(self, 200, {"ok": True, "contract": saved})
                 return
             if self.path == "/api/contracts/delete":
-                json_response(self, 200, delete_contract(CONTRACT_DB_PATH, str(body.get("id", ""))))
+                result = delete_contract(
+                    CONTRACT_DB_PATH, str(body.get("id", ""))
+                )
+                json_response(self, 200, result)
                 return
             self.send_error(404)
         except Exception as exc:
@@ -7902,6 +8118,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    prepare_managed_data_startup(TOMOS_PATHS)
     parser = argparse.ArgumentParser(description="TOMOS AI local Web UI")
     parser.add_argument("--host", default=os.environ.get("GEMMA_WEB_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GEMMA_WEB_PORT", "54876")))

@@ -209,7 +209,13 @@ app bundle内は読み取り専用として扱う。アプリ更新でdata direc
   -> 完了記録
 ```
 
-元データは削除、移動、上書きしない。コピー途中で失敗した場合はstagingだけを破棄し、現在利用中のdata directoryと元データを維持する。
+元データは削除、移動、上書きしない。非協調writerが動くdirectoryに原子的な単一時点は仮定しない。allowlist対象をstagingへコピーし、各fileのidentity・内容とdirectory manifestの検証が完了した時点をcapture boundaryとする。capture中に検出できた変更はstaleとして停止し、capture完了後は検証済みstagingを今回の正本として反映する。その後に旧sourceへ加わった更新は今回のsnapshotには含めず、次回previewの差分として扱う。完了記録にはsource本文やpathではなく`sourceSnapshotDigest`と`sourceCapturedAt`だけを保存し、全sourceが同一時点で停止したという意味は持たせない。APIとUIは「ステージング取得完了時点の内容を移行し、その後の更新は次回候補になる」と表示し、「全データを同一時点で検証済み」とは表示しない。
+
+旧保存先はHOMEの`~/.gemma4-data/knowledge/index.sqlite`、`~/.gemma4-data/context/context.sqlite`、`~/.gemma4-data/contracts/contracts.sqlite`、`~/.gemma4-data/study-packs/`と、旧resource rootの`data/person-photos/`に限定する。HOMEと旧resource rootの両方を検出rootとして扱い、同じkindが複数見つかった場合は自動選択せず停止する。
+
+人物写真はserverが保存するJPEG、PNG、WebPの3形式を移行できる。各形式を終端まで構造検証し、JPEG EOI、PNG IEND、WebP RIFF宣言長より後ろの付加data、途中欠落、壊れたchunkを許可しない。
+
+既存SQLite destinationはsnapshot準備中にcheckpointや`journal_mode`変更を行わない。別fileのlogical snapshotと、main・WAL・SHM・journalを含む物理recovery bundleを先にdurable化する。currentを変更する前にSQLite exclusive境界内でcurrentのphysical・logical digestを再照合し、durableなownership phaseを記録する。replacement / restore scratchのmainと全sidecarも`O_NOFOLLOW`のheld FDへ固定し、whole-file lockを取得したままpathnameへpublishする。destination未作成のSQLiteは、main・WAL・SHM・journalの全pathnameを`dir_fd`と`O_NOFOLLOW`で不存在確認してから、locked staging inodeをhard linkでatomic no-clobber publishする。main反映後も各sidecar反映前に全pathnameを再確認し、未知sidecar、`EEXIST`、別inodeを上書きまたは削除せず安全停止する。stagingのmainとsidecarはtransactionのcommitted journalがdurableになるまでownership anchorとして残し、new-only recoveryはdurableなcomponent phaseとanchorへのinode一致がそろうcomponentだけを破壊対象にする。new-only recoveryでdestination pathnameを取り除く場合、current lock解放前にmain・WAL・SHM・journalの全staging inodeを固定名の`retained_external_write_guard`へhard linkし、`migrationId`・`snapshotId`・既知kindから導出したguard ID、componentのdev・inode、初期physical・logical digestをclosed recordへdurable保存する。POSIX lock APIでは既存FDの待機者が残っていないことを証明できないため、最後のsame-inode guard pathnameを自動recovery、通常cleanup、orphan cleanup、snapshot pruneで削除しない。guardは通常destinationとは別名であり、managed writerが通常destinationを新規作成しても上書きされない。main・WAL・SHM・journalは同じguard base名で到達可能に保ち、再openしてSQLite整合性と外部更新を確認できる。guard削除は外部writerとの調整後にユーザーが明示承認する別工程だけに限定し、通常の1世代rollback snapshotとは別の安全artifactとする。`recovery_pending / quarantined`でcurrentが欠落した再開は、記録済みdev・inodeと一致するfull staging component集合、physical digest、logical digest、安全quarantineがすべて一致する時だけ`recovered / retained_external_write_guard`へ進む。missing・partial・同一byte別inode・置換・logical不一致ではjournalとquarantineを保持して安全停止する。すでにclosed retained guardがdurableな`recovered`だけ、guardとのsame-inodeを確認しながらpartial staging alias cleanupを再開できる。同じ待機FDがlock解放後にwrite＋`fsync`した更新はguardから到達可能でなければならない。同じSQLite connectionがpathname移動を検出して`SQLITE_READONLY_DBMOVED`を返す場合は明示的失敗として扱い、guardの保持済みbytesを失わない。quarantineはheld current FDから別inodeへdurable copyし、既存componentはcurrent lockより先に`O_NOFOLLOW`のheld FDへ固定する。current lock内の検証はheld quarantine FDのphysical digest、pathname `stat` identity、全held current FDとのdev・inode不一致だけを使用し、quarantine pathnameを再open・closeしない。hard-link aliasまたはlock後のpathname差替えはcurrent変更前に停止し、held quarantine FDはdestination unlinkと内部cleanupが終わるまで保持する。main、WAL、SHM、journalの各反映とsidecar確認はcomponent phaseとしてjournal化し、各操作後にparent directoryを`fsync`する。ownership前に検出した他者更新は物理backupで上書きしない。snapshot作成、publish、完了記録、rollbackの途中で失敗した場合、currentの判定結果をlock内で再照合し、安全copyをquarantineへ保持してから検証済みrestore scratchを反映する。scratch identityのmain・全sidecarをcurrent変更前にまとめて確認し、tamperまたは途中失敗時にcurrentを単純削除しない。byte一致復旧または安全停止を確認した後だけrecovery bundleとquarantineを削除する。retained guard recordには本文、full path、認証情報を保存しない。
 
 自動検出対象は、既存TOMOSが使用していた明示済みの既知pathだけに限定する。任意のホームディレクトリ探索や全ディスク走査は行わない。
 
@@ -218,6 +224,7 @@ localStorageはWebKitアプリ領域とブラウザー領域を直接操作し�
 ### rollback
 
 - app更新前のdata snapshotを1世代だけ保持する。
+- `retained_external_write_guard`はrollback snapshotの世代数へ含めず、外部writerとの調整とユーザー明示承認なしに削除しない。
 - rollbackはユーザー操作で実行する。
 - rollbackでも元データを削除しない。
 - schema versionが新しいdataを古いappで無理に開かない。
@@ -308,6 +315,8 @@ notarytool submit --wait
 ### Gate B3
 
 - 空の新規利用者data directoryで起動できる。
+- 旧HOMEの`.gemma4-data` 4種と旧resource rootの人物写真を検出できる。
+- JPEG、PNG、WebP人物写真の正常fileを移行し、末尾付加・壊れたfileを除外できる。
 - プレビュー前に書き込みが発生しない。
 - 承認後のコピーと検証が成功する。
 - 途中失敗で元データと現在dataを維持する。

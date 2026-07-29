@@ -3,8 +3,10 @@ import ast
 from pathlib import Path
 import base64
 import contextlib
+import http.client
 import json
 import socket
+import sqlite3
 import tempfile
 import threading
 import urllib.request
@@ -22,6 +24,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server
 import sarashina_ocr_runner
+from app_paths import TomosPaths
+from migration_manager import (
+    MigrationApprovalError,
+    MigrationNotFoundError,
+    MigrationPreviewStaleError,
+    MigrationValidationError,
+)
 
 
 def test_desktop_session_token_reads_configured_value() -> None:
@@ -358,9 +367,11 @@ def test_tts_stream_rejects_non_streaming_engine() -> None:
 
 def test_person_photo_upload_saves_to_local_folder() -> None:
     previous_dir = server.PERSON_PHOTO_DIR
+    previous_paths = server.TOMOS_PATHS
     with tempfile.TemporaryDirectory() as tmp:
         try:
             server.PERSON_PHOTO_DIR = Path(tmp)
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
             payload = server.person_photo_upload_payload(
                 "avatar.png",
                 "image/png",
@@ -369,6 +380,7 @@ def test_person_photo_upload_saves_to_local_folder() -> None:
             assert (Path(tmp) / payload["file"]).is_file()
         finally:
             server.PERSON_PHOTO_DIR = previous_dir
+            server.TOMOS_PATHS = previous_paths
     assert payload["ok"] is True
     assert payload["file"].endswith(".png")
     assert payload["url"].startswith("/api/person-photo/view?file=")
@@ -1229,10 +1241,11 @@ def test_workspace_context_uses_context_record_adapter_for_knowledge() -> None:
 
 def test_context_memory_payloads_save_list_and_forget() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        db_path = Path(tmp) / "context.sqlite"
         previous_context_db = server.CONTEXT_DB_PATH
+        previous_paths = server.TOMOS_PATHS
         try:
-            server.CONTEXT_DB_PATH = db_path
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
+            server.CONTEXT_DB_PATH = server.TOMOS_PATHS.context_db
             saved = server.context_memory_save_payload({
                 "item": {
                     "text": "ユーザーは短い箇条書きを好む",
@@ -1263,14 +1276,16 @@ def test_context_memory_payloads_save_list_and_forget() -> None:
             assert after["records"] == []
         finally:
             server.CONTEXT_DB_PATH = previous_context_db
+            server.TOMOS_PATHS = previous_paths
 
 
 def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        db_path = Path(tmp) / "context.sqlite"
         previous_context_db = server.CONTEXT_DB_PATH
+        previous_paths = server.TOMOS_PATHS
         try:
-            server.CONTEXT_DB_PATH = db_path
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
+            server.CONTEXT_DB_PATH = server.TOMOS_PATHS.context_db
             server.context_memory_save_payload({
                 "item": {
                     "text": "ユーザーは短い箇条書きを好む",
@@ -1292,6 +1307,7 @@ def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
             payload = server.context_memory_profile_payload({"scopeType": "folder", "scopeId": "folder-1"})
         finally:
             server.CONTEXT_DB_PATH = previous_context_db
+            server.TOMOS_PATHS = previous_paths
 
     assert payload["ok"] is True
     assert payload["stableFacts"][0]["snippet"] == "ユーザーは短い箇条書きを好む"
@@ -1300,10 +1316,11 @@ def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
 
 def test_context_memory_update_payload_updates_saved_memory() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        db_path = Path(tmp) / "context.sqlite"
         previous_context_db = server.CONTEXT_DB_PATH
+        previous_paths = server.TOMOS_PATHS
         try:
-            server.CONTEXT_DB_PATH = db_path
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
+            server.CONTEXT_DB_PATH = server.TOMOS_PATHS.context_db
             saved = server.context_memory_save_payload({
                 "item": {
                     "text": "ユーザーは短い箇条書きを好む",
@@ -1321,6 +1338,7 @@ def test_context_memory_update_payload_updates_saved_memory() -> None:
             listed = server.context_memory_list_payload({"scopeType": "folder", "scopeId": "folder-1"})
         finally:
             server.CONTEXT_DB_PATH = previous_context_db
+            server.TOMOS_PATHS = previous_paths
 
     assert updated["ok"] is True
     assert updated["record"]["snippet"] == "ユーザーは短く具体的な箇条書きを好む"
@@ -1903,6 +1921,600 @@ def local_handler_endpoint(path: str) -> object:
         httpd.shutdown()
         thread.join(timeout=3)
         httpd.server_close()
+
+
+def migration_http_request(
+    method: str,
+    path: str,
+    body: object | None = None,
+    *,
+    token: str | None = None,
+    content_type: str | None = "application/json",
+    raw_body: bytes | None = None,
+) -> tuple[int, str, dict[str, object]]:
+    headers = {
+        "Host": "127.0.0.1:54876",
+        "Origin": "http://127.0.0.1:54876",
+    }
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    if token is not None:
+        headers["X-TOMOS-Session"] = token
+    data = (
+        raw_body
+        if raw_body is not None
+        else None if body is None
+        else json.dumps(body).encode("utf-8")
+    )
+    with local_handler_endpoint(path) as url:
+        parsed = urllib.parse.urlparse(url)
+        connection = http.client.HTTPConnection(
+            parsed.hostname,
+            parsed.port,
+            timeout=5,
+        )
+        try:
+            connection.request(
+                method,
+                parsed.path,
+                body=data,
+                headers=headers,
+            )
+            response = connection.getresponse()
+            return (
+                response.status,
+                response.getheader("Content-Type", ""),
+                json.loads(response.read().decode("utf-8")),
+            )
+        finally:
+            connection.close()
+
+
+def assert_json_content_type(content_type: str) -> None:
+    assert content_type.split(";", 1)[0].strip().lower() == "application/json"
+
+
+def test_migration_preview_http_returns_metadata_without_paths_or_contents() -> None:
+    manager_preview = {
+        "previewId": "a" * 64,
+        "totalFiles": 3,
+        "totalBytes": 120,
+        "latestMtime": 1234.5,
+        "excludedCount": 1,
+        "errorCount": 0,
+        "items": [
+            {
+                "kind": "knowledge",
+                "source": "/Users/private/legacy/index.sqlite",
+                "destination": "/Users/private/managed/knowledge.sqlite",
+                "totalFiles": 3,
+                "totalBytes": 120,
+                "latestMtime": 1234.5,
+                "conflict": False,
+                "excludedCount": 1,
+                "errorCount": 0,
+            },
+            {
+                "kind": "study-packs",
+                "source": "/Users/private/legacy/study-packs",
+                "destination": "/Users/private/managed/study-packs",
+                "totalFiles": 1,
+                "totalBytes": 20,
+                "latestMtime": 1200.0,
+                "conflict": True,
+                "excludedCount": 0,
+                "errorCount": 0,
+            },
+        ],
+        "files": [
+            {
+                "path": "/Users/private/legacy/secret-token.txt",
+                "bytes": 120,
+                "mtime": 1234.5,
+                "contents": "do-not-return",
+            }
+        ],
+    }
+    with patch.object(
+        server,
+        "detect_legacy_sources",
+        return_value=[object()],
+    ), patch.object(
+        server,
+        "build_migration_preview",
+        return_value=manager_preview,
+    ):
+        status, content_type, payload = migration_http_request(
+            "GET",
+            "/api/desktop/migration/preview",
+        )
+
+    assert status == 200
+    assert_json_content_type(content_type)
+    assert payload == {
+        "ok": True,
+        "preview": {
+            "previewId": "a" * 64,
+            "totalFiles": 3,
+            "totalBytes": 120,
+            "latestMtime": 1234.5,
+            "excludedCount": 1,
+            "errorCount": 0,
+            "items": [
+                {
+                    "kind": "knowledge",
+                    "totalFiles": 3,
+                    "totalBytes": 120,
+                    "latestMtime": 1234.5,
+                    "conflict": False,
+                    "excludedCount": 1,
+                    "errorCount": 0,
+                },
+                {
+                    "kind": "study-packs",
+                    "totalFiles": 1,
+                    "totalBytes": 20,
+                    "latestMtime": 1200.0,
+                    "conflict": True,
+                    "excludedCount": 0,
+                    "errorCount": 0,
+                }
+            ],
+        },
+    }
+    encoded = json.dumps(payload, ensure_ascii=False)
+    assert "/Users/private" not in encoded
+    assert "secret-token" not in encoded
+    assert "do-not-return" not in encoded
+
+
+def test_migration_preview_http_is_zero_write_on_real_legacy_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        temp_root = Path(tmp)
+        legacy_home = temp_root / "home"
+        legacy_root = temp_root / "legacy-root"
+        source = legacy_home / ".gemma4-data/knowledge/index.sqlite"
+        source.parent.mkdir(parents=True)
+        connection = sqlite3.connect(source)
+        try:
+            connection.execute(
+                "CREATE TABLE sample (value TEXT NOT NULL)"
+            )
+            connection.execute(
+                "INSERT INTO sample(value) VALUES ('legacy')"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        data_root = temp_root / "app-data"
+
+        def filesystem_tree() -> list[tuple[str, bool, int, int]]:
+            return [
+                (
+                    path.relative_to(temp_root).as_posix(),
+                    path.is_dir(),
+                    path.stat().st_size,
+                    path.stat().st_mtime_ns,
+                )
+                for path in sorted(temp_root.rglob("*"))
+            ]
+
+        before = filesystem_tree()
+        previous_legacy_home = server.LEGACY_HOME
+        previous_root = server.ROOT
+        previous_paths = server.TOMOS_PATHS
+        try:
+            server.LEGACY_HOME = legacy_home
+            server.ROOT = legacy_root
+            server.TOMOS_PATHS = TomosPaths.from_root(data_root)
+            status, content_type, payload = migration_http_request(
+                "GET",
+                "/api/desktop/migration/preview",
+            )
+        finally:
+            server.LEGACY_HOME = previous_legacy_home
+            server.ROOT = previous_root
+            server.TOMOS_PATHS = previous_paths
+
+        after = filesystem_tree()
+        assert status == 200
+        assert_json_content_type(content_type)
+        assert payload["ok"] is True
+        assert payload["preview"]["totalFiles"] == 1
+        assert before == after
+        assert not data_root.exists()
+
+
+def test_migration_apply_http_rejects_missing_empty_and_invalid_approval() -> None:
+    cases = [
+        ({}, "missing approval"),
+        ({"previewId": "a" * 64}, "missing items"),
+        (
+            {"previewId": "a" * 64, "approvedItems": []},
+            "empty items",
+        ),
+        (
+            {"previewId": "a" * 64, "approvedItems": "knowledge"},
+            "invalid item type",
+        ),
+        (
+            {"previewId": "a" * 64, "approvedItems": [1]},
+            "invalid item value",
+        ),
+    ]
+    for body, case in cases:
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/apply",
+            body,
+        )
+        assert status == 400, case
+        assert_json_content_type(content_type)
+        assert payload == {
+            "ok": False,
+            "error": "migration_approval_required",
+        }, case
+
+
+def test_migration_apply_http_maps_fixed_errors_and_statuses() -> None:
+    cases = [
+        (
+            MigrationApprovalError("unknown item /Users/private"),
+            400,
+            "migration_approval_required",
+        ),
+        (
+            MigrationPreviewStaleError("stale /Users/private"),
+            409,
+            "migration_preview_stale",
+        ),
+        (
+            MigrationValidationError("invalid /Users/private"),
+            400,
+            "migration_validation_failed",
+        ),
+    ]
+    body = {"previewId": "a" * 64, "approvedItems": ["knowledge"]}
+    for error, expected_status, expected_code in cases:
+        with patch.object(server, "apply_migration", side_effect=error):
+            status, content_type, payload = migration_http_request(
+                "POST",
+                "/api/desktop/migration/apply",
+                body,
+            )
+        assert status == expected_status
+        assert_json_content_type(content_type)
+        assert payload == {"ok": False, "error": expected_code}
+        assert "/Users/private" not in json.dumps(payload)
+
+
+def assert_migration_post_requires_current_desktop_session(
+    path: str,
+    body: dict[str, object],
+    manager_name: str,
+) -> None:
+    token = "a" * 64
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": token},
+        clear=False,
+    ), patch.object(
+        server,
+        "read_json_body",
+        side_effect=AssertionError("body must not be parsed"),
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        missing_status, missing_type, missing_payload = migration_http_request(
+            "POST",
+            path,
+            body,
+        )
+        wrong_status, wrong_type, wrong_payload = migration_http_request(
+            "POST",
+            path,
+            body,
+            token="0" * 64,
+        )
+
+    assert missing_status == 403
+    assert_json_content_type(missing_type)
+    assert missing_payload == {
+        "ok": False,
+        "error": "desktop_session_required",
+    }
+    assert wrong_status == 403
+    assert_json_content_type(wrong_type)
+    assert wrong_payload == {
+        "ok": False,
+        "error": "desktop_session_required",
+    }
+
+
+def test_migration_apply_http_requires_current_desktop_session() -> None:
+    assert_migration_post_requires_current_desktop_session(
+        "/api/desktop/migration/apply",
+        {
+            "previewId": "b" * 64,
+            "approvedItems": ["knowledge"],
+        },
+        "apply_migration",
+    )
+
+
+def test_migration_rollback_http_requires_current_desktop_session() -> None:
+    assert_migration_post_requires_current_desktop_session(
+        "/api/desktop/migration/rollback",
+        {"migrationId": "c" * 32},
+        "snapshot_id_for_migration",
+    )
+
+
+def assert_migration_post_rejects_bad_json_input(
+    path: str,
+    body: dict[str, object],
+    manager_name: str,
+) -> None:
+    token = "a" * 64
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": token},
+        clear=False,
+    ), patch.object(
+        server,
+        "read_json_body",
+        side_effect=AssertionError("body must not be parsed"),
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        for content_type in (None, "text/plain"):
+            status, response_type, payload = migration_http_request(
+                "POST",
+                path,
+                body,
+                token=token,
+                content_type=content_type,
+            )
+            assert status == 403
+            assert_json_content_type(response_type)
+            assert payload == {
+                "ok": False,
+                "error": "desktop_session_required",
+            }
+
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": token},
+        clear=False,
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        status, response_type, payload = migration_http_request(
+            "POST",
+            path,
+            token=token,
+            raw_body=b"{not-json",
+        )
+    assert status == 400
+    assert_json_content_type(response_type)
+    assert payload == {
+        "ok": False,
+        "error": "migration_validation_failed",
+    }
+
+
+def test_migration_apply_http_rejects_bad_json_input() -> None:
+    assert_migration_post_rejects_bad_json_input(
+        "/api/desktop/migration/apply",
+        {
+            "previewId": "b" * 64,
+            "approvedItems": ["knowledge"],
+        },
+        "apply_migration",
+    )
+
+
+def test_migration_rollback_http_rejects_bad_json_input() -> None:
+    assert_migration_post_rejects_bad_json_input(
+        "/api/desktop/migration/rollback",
+        {"migrationId": "c" * 32},
+        "snapshot_id_for_migration",
+    )
+
+
+def assert_invalid_session_precedes_migration_body_handling(
+    path: str,
+    manager_name: str,
+) -> None:
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64},
+        clear=False,
+    ), patch.object(
+        server,
+        "read_json_body",
+        side_effect=AssertionError("body must not be parsed"),
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        for content_type in ("text/plain", "application/json"):
+            status, response_type, payload = migration_http_request(
+                "POST",
+                path,
+                token="0" * 64,
+                content_type=content_type,
+                raw_body=b"{not-json",
+            )
+            assert status == 403
+            assert_json_content_type(response_type)
+            assert payload == {
+                "ok": False,
+                "error": "desktop_session_required",
+            }
+
+
+def test_migration_apply_invalid_session_precedes_body_handling() -> None:
+    assert_invalid_session_precedes_migration_body_handling(
+        "/api/desktop/migration/apply",
+        "apply_migration",
+    )
+
+
+def test_migration_rollback_invalid_session_precedes_body_handling() -> None:
+    assert_invalid_session_precedes_migration_body_handling(
+        "/api/desktop/migration/rollback",
+        "snapshot_id_for_migration",
+    )
+
+
+def test_migration_apply_http_success_is_json() -> None:
+    result = {
+        "status": "completed",
+        "migrationId": "c" * 32,
+        "snapshotId": "d" * 32,
+        "approvedItems": ["knowledge"],
+        "cleanupPending": False,
+    }
+    with patch.object(
+        server,
+        "apply_migration",
+        return_value=result,
+    ):
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/apply",
+            {
+                "previewId": "b" * 64,
+                "approvedItems": ["knowledge"],
+            },
+        )
+    assert status == 200
+    assert_json_content_type(content_type)
+    assert payload == {"ok": True, "migration": result}
+
+
+def test_migration_rollback_http_resolves_existing_migration_id() -> None:
+    migration_id = "c" * 32
+    snapshot_id = "d" * 32
+
+    def resolve(received_id: str, paths: TomosPaths) -> str:
+        assert received_id == migration_id
+        assert paths is server.TOMOS_PATHS
+        return snapshot_id
+
+    def rollback(received_id: str, paths: TomosPaths) -> dict:
+        assert received_id == snapshot_id
+        assert paths is server.TOMOS_PATHS
+        return {
+            "status": "rolled_back",
+            "migrationId": migration_id,
+            "snapshotId": snapshot_id,
+        }
+
+    with patch.object(
+        server,
+        "snapshot_id_for_migration",
+        side_effect=resolve,
+    ), patch.object(
+        server,
+        "rollback_migration",
+        side_effect=rollback,
+    ):
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/rollback",
+            {"migrationId": migration_id},
+        )
+
+    assert status == 200
+    assert_json_content_type(content_type)
+    assert payload == {
+        "ok": True,
+        "migration": {
+            "status": "rolled_back",
+            "migrationId": migration_id,
+            "snapshotId": snapshot_id,
+        },
+    }
+
+
+def test_migration_rollback_http_rejects_invalid_and_unknown_migration() -> None:
+    invalid_cases = [{}, {"migrationId": ""}, {"migrationId": 1}]
+    for body in invalid_cases:
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/rollback",
+            body,
+        )
+        assert status == 404
+        assert_json_content_type(content_type)
+        assert payload == {
+            "ok": False,
+            "error": "migration_not_found",
+        }
+
+    with patch.object(
+        server,
+        "snapshot_id_for_migration",
+        side_effect=MigrationNotFoundError("not found /Users/private"),
+    ):
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/rollback",
+            {"migrationId": "e" * 32},
+        )
+    assert status == 404
+    assert_json_content_type(content_type)
+    assert payload == {
+        "ok": False,
+        "error": "migration_not_found",
+    }
+
+
+def test_migration_post_unexpected_errors_are_fixed_json() -> None:
+    cases = [
+        (
+            "/api/desktop/migration/apply",
+            {
+                "previewId": "b" * 64,
+                "approvedItems": ["knowledge"],
+            },
+            "apply_migration",
+        ),
+        (
+            "/api/desktop/migration/rollback",
+            {"migrationId": "e" * 32},
+            "snapshot_id_for_migration",
+        ),
+    ]
+    for path, body, manager_name in cases:
+        with patch.object(
+            server,
+            manager_name,
+            side_effect=RuntimeError("secret-token /Users/private/source.json"),
+        ):
+            status, content_type, payload = migration_http_request(
+                "POST",
+                path,
+                body,
+            )
+        assert status == 500
+        assert_json_content_type(content_type)
+        assert payload == {
+            "ok": False,
+            "error": "migration_validation_failed",
+        }
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert "secret-token" not in serialized
+        assert "/Users/private" not in serialized
 
 
 def test_model_benchmark_http_rejects_disallowed_model() -> None:
@@ -4510,6 +5122,20 @@ if __name__ == "__main__":
     test_model_benchmark_allows_installed_auto_select_model()
     test_model_benchmark_rejects_external_ollama_url_before_request()
     test_run_local_model_benchmark_shape()
+    test_migration_preview_http_returns_metadata_without_paths_or_contents()
+    test_migration_preview_http_is_zero_write_on_real_legacy_root()
+    test_migration_apply_http_rejects_missing_empty_and_invalid_approval()
+    test_migration_apply_http_maps_fixed_errors_and_statuses()
+    test_migration_apply_http_requires_current_desktop_session()
+    test_migration_rollback_http_requires_current_desktop_session()
+    test_migration_apply_http_rejects_bad_json_input()
+    test_migration_rollback_http_rejects_bad_json_input()
+    test_migration_apply_invalid_session_precedes_body_handling()
+    test_migration_rollback_invalid_session_precedes_body_handling()
+    test_migration_apply_http_success_is_json()
+    test_migration_rollback_http_resolves_existing_migration_id()
+    test_migration_rollback_http_rejects_invalid_and_unknown_migration()
+    test_migration_post_unexpected_errors_are_fixed_json()
     test_model_benchmark_http_rejects_disallowed_model()
     test_model_benchmark_http_rejects_external_ollama_before_tags()
     test_model_benchmark_http_runs_allowed_model_once()

@@ -8,16 +8,19 @@ import time
 import uuid
 from pathlib import Path
 
+from app_paths import TomosPaths
+import migration_manager
+
 
 VALID_AUTO_RENEW = {"yes", "no", "unknown"}
 VALID_STATUS = {"active", "expired", "cancelled", "needs_review"}
 
 
 def default_contract_db_path(root: Path) -> Path:
-    return root / ".gemma4-data" / "contracts" / "contracts.sqlite"
+    return TomosPaths.from_root(root).contracts_db
 
 
-def ensure_schema(connection: sqlite3.Connection) -> None:
+def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS contract_records (
@@ -48,11 +51,21 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     connection.commit()
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+def _connect_write(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
-    ensure_schema(connection)
+    _ensure_schema(connection)
+    return connection
+
+
+def connect(db_path: Path) -> sqlite3.Connection:
+    """Open an existing contract database without schema writes."""
+    connection = sqlite3.connect(
+        f"{Path(db_path).absolute().as_uri()}?mode=ro",
+        uri=True,
+    )
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only = ON")
     return connection
 
 
@@ -242,9 +255,10 @@ def validate_record(record: dict) -> dict:
     }
 
 
+@migration_manager.managed_database_writer("contracts")
 def save_contract(db_path: Path, record: dict) -> dict:
     values = validate_record(record)
-    with connect(db_path) as connection:
+    with _connect_write(db_path) as connection:
         duplicate_ids: list[str] = []
         if not record.get("id") and values["folder_id"] and values["source_path"]:
             existing_rows = connection.execute(
@@ -298,6 +312,8 @@ def save_contract(db_path: Path, record: dict) -> dict:
 
 
 def list_contracts(db_path: Path, folder_id: str = "") -> list[dict]:
+    if not Path(db_path).is_file():
+        return []
     with connect(db_path) as connection:
         if folder_id:
             rows = connection.execute(
@@ -328,7 +344,11 @@ def list_contracts(db_path: Path, folder_id: str = "") -> list[dict]:
         return [row_to_contract(row) for row in rows]
 
 
+@migration_manager.managed_database_writer("contracts")
 def delete_contract(db_path: Path, contract_id: str) -> dict:
-    with connect(db_path) as connection:
-        connection.execute("DELETE FROM contract_records WHERE id = ?", (str(contract_id),))
+    with _connect_write(db_path) as connection:
+        connection.execute(
+            "DELETE FROM contract_records WHERE id = ?",
+            (str(contract_id),),
+        )
         return {"ok": True}

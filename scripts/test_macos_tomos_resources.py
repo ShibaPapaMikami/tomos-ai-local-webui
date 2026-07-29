@@ -5,9 +5,11 @@ import ast
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -15,9 +17,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_LOCAL_IMPORT_FILES = {
     "agent_reach_adapter.py",
+    "app_paths.py",
     "context_core.py",
     "contract_ledger.py",
     "knowledge_layer.py",
+    "migration_manager.py",
     "packages/local_context_core/__init__.py",
     "pdf_reader.py",
     "sarashina_ocr_runner.py",
@@ -175,6 +179,23 @@ def test_staged_tree_excludes_private_state_and_records_fixed_release_metadata()
     assert all(re.fullmatch(r"[0-9a-f]{64}", digest) for digest in manifest["resourceHashes"].values())
 
 
+def test_staged_tree_can_import_server() -> None:
+    module = _load_stage_module()
+    with tempfile.TemporaryDirectory() as temporary:
+        destination = Path(temporary) / "tomos"
+        data_root = Path(temporary) / "app-data"
+        module.stage_resources(ROOT, destination)
+        result = subprocess.run(
+            [sys.executable, "-c", "import server"],
+            cwd=destination,
+            env={**os.environ, "TOMOS_DATA_ROOT": str(data_root)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    assert result.returncode == 0, result.stderr
+
+
 def test_stage_rejects_leaf_parent_and_root_symlinks() -> None:
     module = _load_stage_module()
     with tempfile.TemporaryDirectory() as temporary:
@@ -244,6 +265,7 @@ def test_release_mode_rejects_dirty_worktree() -> None:
 def main() -> None:
     test_allowlist_contains_server_graph_web_static_urls_and_runtime_scripts()
     test_staged_tree_excludes_private_state_and_records_fixed_release_metadata()
+    test_staged_tree_can_import_server()
     test_stage_rejects_leaf_parent_and_root_symlinks()
     test_forbidden_components_are_case_insensitive()
     test_manifest_publish_failure_rolls_back_tree()

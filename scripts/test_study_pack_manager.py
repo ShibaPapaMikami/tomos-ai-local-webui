@@ -58,6 +58,24 @@ def test_install_and_remove_pack():
         assert not (root / "note-article-writing").exists()
 
 
+def test_install_does_not_create_an_uninitialized_install_root():
+    archive = make_pack_zip()
+    with tempfile.TemporaryDirectory() as tmp:
+        install_root = Path(tmp) / "app-data" / "data" / "study-packs"
+        catalog = study_pack_manager.build_catalog(
+            install_root=install_root,
+            release_url="https://github.com/ShibaPapaMikami/tomos-ai-local-webui/releases/download/note-article-writing-v0.1.0/TOMOS-note-article-writing-v0.1.0.zip",
+            sha256=hashlib.sha256(archive).hexdigest(),
+        )
+        try:
+            study_pack_manager.install_pack_bytes(archive, catalog[0], install_root=install_root)
+        except FileNotFoundError:
+            pass
+        else:
+            raise AssertionError("install root must be initialized before package installation")
+        assert not install_root.exists()
+
+
 def test_install_rejects_wrong_hash():
     archive = make_pack_zip()
     with tempfile.TemporaryDirectory() as tmp:
@@ -185,6 +203,7 @@ def test_server_starts_note_pack_install_as_background_job():
 
 if __name__ == "__main__":
     test_install_and_remove_pack()
+    test_install_does_not_create_an_uninitialized_install_root()
     test_install_rejects_wrong_hash()
     test_install_rejects_unsafe_zip_path()
     test_download_allows_only_configured_github_asset()

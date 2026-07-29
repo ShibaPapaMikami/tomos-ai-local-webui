@@ -90,6 +90,7 @@ prefix一致は使わず、完全一致だけを許可する。
 
 - `type`と`version`が一致しないfileは反映しない。
 - `values`は文字列valueだけを受け付ける。
+- import fileは最大`10 MiB`（`10 * 1024 * 1024` bytes）とし、`size`が0以上の整数でないfile、または上限を超えるfileは`FileReader.readAsText`の前に拒否する。
 - 未知keyはpreviewの除外件数へ数えるが、値は画面へ表示しない。
 - preview時点ではlocalStorageを書き換えない。
 
@@ -104,6 +105,8 @@ prefix一致は使わず、完全一致だけを許可する。
 - 独立した成功・失敗status
 
 export前に「会話や設定がfileへ含まれます」と表示する。import前に「現在のアプリ設定へ上書きされます」と表示する。ボタン内だけで完了を通知しない。
+
+native file inputは視覚的に隠し、明示的な選択ボタンからだけ開く。選択直後にinputの`value`を空へ戻し、file basenameを画面へ残さない。exportは750 msの再操作guard中、ボタンとstatusをpendingに保ち、同一連打で複数fileを生成しない。
 
 ## 反映と失敗
 

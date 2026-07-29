@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const DESKTOP_RELEASE_VERSION = "0.8.233";
 const DOWNLOAD_PROGRESS_ASSET_VERSION = "0.8.236-download-progress";
 const CHAT_CONTEXT_ASSET_VERSION = "0.8.235-strict-purpose";
+const TTS_ASSET_VERSION = "0.8.233-tts-boundary";
+const DATA_MIGRATION_ASSET_VERSION = DOWNLOAD_PROGRESS_ASSET_VERSION;
 const index = fs.readFileSync("web/index.html", "utf8");
 const appJs = fs.readFileSync("web/app.js", "utf8");
 const styles = fs.readFileSync("web/styles.css", "utf8");
@@ -21,7 +23,30 @@ assert.match(index, new RegExp(`src="/tts\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VER
 assert.match(index, new RegExp(`src="/messages\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"`));
 assert.match(index, new RegExp(`src="/pwa\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"`));
 assert.match(index, /id="composer-status" hidden aria-live="polite"/);
+assert.match(index, /id="legacy-data-migration"/);
+assert.match(index, /id="migration-status"[^>]*aria-live="polite"/);
+assert.match(index, /id="migration-apply-action"[^>]*disabled/);
+assert.match(index, /id="migration-confirm-dialog"[^>]*aria-labelledby="migration-confirm-title"/);
+assert.match(index, /元データは削除されません/);
+assert.match(index, /id="local-storage-export-action"/);
+assert.match(index, /id="local-storage-export-status"[^>]*aria-live="polite"/);
+assert.match(index, /id="local-storage-import-choose"[^>]*type="button"/);
+assert.match(index, /id="local-storage-import-file"[^>]*class="local-storage-file-input"[^>]*type="file"/);
+assert.match(index, /id="local-storage-import-preview"/);
+assert.match(index, /id="local-storage-import-apply"[^>]*disabled/);
+assert.match(index, /id="local-storage-import-status"[^>]*aria-live="polite"/);
+assert.match(index, /id="local-storage-import-dialog"[^>]*aria-labelledby="local-storage-import-dialog-title"/);
+assert.match(index, /会話や設定がファイルへ含まれます/);
+assert.match(index, /現在のアプリ設定へ上書きされます/);
+assert.match(
+  index,
+  new RegExp(`src="/local-storage-transfer\\.js\\?v=${DATA_MIGRATION_ASSET_VERSION}"[\\s\\S]*src="/management\\.js\\?v=${DATA_MIGRATION_ASSET_VERSION}"`),
+);
 assert.match(i18n, /"composer\.voiceInputDetected": "音を受け取っています。"/);
+assert.match(i18n, /"management\.migrationTitle": "古いTOMOSデータ"/);
+assert.match(styles, /\.migration-item\s*\{[^}]*min-width:\s*0/s);
+assert.match(styles, /\.local-storage-transfer\s*\{[^}]*min-width:\s*0/s);
+assert.match(styles, /\.local-storage-file-input\s*\{[^}]*position:\s*absolute/s);
 for (const level of [0, 1, 2, 3, 4]) {
   assert.match(styles, new RegExp(`\\.composer-status\\[data-voice-level="${level}"\\]`));
 }
@@ -96,6 +121,23 @@ assert.match(sw, /\/person-relationship\.js\?v=0\.8\.209-tomos53/);
 assert.match(sw, /cache\.put\(event\.request/);
 const pwaJs = fs.readFileSync("web/pwa.js", "utf8");
 assert.match(pwaJs, new RegExp(`navigator\\.serviceWorker\\.register\\("/sw\\.js\\?v=${DOWNLOAD_PROGRESS_ASSET_VERSION}"\\)`));
+assert.doesNotMatch(
+  [
+    index.match(/href="\/styles\.css\?v=[^"]+"/)?.[0] || "",
+    index.match(/src="\/i18n\.js\?v=[^"]+"/)?.[0] || "",
+    index.match(/src="\/local-storage-transfer\.js\?v=[^"]+"/)?.[0] || "",
+    index.match(/src="\/management\.js\?v=[^"]+"/)?.[0] || "",
+    index.match(/src="\/pwa\.js\?v=[^"]+"/)?.[0] || "",
+    sw.match(/const CACHE_NAME = "[^"]+"/)?.[0] || "",
+    sw.match(/"\/styles\.css\?v=[^"]+"/)?.[0] || "",
+    sw.match(/"\/i18n\.js\?v=[^"]+"/)?.[0] || "",
+    sw.match(/"\/local-storage-transfer\.js\?v=[^"]+"/)?.[0] || "",
+    sw.match(/"\/management\.js\?v=[^"]+"/)?.[0] || "",
+    sw.match(/"\/pwa\.js\?v=[^"]+"/)?.[0] || "",
+    pwaJs.match(/navigator\.serviceWorker\.register\("[^"]+"\)/)?.[0] || "",
+  ].join("\n"),
+  new RegExp(TTS_ASSET_VERSION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+);
 
 const mobileHtml = fs.readFileSync("web/mobile.html", "utf8");
 assert.match(mobileHtml, /rel="icon" href="\/icons\/icon\.svg" type="image\/svg\+xml"/);

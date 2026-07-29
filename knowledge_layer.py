@@ -10,6 +10,9 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from app_paths import TomosPaths
+import migration_manager
+
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".markdown", ".pdf"}
 IGNORED_DIRS = {
@@ -33,7 +36,7 @@ TextExtractor = Callable[[Path], str]
 
 
 def default_db_path(root: Path) -> Path:
-    return root / ".gemma4-data" / "knowledge" / "index.sqlite"
+    return TomosPaths.from_root(root).knowledge_db
 
 
 def now_ms() -> int:
@@ -118,16 +121,27 @@ def chunk_text(text: str) -> list[dict[str, object]]:
     return chunks
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+def _connect_write(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(str(db_path))
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
-    ensure_schema(connection)
+    _ensure_schema(connection)
     return connection
 
 
-def ensure_schema(connection: sqlite3.Connection) -> None:
+def connect(db_path: Path) -> sqlite3.Connection:
+    """Open an existing knowledge database without schema writes."""
+    connection = sqlite3.connect(
+        f"{Path(db_path).absolute().as_uri()}?mode=ro",
+        uri=True,
+    )
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only = ON")
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
+def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
         CREATE TABLE IF NOT EXISTS knowledge_files (
@@ -215,6 +229,7 @@ def iter_supported_files(root_path: Path) -> list[Path]:
     return files
 
 
+@migration_manager.managed_database_writer("knowledge")
 def index_folder(
     *,
     db_path: Path,
@@ -228,8 +243,8 @@ def index_folder(
         raise ValueError("フォルダーが見つかりません。")
     indexed = skipped = failed = deleted = 0
     seen_paths: set[str] = set()
-    with connect(db_path) as connection:
-      for path in iter_supported_files(root_path):
+    with _connect_write(db_path) as connection:
+       for path in iter_supported_files(root_path):
         rel = path.relative_to(root_path).as_posix()
         seen_paths.add(rel)
         info = path.stat()
@@ -309,16 +324,16 @@ def index_folder(
                 (fid, folder_id, rel, path.suffix.lower(), mtime, size, digest, str(exc)[:500], now_ms()),
             )
             failed += 1
-      existing = connection.execute(
+       existing = connection.execute(
           "SELECT id, path FROM knowledge_files WHERE folder_id = ? AND status != 'deleted'",
           (folder_id,),
       ).fetchall()
-      for row in existing:
+       for row in existing:
           if row["path"] not in seen_paths:
               connection.execute("UPDATE knowledge_files SET status = 'deleted', indexed_at = ? WHERE id = ?", (now_ms(), row["id"]))
               deleted += 1
-      connection.commit()
-      status = knowledge_status(db_path=db_path, folder_id=folder_id, connection=connection)
+       connection.commit()
+       status = knowledge_status(db_path=db_path, folder_id=folder_id, connection=connection)
     return {
         "ok": True,
         "indexed": indexed,
@@ -331,6 +346,14 @@ def index_folder(
 
 
 def knowledge_status(*, db_path: Path, folder_id: str, connection: sqlite3.Connection | None = None) -> dict[str, object]:
+    if connection is None and not Path(db_path).is_file():
+        return {
+            "ok": True,
+            "lastIndexedAt": 0,
+            "fileCount": 0,
+            "textCount": 0,
+            "failedCount": 0,
+        }
     close = False
     if connection is None:
         connection = connect(db_path)
@@ -376,6 +399,8 @@ def search_knowledge(*, db_path: Path, folder_id: str, query: str, limit: int = 
     if not query:
         raise ValueError("検索キーワードを入力してください。")
     limit = max(1, min(int(limit or 5), 20))
+    if not Path(db_path).is_file():
+        return {"ok": True, "query": query, "results": []}
     tokens = ngrams(query)
     with connect(db_path) as connection:
         rows: list[sqlite3.Row] = []

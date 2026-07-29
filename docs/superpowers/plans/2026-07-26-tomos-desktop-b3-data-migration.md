@@ -119,7 +119,9 @@ Expected: `migration_manager`未作成で失敗。
 
 - [ ] **Step 3: 明示allowlistで検出と集計を実装する**
 
-対象は旧`.gemma4-data/knowledge/index.sqlite`、`context/context.sqlite`、`contracts/contracts.sqlite`、`study-packs/`、`data/person-photos/`だけとする。件数、byte数、最新mtime、移行先、衝突状態を返し、本文やDB row内容はpreview responseへ含めない。
+対象は旧HOMEの`~/.gemma4-data/knowledge/index.sqlite`、`~/.gemma4-data/context/context.sqlite`、`~/.gemma4-data/contracts/contracts.sqlite`、`~/.gemma4-data/study-packs/`と、旧resource rootの`data/person-photos/`だけとする。検出rootにはHOMEと旧resource rootを渡し、同じkindが複数rootに存在する場合は黙って選ばず明示エラーにする。fixtureはこの旧default path契約を独立した期待値として固定する。件数、byte数、最新mtime、移行先、衝突状態を返し、本文やDB row内容はpreview responseへ含めない。
+
+人物写真はserverの保存形式と同じ`.jpg`、`.png`、`.webp`だけを対象にする。JPEGはEOI、PNGはCRC付きIEND、WebPはRIFF宣言長と最終chunkまで構造を検証し、末尾付加、途中欠落、壊れた形式を除外する。
 
 - [ ] **Step 4: GREENを確認する**
 
@@ -166,11 +168,11 @@ Expected: apply未定義で失敗。
 
 - [ ] **Step 3: staging copyと検証を実装する**
 
-preview IDはsource path、size、mtime、destinationのdigestから作る。apply時に同じdigestを再計算し、変化していれば再previewを要求する。SQLiteは`PRAGMA quick_check`、directoryはfile countとSHA-256一覧を検証する。
+preview IDはsource path、size、mtime、destinationのdigestから作る。apply時に同じdigestを再計算し、変化していれば再previewを要求する。SQLiteは`PRAGMA quick_check`、directoryはfile countとSHA-256一覧を検証する。非協調writerが動くdirectoryに原子的な単一時点を仮定せず、allowlist対象をstagingへ安全にコピーしてhash検証を完了した時点をcapture boundaryとする。capture中に検出できた変更はstaleとして停止し、capture完了後は検証済みstagingを今回の正本として反映する。その後の旧source更新は今回のコピーへ混在させず、次回previewの差分として扱う。完了記録には`sourceSnapshotDigest`と`sourceCapturedAt`だけを保存し、「全sourceを同一時点で停止した」という意味は持たせない。
 
 - [ ] **Step 4: atomic反映と1世代snapshotを実装する**
 
-既存destinationがある場合は同じfilesystem上のsnapshotへrenameし、検証済みstagingをdestinationへrenameする。失敗時はsnapshotを戻す。完了記録に本文やtokenを含めない。
+既存destinationがある場合、directoryは同じfilesystem上のsnapshotへrenameし、検証済みstagingをdestinationへrenameする。SQLiteはcurrentをcheckpointまたは`journal_mode = DELETE`へ変更せず、別fileへlogical snapshotを作り、main・WAL・SHM・journalの物理recovery bundleをdurable journalへdigest固定する。currentを変更する前にSQLite exclusive境界内でphysical・logical digestを再照合し、durableなownership phaseを記録する。replacement / restore scratchもmainと全sidecarをheld FDへ固定し、whole-file lockを取得したままpathnameへpublishする。destination未作成のSQLiteは、main・WAL・SHM・journalの全pathnameが不存在であることを`dir_fd`と`O_NOFOLLOW`で確認してから、locked staging inodeをhard linkでatomic no-clobber publishする。main反映後も各sidecar反映前に未知pathnameの出現を再確認し、上書きや削除を行わず安全停止する。stagingのmainとsidecarはtransactionのcommitted journalがdurableになるまでownership anchorとして保持し、component phaseで反映済みと証明できる同一inodeだけをnew-only recoveryの破壊対象にする。new-only recoveryがdestination pathnameを削除する場合は、current lockを解放する前にmain・WAL・SHM・journalの全staging inodeへ固定名の`retained_external_write_guard` hard linkを作り、`migrationId`・`snapshotId`・既知kindだけから導出したguard ID、componentのdev・inode、初期physical・logical digestをclosed recordへdurable保存する。待機済みFDが存在するかPOSIX lock APIでは証明できないため、このguardの最後のsame-inode pathnameを自動recovery、通常cleanup、orphan cleanup、snapshot pruneで削除しない。guardは通常destinationとは別名なのでmanaged writerによるdestination新規作成を妨げず、main・WAL・SHM・journalを同じbase名で再openして確認できる。後日の削除は外部writerとの調整後にユーザーが明示承認する別工程だけで行い、1世代rollback snapshotとは別の安全artifactとして扱う。`recovery_pending / quarantined`でcurrentが欠落した再開は、記録済みdev・inodeと一致するfull staging component集合、physical digest、logical digest、安全quarantineがすべて一致する場合だけ`recovered / retained_external_write_guard`へ進める。欠落・partial・同一byte別inode・置換・logical不一致はjournalとquarantineを保持して安全停止する。すでにclosed retained guardがdurableな`recovered`だけは、guardとのsame-inodeを確認しながらpartial staging alias cleanupを再開できる。同じ待機FDのlock解放後write＋`fsync`はguardから到達可能でなければならず、同じSQLite connectionが`SQLITE_READONLY_DBMOVED`を返す場合は明示的失敗として扱い、guardの保持済みbytesを失わない。recovery quarantineはheld FDから別inodeへdurable copyし、既存のmain・全sidecarもcurrent lock取得前に`O_NOFOLLOW`のheld FDへ固定する。lock内ではheld quarantine FDからdigestを計算し、pathname identityを`stat`で再確認して、全current FDとのdev・inode不一致を必須にする。quarantine pathnameの差替えまたはhard-link aliasはcurrent変更前に安全停止し、lock中にquarantine pathを別FDでopen・closeしない。main、WAL、SHM、journalの各反映後はparent directoryを`fsync`し、closedなcomponent phaseをdurable journalへ保存する。ownership前のcurrent不一致は他者更新として一切復元せず停止する。復元時はcurrentもheld FDとlockの内側で最終physical stateを再照合し、安全copyをquarantineへ保持してからrestore scratchをpublishする。tamperまたは途中失敗時にcurrentを単純削除せず、byte一致復旧または安全停止できた場合だけrecovery bundleとquarantineを削除する。完了記録とretained guard recordに本文、full path、tokenを含めない。
 
 - [ ] **Step 5: GREENを確認する**
 
@@ -350,19 +352,19 @@ Browser確認: `1280×820`、`960×640`、`390×844`で文字の重なり・横o
 
 ### Task 7: Gate B3
 
-- [ ] **Step 1: 新規profileを確認する**
+- [x] **Step 1: 新規profileを確認する**
 
 空の一時HOMEで起動し、Application Support配下だけへDBが作成されることを確認する。
 
-- [ ] **Step 2: 旧データ移行を確認する**
+- [x] **Step 2: 旧データ移行を確認する**
 
 fixtureでpreview、選択、copy、検証、再起動後readbackを確認する。元data hashが前後一致することを記録する。
 
-- [ ] **Step 3: 失敗とrollbackを確認する**
+- [x] **Step 3: 失敗とrollbackを確認する**
 
 copy途中失敗、stale preview、壊れたSQLite、同じ移行の再実行を確認する。
 
-- [ ] **Step 4: 全回帰testを実行する**
+- [x] **Step 4: 全回帰testを実行する**
 
 Run:
 
@@ -379,6 +381,6 @@ node scripts/test-pwa-assets.js
 git diff --check
 ```
 
-- [ ] **Step 5: Gate判定**
+- [x] **Step 5: Gate判定**
 
 全件合格後だけマスター台帳のGate B3を`合格`へ更新し、Desktop Cを許可する。

@@ -116,7 +116,7 @@
 | Gate 3 | Gate 2合格版 | TTS共通境界、fixture、手動再生 | Desktop B1 | 合格 |
 | Gate B1 | Gate 3合格版 | Apple Silicon用Python同梱、app内resource | Desktop B2 | 合格 |
 | Gate B2 | Gate B1合格版 | localhost API session保護 | Desktop B3 | 合格 |
-| Gate B3 | Gate B2合格版 | app data、プレビュー、承認コピー移行 | Desktop C | 停止 |
+| Gate B3 | Gate B2合格版 | app data、プレビュー、承認コピー移行 | Desktop C | 合格 |
 | Gate C | Gate B3合格版 | 署名・公証済みApple Silicon Mac PKG | 実機インストール確認 | 停止 |
 | Gate 4 | Gate C実機確認合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment E/VまたはDesktop D | 停止 |
 | Gate V0 / V1 | Gate 4合格版とcandidate承認 | 隔離音声adapter、実測、人評価 | 音声採用の別計画 | 停止 |
@@ -126,6 +126,8 @@
 台帳の状態は `未着手 | 実装中 | 検証中 | 差し戻し | 合格 | 停止` の6値だけを使う。工程開始時とGate判定時にこの表を更新する。状態変更だけのcommitもDirector承認がない限り作成しない。
 
 Gate B2の検証証跡は [TOMOS Desktop Gate B2 検証報告](../../tomos-desktop-b2-gate-report-2026-07-27.ja.md) を正本とする。
+Gate B3の検証証跡は [TOMOS Desktop Gate B3 検証報告](../../tomos-desktop-b3-gate-report-2026-07-28.ja.md) を正本とする。
+最終コードレビューで見つかった旧保存先、人物写真形式、WebPの復号前サイズ制限は追加修正と独立再レビューで解消した。Gate B3は合格としDesktop Cの開始を許可する。ただし、Gate Cは停止を維持し、署名・公証・PKG作成は別承認まで実施しない。
 
 ## Ownership Boundary
 

@@ -1,10 +1,13 @@
 from pathlib import Path
+import hashlib
+import sqlite3
 import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from app_paths import TomosPaths, ensure_data_directories
 from contract_ledger import (
     delete_contract,
     extract_contract_candidate,
@@ -45,6 +48,24 @@ def test_extract_contract_candidate_from_text():
     assert candidate["noticePeriodDays"] == 30
     assert candidate["noticeDeadline"] == "2027-05-31"
     assert candidate["status"] == "needs_review"
+
+
+def test_missing_contract_database_reads_empty_without_writing_and_reads_after_save():
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = TomosPaths.from_root(Path(tmp) / "app-data")
+        assert list_contracts(paths.contracts_db, "folder-1") == []
+        assert not paths.root.exists()
+        ensure_data_directories(paths)
+        assert list_contracts(paths.contracts_db, "folder-1") == []
+        assert not paths.contracts_db.exists()
+        saved = save_contract(
+            paths.contracts_db,
+            extract_contract_candidate("folder-1", "sample-contract.txt", SAMPLE_TEXT),
+        )
+        before_read = hashlib.sha256(paths.contracts_db.read_bytes()).hexdigest()
+        records = list_contracts(paths.contracts_db, "folder-1")
+        assert records == [saved]
+        assert hashlib.sha256(paths.contracts_db.read_bytes()).hexdigest() == before_read
 
 
 def test_extract_contract_candidate_from_pdf_snippets():
@@ -132,10 +153,46 @@ def test_save_contract_merges_duplicate_source_path_records():
         assert records[0]["notes"].startswith("業務委託契約終了日から3年間")
 
 
+def test_read_sees_latest_wal_commit_while_writer_is_open():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "contracts.sqlite"
+        saved = save_contract(
+            db_path,
+            extract_contract_candidate(
+                "folder-wal",
+                "sample-contract.txt",
+                SAMPLE_TEXT,
+            ),
+        )
+        writer = sqlite3.connect(db_path)
+        try:
+            assert (
+                writer.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+                == "wal"
+            )
+            writer.execute("PRAGMA wal_autocheckpoint = 0")
+            writer.execute(
+                """
+                UPDATE contract_records
+                SET contract_name = ?
+                WHERE id = ?
+                """,
+                ("WAL最新契約", saved["id"]),
+            )
+            writer.commit()
+            assert Path(f"{db_path}-wal").is_file()
+            records = list_contracts(db_path, "folder-wal")
+            assert records[0]["contractName"] == "WAL最新契約"
+        finally:
+            writer.close()
+
+
 if __name__ == "__main__":
     test_extract_contract_candidate_from_text()
+    test_missing_contract_database_reads_empty_without_writing_and_reads_after_save()
     test_extract_contract_candidate_from_pdf_snippets()
     test_save_list_delete_contract()
     test_save_contract_updates_same_folder_and_source_path()
     test_save_contract_merges_duplicate_source_path_records()
+    test_read_sees_latest_wal_commit_while_writer_is_open()
     print("contract ledger tests passed")

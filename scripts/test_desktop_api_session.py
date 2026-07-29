@@ -272,6 +272,58 @@ def exercise_guard(use_head_server: bool) -> None:
             valid.status == 403 and valid_payload.get("error") == "desktop_session_required"
         ), "valid desktop request did not pass the guard"
 
+        data_root = fixture.root / "home" / "Library" / "Application Support" / "com.shibapapastudio.tomos-ai"
+        knowledge_status = request(
+            fixture.port,
+            "GET",
+            "/api/knowledge/status?folderId=folder-1",
+            {"Host": GUARD_HOST},
+        )
+        knowledge_search = request(
+            fixture.port,
+            "POST",
+            "/api/knowledge/search",
+            {**missing_headers, "X-TOMOS-Session": fixture.token},
+            json.dumps({"folderId": "folder-1", "query": "契約"}).encode("utf-8"),
+        )
+        contracts_before = request(
+            fixture.port,
+            "GET",
+            "/api/contracts/list?folderId=folder-1",
+            {"Host": GUARD_HOST},
+        )
+        assert knowledge_status.status == 200
+        assert json.loads(knowledge_status.body) == {
+            "ok": True,
+            "lastIndexedAt": 0,
+            "fileCount": 0,
+            "textCount": 0,
+            "failedCount": 0,
+        }
+        assert knowledge_search.status == 200
+        assert json.loads(knowledge_search.body) == {"ok": True, "query": "契約", "results": []}
+        assert contracts_before.status == 200
+        assert json.loads(contracts_before.body) == {"ok": True, "contracts": []}
+        assert not data_root.exists()
+
+        saved_contract = request(
+            fixture.port,
+            "POST",
+            "/api/contracts/save",
+            {**missing_headers, "X-TOMOS-Session": fixture.token},
+            json.dumps({"folderId": "folder-1", "sourcePath": "contract.txt", "contractName": "業務委託契約書"}).encode("utf-8"),
+        )
+        contracts_after = request(
+            fixture.port,
+            "GET",
+            "/api/contracts/list?folderId=folder-1",
+            {"Host": GUARD_HOST},
+        )
+        assert saved_contract.status == 200
+        assert json.loads(saved_contract.body)["ok"] is True
+        assert contracts_after.status == 200
+        assert json.loads(contracts_after.body)["contracts"][0]["contractName"] == "業務委託契約書"
+
         assert_token_absent(
             fixture.token,
             {
