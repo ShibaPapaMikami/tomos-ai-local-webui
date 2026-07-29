@@ -126,6 +126,9 @@ def _make_fixture(tmp: Path, marker: bool = True) -> tuple[Path, Path]:
     python = app / "Contents" / "Resources" / "python" / "lib"
     macos.mkdir(parents=True)
     python.mkdir(parents=True)
+    (app.parent / "build-manifest.json").write_text(
+        '{"appVersion":"0.8.233"}\n', encoding="utf-8"
+    )
     with (app / "Contents" / "Info.plist").open("wb") as destination:
         plistlib.dump({"CFBundleExecutable": "tomos-desktop"}, destination)
     main = macos / "tomos-desktop"
@@ -178,6 +181,19 @@ def _assert_failure_has_no_final_app(result: subprocess.CompletedProcess[str], f
     assert not list(fixture.glob(".tomos-signing.*"))
 
 
+def _assert_no_signed_distribution(fixture: Path) -> None:
+    signed = fixture / "dist" / "signed"
+    assert not signed.exists()
+    assert not signed.is_symlink()
+
+
+def _assert_unverified_signed_is_quarantined(fixture: Path) -> None:
+    _assert_no_signed_distribution(fixture)
+    quarantined = list((fixture / "dist").glob(".tomos-rejected-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].name != ".tomos-rejected-"
+
+
 def test_signs_real_bundle_main_after_nested_before_app_and_verify() -> None:
     with _test_root() as temporary:
         fixture, tools = _make_fixture(temporary)
@@ -186,6 +202,12 @@ def test_signs_real_bundle_main_after_nested_before_app_and_verify() -> None:
         assert result.returncode == 0, result.stdout + result.stderr
         assert candidate_main.read_bytes() == b"fixture main executable"
         assert (fixture / "dist" / "signed" / "TOMOS AI.app").is_dir()
+        signed_manifest = fixture / "dist" / "signed" / "build-manifest.json"
+        assert signed_manifest.is_file()
+        assert not signed_manifest.is_symlink()
+        assert signed_manifest.read_text(encoding="utf-8") == (
+            fixture / "dist" / "candidate" / "build-manifest.json"
+        ).read_text(encoding="utf-8")
         phases = [line.split("|", 1)[0] for line in log]
         assert phases == ["nested", "nested", "main", "app", "verify"], log
         assert "libnested.dylib" in log[0]
@@ -265,6 +287,35 @@ def test_rejects_existing_signed_app_without_overwriting_it() -> None:
         result, log = _run(fixture, tools)
         assert result.returncode != 0
         assert sentinel.read_text(encoding="utf-8") == "keep"
+        assert not log
+
+
+def test_missing_invalid_or_conflicting_manifest_never_publishes_partial_distribution() -> None:
+    for manifest_contents in (None, "not-json\n"):
+        with _test_root() as temporary:
+            fixture, tools = _make_fixture(temporary)
+            manifest = fixture / "dist" / "candidate" / "build-manifest.json"
+            if manifest_contents is None:
+                manifest.unlink()
+            else:
+                manifest.write_text(manifest_contents, encoding="utf-8")
+            result, log = _run(fixture, tools)
+            _assert_failure_has_no_final_app(result, fixture)
+            _assert_no_signed_distribution(fixture)
+            assert not log
+
+    with _test_root() as temporary:
+        fixture, tools = _make_fixture(temporary)
+        signed = fixture / "dist" / "signed"
+        signed.mkdir(parents=True)
+        sentinel = signed / "keep.txt"
+        sentinel.write_text("keep", encoding="utf-8")
+        result, log = _run(fixture, tools)
+        assert result.returncode != 0
+        assert sentinel.read_text(encoding="utf-8") == "keep"
+        assert not (signed / "TOMOS AI.app").exists()
+        assert not (signed / "build-manifest.json").exists()
+        assert not list(fixture.glob(".tomos-signing.*"))
         assert not log
 
 
@@ -408,8 +459,9 @@ def test_atomic_publish_detects_signed_parent_replacement() -> None:
     with _test_root() as temporary:
         fixture, _tools = _make_fixture(temporary)
         stage = fixture / ".tomos-signing.publish-test"
-        app = stage / "TOMOS AI.app"
+        app = stage / "payload" / "TOMOS AI.app"
         app.mkdir(parents=True)
+        (app.parent / "build-manifest.json").write_text("{}\n", encoding="utf-8")
         stage.chmod(0o700)
         result = subprocess.run(
             [
@@ -419,6 +471,8 @@ def test_atomic_publish_detects_signed_parent_replacement() -> None:
                 str(fixture),
                 "--stage-name",
                 stage.name,
+                "--payload-name",
+                "payload",
                 "--app-name",
                 "TOMOS AI.app",
                 "--test-replace-signed-parent",
@@ -429,8 +483,66 @@ def test_atomic_publish_detects_signed_parent_replacement() -> None:
         )
         assert result.returncode != 0
         assert "signed parent directory" in result.stderr
-        assert app.is_dir()
-        assert not (fixture / "dist" / "signed" / "TOMOS AI.app").exists()
+        assert (fixture / "dist" / "signed-before-replacement" / "TOMOS AI.app").is_dir()
+        _assert_unverified_signed_is_quarantined(fixture)
+
+
+def test_atomic_publish_rejects_signed_replacement_before_reopen() -> None:
+    with _test_root() as temporary:
+        fixture, _tools = _make_fixture(temporary)
+        stage = fixture / ".tomos-signing.publish-test"
+        app = stage / "payload" / "TOMOS AI.app"
+        app.mkdir(parents=True)
+        (app.parent / "build-manifest.json").write_text("{}\n", encoding="utf-8")
+        stage.chmod(0o700)
+        result = subprocess.run(
+            [
+                "/usr/bin/python3",
+                str(fixture / "scripts" / PUBLISHER_SOURCE.name),
+                "--root",
+                str(fixture),
+                "--stage-name",
+                stage.name,
+                "--payload-name",
+                "payload",
+                "--app-name",
+                "TOMOS AI.app",
+                "--test-replace-signed-before-open",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "published payload directory" in result.stderr
+        _assert_unverified_signed_is_quarantined(fixture)
+
+
+def test_atomic_publish_rejects_partial_payload_without_creating_signed_distribution() -> None:
+    with _test_root() as temporary:
+        fixture, _tools = _make_fixture(temporary)
+        stage = fixture / ".tomos-signing.publish-test"
+        (stage / "payload" / "TOMOS AI.app").mkdir(parents=True)
+        stage.chmod(0o700)
+        result = subprocess.run(
+            [
+                "/usr/bin/python3",
+                str(fixture / "scripts" / PUBLISHER_SOURCE.name),
+                "--root",
+                str(fixture),
+                "--stage-name",
+                stage.name,
+                "--payload-name",
+                "payload",
+                "--app-name",
+                "TOMOS AI.app",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        _assert_no_signed_distribution(fixture)
 
 
 def test_collects_nested_candidates_with_absolute_find() -> None:
@@ -440,10 +552,75 @@ def test_collects_nested_candidates_with_absolute_find() -> None:
     assert 'collect_regular_paths_inner_first > "$sorted_path_list"' in script
 
 
+def test_no_test_tools_hook_returns_zero_without_early_exit(tmp_path: Path) -> None:
+    source = SIGN_SOURCE.read_text(encoding="utf-8")
+    functions_only = source.split("\nconfigure_test_tools\n[", 1)[0]
+    helper = tmp_path / "sign-functions.sh"
+    helper.write_text(functions_only, encoding="utf-8")
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            'set -euo pipefail; source "$1"; TEST_TOOLS_DIR=""; configure_test_tools; printf "continued\\n"',
+            "bash",
+            str(helper),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "continued\n"
+
+
+def test_manifest_copy_keeps_verified_bytes_across_candidate_replacement(tmp_path: Path) -> None:
+    source = SIGN_SOURCE.read_text(encoding="utf-8")
+    functions_only = source.split("\nconfigure_test_tools\n[", 1)[0]
+    helper = tmp_path / "sign-functions.sh"
+    helper.write_text(functions_only, encoding="utf-8")
+    for replacement in ("invalid", "symlink"):
+        candidate = tmp_path / f"candidate-{replacement}.json"
+        staging = tmp_path / f"staging-{replacement}.json"
+        candidate.write_text('{"appVersion":"0.8.233"}\n', encoding="utf-8")
+        result = subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                (
+                    'set -euo pipefail; source "$1"; '
+                    'export TEST_HOOK_ENABLED=1 TOMOS_SIGN_TEST_SWAP_MANIFEST_AFTER_READ="$4"; '
+                    'CANDIDATE_MANIFEST="$2"; STAGING_MANIFEST="$3"; '
+                    'copy_build_manifest; '
+                    '"$PYTHON" - "$3" <<\'PY\'\n'
+                    'import json\n'
+                    'import sys\n'
+                    'from pathlib import Path\n'
+                    'manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))\n'
+                    'assert manifest == {"appVersion": "0.8.233"}\n'
+                    'PY\n'
+                ),
+                "bash",
+                str(helper),
+                str(candidate),
+                str(staging),
+                replacement,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert staging.is_file()
+        assert not staging.is_symlink()
+        assert candidate.read_text(encoding="utf-8") == "not-json\n"
+        assert candidate.is_symlink() is (replacement == "symlink")
+
+
 def test_publish_uses_dirfd_rename_exclusive_helper_and_absolute_tools() -> None:
     script = SIGN_SOURCE.read_text(encoding="utf-8")
     assert 'PUBLISHER="$ROOT/scripts/macos-atomic-publish.py"' in script
     assert '"$PYTHON" "$PUBLISHER"' in script
+    assert 'os.open(candidate, os.O_RDONLY | os.O_NOFOLLOW)' in script
     assert PUBLISHER_SOURCE.is_file()
     publisher = PUBLISHER_SOURCE.read_text(encoding="utf-8")
     assert "os.O_NOFOLLOW" in publisher
@@ -454,6 +631,7 @@ def test_publish_uses_dirfd_rename_exclusive_helper_and_absolute_tools() -> None
         'DITTO="/usr/bin/ditto"',
         'FILE="/usr/bin/file"',
         'FIND="/usr/bin/find"',
+        'MKDIR="/bin/mkdir"',
         'MKTEMP="/usr/bin/mktemp"',
         'RM="/bin/rm"',
         'PLUTIL="/usr/bin/plutil"',
@@ -472,6 +650,7 @@ if __name__ == "__main__":
     test_same_label_with_different_fingerprints_is_rejected()
     test_explicit_fingerprint_is_normalized_and_restricted_to_expected_certificate()
     test_rejects_existing_signed_app_without_overwriting_it()
+    test_missing_invalid_or_conflicting_manifest_never_publishes_partial_distribution()
     test_keeps_final_path_absent_when_nested_main_app_or_verify_fails()
     test_rejects_empty_other_team_and_ambiguous_identity_before_signing()
     test_rejects_external_symlink_and_invalid_main_macho_or_mode()
@@ -482,6 +661,12 @@ if __name__ == "__main__":
     test_rejects_tool_directories_escaping_root_by_dotdot_or_symlink()
     test_rejects_signed_parent_symlink()
     test_atomic_publish_detects_signed_parent_replacement()
+    test_atomic_publish_rejects_signed_replacement_before_reopen()
+    test_atomic_publish_rejects_partial_payload_without_creating_signed_distribution()
     test_collects_nested_candidates_with_absolute_find()
+    with tempfile.TemporaryDirectory() as temporary:
+        test_no_test_tools_hook_returns_zero_without_early_exit(Path(temporary))
+    with tempfile.TemporaryDirectory() as temporary:
+        test_manifest_copy_keeps_verified_bytes_across_candidate_replacement(Path(temporary))
     test_publish_uses_dirfd_rename_exclusive_helper_and_absolute_tools()
     print("macOS Tauri app signing tests: OK")

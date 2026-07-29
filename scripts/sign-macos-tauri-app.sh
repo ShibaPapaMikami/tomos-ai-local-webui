@@ -5,8 +5,10 @@ umask 077
 
 ROOT="$(cd "$(/usr/bin/dirname "$0")/.." && /bin/pwd -P)"
 CANDIDATE_APP="$ROOT/dist/candidate/TOMOS AI.app"
+CANDIDATE_MANIFEST="$ROOT/dist/candidate/build-manifest.json"
 SIGNED_DIR="$ROOT/dist/signed"
 SIGNED_APP="$SIGNED_DIR/TOMOS AI.app"
+SIGNED_MANIFEST="$SIGNED_DIR/build-manifest.json"
 ENTITLEMENTS="$ROOT/src-tauri/Entitlements.plist"
 PUBLISHER="$ROOT/scripts/macos-atomic-publish.py"
 SIGNING_IDENTITY="${TOMOS_MAC_APPLICATION_IDENTITY:-}"
@@ -20,6 +22,7 @@ CODESIGN="/usr/bin/codesign"
 DITTO="/usr/bin/ditto"
 FILE="/usr/bin/file"
 FIND="/usr/bin/find"
+MKDIR="/bin/mkdir"
 MKTEMP="/usr/bin/mktemp"
 RM="/bin/rm"
 PLUTIL="/usr/bin/plutil"
@@ -28,7 +31,9 @@ SECURITY="/usr/bin/security"
 UNAME="/usr/bin/uname"
 AWK="/usr/bin/awk"
 STAGING_DIR=""
+STAGING_PAYLOAD=""
 STAGING_APP=""
+STAGING_MANIFEST=""
 PUBLISHED=0
 
 fail() {
@@ -75,7 +80,7 @@ require_regular_file() {
 }
 
 configure_test_tools() {
-  [ -n "$TEST_TOOLS_DIR" ] || return
+  [ -n "$TEST_TOOLS_DIR" ] || return 0
   CANONICAL_TEST_TOOLS_DIR="$("$PYTHON" - "$ROOT" "$TEST_TOOLS_DIR" <<'PY'
 import os
 import stat
@@ -340,9 +345,61 @@ sign_app_bundle() {
     --entitlements "$ENTITLEMENTS" "$STAGING_APP"
 }
 
+copy_build_manifest() {
+  "$PYTHON" - "$CANDIDATE_MANIFEST" "$STAGING_MANIFEST" <<'PY'
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+candidate = Path(sys.argv[1])
+staging = Path(sys.argv[2])
+source_fd = destination_fd = -1
+try:
+    source_fd = os.open(candidate, os.O_RDONLY | os.O_NOFOLLOW)
+    source_stat = os.fstat(source_fd)
+    if not stat.S_ISREG(source_stat.st_mode):
+        raise SystemExit("candidate build manifest must be a regular file")
+    contents = bytearray()
+    while chunk := os.read(source_fd, 1024 * 1024):
+        contents.extend(chunk)
+    manifest = json.loads(bytes(contents).decode("utf-8"))
+    if not isinstance(manifest, dict):
+        raise SystemExit("build manifest must be a JSON object")
+    if os.environ.get("TEST_HOOK_ENABLED") == "1":
+        replacement = os.environ.get("TOMOS_SIGN_TEST_SWAP_MANIFEST_AFTER_READ")
+        if replacement == "invalid":
+            candidate.write_text("not-json\n", encoding="utf-8")
+        elif replacement == "symlink":
+            target = candidate.with_name(f"{candidate.name}.replacement")
+            target.write_text("not-json\n", encoding="utf-8")
+            candidate.unlink()
+            candidate.symlink_to(target.name)
+        elif replacement:
+            raise SystemExit("unknown manifest test replacement")
+    destination_fd = os.open(
+        staging,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+    )
+    remaining = memoryview(contents)
+    while remaining:
+        written = os.write(destination_fd, remaining)
+        remaining = remaining[written:]
+finally:
+    if destination_fd >= 0:
+        os.close(destination_fd)
+    if source_fd >= 0:
+        os.close(source_fd)
+PY
+  require_regular_file "$STAGING_MANIFEST" "staging build manifest"
+}
+
 publish_signed_app() {
-  "$PYTHON" "$PUBLISHER" --root "$ROOT" --stage-name "${STAGING_DIR##*/}" --app-name "TOMOS AI.app" || fail "signed appのatomic publishに失敗しました"
+  "$PYTHON" "$PUBLISHER" --root "$ROOT" --stage-name "${STAGING_DIR##*/}" --payload-name "${STAGING_PAYLOAD##*/}" --app-name "TOMOS AI.app" || fail "signed appのatomic publishに失敗しました"
   require_real_directory "$SIGNED_APP" "published signed app"
+  require_regular_file "$SIGNED_MANIFEST" "published signed build manifest"
   PUBLISHED=1
 }
 
@@ -353,11 +410,9 @@ require_real_directory "$ROOT/dist" "dist directory"
 require_real_directory "$ROOT/dist/candidate" "candidate directory"
 require_real_directory "$CANDIDATE_APP" "candidate app"
 if [ -e "$SIGNED_DIR" ] || [ -L "$SIGNED_DIR" ]; then
-  require_real_directory "$SIGNED_DIR" "signed directory"
+  fail "signed distribution は上書きしません"
 fi
-if [ -e "$SIGNED_APP" ] || [ -L "$SIGNED_APP" ]; then
-  fail "signed app は上書きしません"
-fi
+require_regular_file "$CANDIDATE_MANIFEST" "candidate build manifest"
 require_regular_file "$ENTITLEMENTS" "Entitlements.plist"
 require_regular_file "$PUBLISHER" "macOS atomic publisher"
 "$PLUTIL" -lint "$ENTITLEMENTS" >/dev/null || fail "Entitlements.plistが不正です"
@@ -370,9 +425,13 @@ trap cleanup_exit EXIT
 trap 'cleanup_signal 129' HUP
 trap 'cleanup_signal 130' INT
 trap 'cleanup_signal 143' TERM
-STAGING_APP="$STAGING_DIR/TOMOS AI.app"
+STAGING_PAYLOAD="$STAGING_DIR/payload"
+"$MKDIR" "$STAGING_PAYLOAD" || fail "signed payloadを作成できません"
+STAGING_APP="$STAGING_PAYLOAD/TOMOS AI.app"
+STAGING_MANIFEST="$STAGING_PAYLOAD/build-manifest.json"
 "$DITTO" "$CANDIDATE_APP" "$STAGING_APP"
 require_real_directory "$STAGING_APP" "staging app"
+copy_build_manifest
 validate_symlinks "$STAGING_APP"
 read_main_executable_name
 sign_nested_code
