@@ -88,6 +88,25 @@ def _validated_member_path(member: tarfile.TarInfo) -> PurePosixPath:
     return name
 
 
+def _ensure_runtime_directory(path: Path, staging_root: Path) -> None:
+    """Create runtime directories with deterministic modes, independent of umask."""
+    try:
+        relative = path.relative_to(staging_root)
+    except ValueError as exc:
+        raise ValueError("runtime directoryがstaging外です") from exc
+    current = staging_root
+    for part in relative.parts:
+        current /= part
+        try:
+            current.mkdir()
+        except FileExistsError:
+            metadata = current.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+                raise ValueError("runtime directory pathが不正です")
+        else:
+            os.chmod(current, 0o755)
+
+
 def stage_runtime(archive: BinaryIO, destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging_root = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
@@ -102,13 +121,14 @@ def stage_runtime(archive: BinaryIO, destination: Path) -> Path:
                     continue
                 target = staging_root / relative_path
                 if member.isdir():
-                    target.mkdir(parents=True, exist_ok=True)
+                    _ensure_runtime_directory(target, staging_root)
+                    os.chmod(target, member.mode & 0o777)
                     continue
                 if member.issym():
-                    target.parent.mkdir(parents=True, exist_ok=True)
+                    _ensure_runtime_directory(target.parent, staging_root)
                     os.symlink(member.linkname, target)
                     continue
-                target.parent.mkdir(parents=True, exist_ok=True)
+                _ensure_runtime_directory(target.parent, staging_root)
                 source = tar.extractfile(member)
                 if source is None:
                     raise ValueError(f"tar memberを読み込めません: {member.name}")

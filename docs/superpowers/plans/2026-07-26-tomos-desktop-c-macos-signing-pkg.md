@@ -117,7 +117,7 @@ secure timestampを確認できる。
 - Consumes: `dist/signed/TOMOS AI.app`。
 - Produces: `dist/candidate/TOMOS_AI-v0.8.233-mac-arm64.pkg`。
 
-- [ ] **Step 1: payloadとidentifier contract testを書く**
+- [x] **Step 1: payloadとidentifier contract testを書く**
 
 ```python
 def test_pkg_script_installs_tauri_app():
@@ -128,17 +128,17 @@ def test_pkg_script_installs_tauri_app():
     assert "/Applications/Gemma4_12B" not in script
 ```
 
-- [ ] **Step 2: REDを確認する**
+- [x] **Step 2: REDを確認する**
 
 Run: `python3 scripts/test_mac_pkg_signing.py`
 
 Expected: new PKG script契約で失敗。
 
-- [ ] **Step 3: PKG生成を実装する**
+- [x] **Step 3: PKG生成を実装する**
 
 一時pkgrootの`Applications/TOMOS AI.app`へ署名済みappをcopyし、`pkgbuild --root ... --identifier jp.local.gemma4-12b --version 0.8.233 --install-location / --sign`を実行する。旧folderやuser dataをpostinstall scriptで操作しない。
 
-- [ ] **Step 4: PKG内容と署名を確認する**
+- [x] **Step 4: PKG内容と署名を確認する**
 
 Run:
 

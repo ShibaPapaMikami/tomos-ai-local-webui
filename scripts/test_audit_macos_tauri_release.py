@@ -7,7 +7,9 @@ import json
 import os
 import plistlib
 import shutil
+import stat
 import struct
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -105,6 +107,12 @@ def _audit(app: Path) -> list[str]:
     return audit_app(app, "0.8.233", "a" * 40)
 
 
+def _audit_signed(app: Path) -> list[str]:
+    from audit_macos_tauri_release import audit_signed_app
+
+    return audit_signed_app(app, "0.8.233", "a" * 40)
+
+
 def _manifest(root: Path) -> tuple[Path, dict[str, object]]:
     path = root / "build-manifest.json"
     return path, json.loads(path.read_text(encoding="utf-8"))
@@ -113,6 +121,71 @@ def _manifest(root: Path) -> tuple[Path, dict[str, object]]:
 def test_accepts_matching_release_candidate() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         assert _audit(make_app_fixture(Path(temporary))) == []
+
+
+def test_signed_audit_accepts_runtime_macho_changes_but_rejects_non_macho_mutation() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        app = make_app_fixture(Path(temporary))
+        python = app / "Contents" / "Resources" / "python"
+        signed_binary = python / "bin" / "python3"
+        signed_binary.write_bytes(signed_binary.read_bytes() + b"signed-runtime-mutation")
+        signed_macho = lambda path: Path(path).name in {"python3", "python3.11", "tomos-desktop"}
+        with patch("audit_macos_tauri_release._is_arm64_macho_code", side_effect=signed_macho):
+            assert _audit_signed(app) == []
+
+        license_file = python / "lib" / "python3.11" / "LICENSE.txt"
+        license_file.write_bytes(b"unexpected mutation")
+        with patch("audit_macos_tauri_release._is_arm64_macho_code", side_effect=signed_macho):
+            assert "python_runtime" in _audit_signed(app)
+
+
+def test_signed_audit_rejects_archive_non_macho_replaced_by_arm64_macho() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        app = make_app_fixture(Path(temporary))
+        python = app / "Contents" / "Resources" / "python"
+        license_file = python / "lib" / "python3.11" / "LICENSE.txt"
+        original_mode = stat.S_IMODE(license_file.stat().st_mode)
+        shutil.copyfile(python / "bin" / "python3", license_file)
+        license_file.chmod(original_mode)
+
+        assert "python_runtime" in _audit_signed(app)
+
+
+def test_signed_production_audit_accepts_current_signed_app() -> None:
+    from audit_macos_tauri_release import audit_signed_app
+
+    commit = subprocess.run(
+        ["/usr/bin/git", "-C", str(ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout.strip()
+    signed = ROOT / "dist" / "signed" / "TOMOS AI.app"
+    assert audit_signed_app(signed, "0.8.233", commit) == []
+
+
+def test_signed_production_audit_accepts_current_signed_app_under_private_umask() -> None:
+    from audit_macos_tauri_release import audit_signed_app
+
+    commit = subprocess.run(
+        ["/usr/bin/git", "-C", str(ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        check=True,
+        text=True,
+    ).stdout.strip()
+    signed = ROOT / "dist" / "signed" / "TOMOS AI.app"
+    previous_umask = os.umask(0o077)
+    try:
+        assert audit_signed_app(signed, "0.8.233", commit) == []
+    finally:
+        os.umask(previous_umask)
+
+
+def test_signed_audit_rejects_unapproved_runtime_symlink() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        app = make_app_fixture(Path(temporary), runtime_symlinks=False)
+        _replace_materialized_runtime_file_with_symlink(app)
+        assert "python_runtime" in _audit_signed(app)
 
 
 def test_rejects_wrong_bundle_identifier() -> None:
@@ -453,6 +526,11 @@ def test_rejects_oversized_metadata_and_streams_large_resource_hashes() -> None:
 
 def main() -> None:
     test_accepts_matching_release_candidate()
+    test_signed_audit_accepts_runtime_macho_changes_but_rejects_non_macho_mutation()
+    test_signed_audit_rejects_archive_non_macho_replaced_by_arm64_macho()
+    test_signed_production_audit_accepts_current_signed_app()
+    test_signed_production_audit_accepts_current_signed_app_under_private_umask()
+    test_signed_audit_rejects_unapproved_runtime_symlink()
     test_rejects_wrong_bundle_identifier()
     test_rejects_incomplete_and_non_executable_macho()
     test_rejects_fat_count_over_limit_before_tool_parse()

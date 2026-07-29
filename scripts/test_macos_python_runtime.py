@@ -5,6 +5,7 @@ import io
 import importlib.util
 import os
 import shutil
+import stat
 import sys
 import tarfile
 import tempfile
@@ -39,12 +40,14 @@ def make_valid_runtime_tar(
     link_target: str | None = "python3.11",
     hardlink: bool = False,
     include_license: bool = True,
+    directory_mode: int = 0o755,
 ) -> Path:
     archive = tmp_path / "valid-runtime.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
         for directory in ("python", "python/bin", "python/lib/python3.11"):
             member = tarfile.TarInfo(directory)
             member.type = tarfile.DIRTYPE
+            member.mode = directory_mode
             tar.addfile(member)
 
         executable = tarfile.TarInfo("python/bin/python3.11")
@@ -116,6 +119,19 @@ def test_allows_allowlisted_symlink_and_official_license_path(tmp_path: Path) ->
     runtime = extract_runtime(archive, tmp_path / "runtime")
     assert (runtime / "bin/python3").is_symlink()
     assert (runtime / "lib/python3.11/LICENSE.txt").is_file()
+
+
+def test_preserves_archive_directory_modes_under_private_umask(tmp_path: Path) -> None:
+    archive = make_valid_runtime_tar(tmp_path, directory_mode=0o750)
+    previous_umask = os.umask(0o077)
+    try:
+        runtime = extract_runtime(archive, tmp_path / "runtime-private-umask")
+    finally:
+        os.umask(previous_umask)
+
+    assert stat.S_IMODE((runtime / "bin").stat().st_mode) == 0o750
+    assert stat.S_IMODE((runtime / "lib/python3.11").stat().st_mode) == 0o750
+    assert stat.S_IMODE((runtime / "lib").stat().st_mode) == 0o755
 
 
 def test_rejects_unregistered_symlink(tmp_path: Path) -> None:
@@ -297,6 +313,7 @@ def main() -> None:
         test_rejects_wrong_size(tmp_path)
         test_rejects_unsafe_tar_member(tmp_path)
         test_allows_allowlisted_symlink_and_official_license_path(tmp_path)
+        test_preserves_archive_directory_modes_under_private_umask(tmp_path)
         test_rejects_unregistered_symlink(tmp_path)
         test_rejects_symlink_with_external_target(tmp_path)
         test_rejects_symlink_with_parent_target(tmp_path)

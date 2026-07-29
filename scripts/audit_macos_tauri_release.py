@@ -221,6 +221,39 @@ def _is_arm64_macho(path: Path) -> bool:
     )
 
 
+def _is_arm64_macho_code(path: Path) -> bool:
+    """Return whether a regular arm64 Mach-O executable, dylib, or bundle is signable code."""
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or not _fat_architecture_count_is_bounded(path)
+    ):
+        return False
+    absolute_path = os.path.abspath(path)
+    architectures = _run_macho_tool(["/usr/bin/lipo", "-archs", absolute_path])
+    if architectures is None or architectures.strip() != "arm64":
+        return False
+    header = _run_macho_tool(["/usr/bin/otool", "-hv", absolute_path])
+    load_commands = _run_macho_tool(["/usr/bin/otool", "-l", absolute_path])
+    header_rows = [line.split() for line in header.splitlines()] if header is not None else []
+    valid_header = any(
+        len(row) >= 5
+        and row[0] == "MH_MAGIC_64"
+        and row[1] == "ARM64"
+        and row[4] in {"EXECUTE", "DYLIB", "BUNDLE"}
+        for row in header_rows
+    )
+    return (
+        valid_header
+        and load_commands is not None
+        and "UNKNOWN LOAD COMMAND" not in load_commands.upper()
+    )
+
+
 def _file_sha256(path: Path) -> str | None:
     descriptor = _open_regular(path)
     if descriptor is None:
@@ -310,6 +343,68 @@ def _python_runtime_matches_verified_artifact(python_root: Path) -> bool:
     return _python_runtime_verification(python_root)[0]
 
 
+def _signed_python_runtime_verification(python_root: Path) -> tuple[bool, bool]:
+    """Return (matches artifact layout, has unapproved runtime symlink) for a signed app.
+
+    Developer ID signing changes the bytes of arm64 Mach-O files.  Every other
+    runtime entry must still match the verified unsigned archive exactly.
+    """
+    try:
+        metadata = python_root.lstat()
+    except OSError:
+        return False, False
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        return False, stat.S_ISLNK(metadata.st_mode)
+    archive = ROOT / "build" / "cache" / ARTIFACT.name
+    try:
+        with tempfile.TemporaryDirectory() as temporary:
+            expected_destination = Path(temporary) / "python"
+            with archive.open("rb") as source:
+                verify_artifact_file(source, ARTIFACT)
+                expected_root = stage_runtime(source, expected_destination)
+            expected_entries = runtime_tree_entries(expected_root)
+            candidate_entries = runtime_tree_entries(python_root)
+            approved_symlinks = {
+                name: target
+                for name, (kind, _mode, target) in expected_entries.items()
+                if kind == "symlink"
+            }
+            has_unapproved_symlink = any(
+                kind == "symlink" and approved_symlinks.get(name) != target
+                for name, (kind, _mode, target) in candidate_entries.items()
+            )
+            expected = normalized_runtime_tree_entries(
+                expected_root, expected_entries, approved_symlinks
+            )
+            candidate = normalized_runtime_tree_entries(
+                python_root, candidate_entries, approved_symlinks
+            )
+            if expected.keys() != candidate.keys():
+                return False, has_unapproved_symlink
+            for name, expected_entry in expected.items():
+                candidate_entry = candidate[name]
+                if candidate_entry == expected_entry:
+                    continue
+                if (
+                    expected_entry[0] == "file"
+                    and candidate_entry[0] == "file"
+                    and expected_entry[1] == candidate_entry[1]
+                ):
+                    try:
+                        expected_file = (expected_root / name).resolve(strict=True)
+                        expected_file.relative_to(expected_root.resolve(strict=True))
+                        signed_file = (python_root / name).resolve(strict=True)
+                        signed_file.relative_to(python_root.resolve(strict=True))
+                    except (OSError, ValueError):
+                        return False, has_unapproved_symlink
+                    if _is_arm64_macho_code(expected_file) and _is_arm64_macho_code(signed_file):
+                        continue
+                return False, has_unapproved_symlink
+            return True, has_unapproved_symlink
+    except (OSError, ValueError):
+        return False, False
+
+
 def _is_forbidden_name(relative: Path) -> bool:
     parts = {part.casefold() for part in relative.parts}
     name = relative.name.casefold()
@@ -370,8 +465,14 @@ def _python_version_matches(manifest: dict[str, Any]) -> bool:
     return isinstance(name, str) and bool(re.fullmatch(r"cpython-3\.11\.15(?:[+-].+)?", name))
 
 
-def audit_app(app_path: Path, expected_version: str, expected_commit: str) -> list[str]:
-    """Return stable error categories for an unsigned TOMOS app-bundle audit.
+def _audit_app(
+    app_path: Path,
+    expected_version: str,
+    expected_commit: str,
+    *,
+    signed_runtime: bool,
+) -> list[str]:
+    """Return stable error categories for a TOMOS app-bundle audit.
 
     This audit reads bounded metadata and file names for policy checks; it never
     prints payload contents and it does not sign, notarize, install, or modify.
@@ -394,7 +495,10 @@ def audit_app(app_path: Path, expected_version: str, expected_commit: str) -> li
         _add(errors, "bundle_read_error")
     if forbidden_payload:
         _add(errors, "forbidden_payload")
-    python_runtime_matches, python_has_unapproved_symlink = _python_runtime_verification(python)
+    if signed_runtime:
+        python_runtime_matches, python_has_unapproved_symlink = _signed_python_runtime_verification(python)
+    else:
+        python_runtime_matches, python_has_unapproved_symlink = _python_runtime_verification(python)
     if python_has_unapproved_symlink:
         _add(errors, "bundle_symlink")
     if not python_runtime_matches:
@@ -445,3 +549,23 @@ def audit_app(app_path: Path, expected_version: str, expected_commit: str) -> li
         if not _resource_allowlist_matches(contents / "Resources" / "tomos", manifest):
             _add(errors, "resource_allowlist")
     return errors
+
+
+def audit_app(app_path: Path, expected_version: str, expected_commit: str) -> list[str]:
+    """Audit an unsigned release candidate against the exact runtime archive."""
+    return _audit_app(
+        app_path,
+        expected_version,
+        expected_commit,
+        signed_runtime=False,
+    )
+
+
+def audit_signed_app(app_path: Path, expected_version: str, expected_commit: str) -> list[str]:
+    """Audit a Developer ID signed app without byte-comparing signed Mach-O files."""
+    return _audit_app(
+        app_path,
+        expected_version,
+        expected_commit,
+        signed_runtime=True,
+    )
