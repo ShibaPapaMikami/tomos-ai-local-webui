@@ -93,7 +93,7 @@ Expected: sign script未作成で失敗。
 
 `find`で実行可能file、`.dylib`、`.so`を収集し、pathをsortして内側から署名する。symlinkは署名対象にせず、解決先がapp外なら失敗する。最後にmain executableとapp bundleを署名する。`--deep`は検証補助にだけ使い、署名処理を`--deep`任せにしない。
 
-- [ ] **Step 4: app署名をreadbackする**
+- [x] **Step 4: app署名をreadbackする**
 
 Run:
 
@@ -102,7 +102,8 @@ codesign --verify --deep --strict --verbose=2 dist/signed/TOMOS\ AI.app
 codesign -dv --verbose=4 dist/signed/TOMOS\ AI.app
 ```
 
-Expected: identifier、TeamIdentifier `AJK3HH9G22`、runtime flagを確認できる。
+Expected: identifier、TeamIdentifier `AJK3HH9G22`、runtime flag、
+secure timestampを確認できる。
 
 ---
 
@@ -210,7 +211,7 @@ Run:
 python3 scripts/test-desktop-release-version.py
 python3 scripts/test_macos_python_runtime.py
 python3 scripts/test_macos_tomos_resources.py
-python3 scripts/test_macos_tauri_bundle.py dist/signed/TOMOS\ AI.app
+python3 scripts/test_macos_tauri_bundle.py dist/candidate/TOMOS\ AI.app
 python3 scripts/test_desktop_api_session.py
 python3 scripts/test_app_paths.py
 python3 scripts/test_migration_manager.py
@@ -231,6 +232,8 @@ Run:
 pkgutil --check-signature dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg
 xcrun stapler validate dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg
 spctl -a -vv -t install dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg
+codesign --verify --deep --strict --verbose=2 dist/signed/TOMOS\ AI.app
+codesign -dv --verbose=4 dist/signed/TOMOS\ AI.app
 shasum -a 256 dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg
 ```
 
