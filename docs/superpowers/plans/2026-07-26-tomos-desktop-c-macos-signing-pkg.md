@@ -175,7 +175,7 @@ Expected: release gate script未作成で失敗。
 
 開始時にsource worktree clean、HEAD、version、CPU、署名identity、notary profileを確認する。途中失敗時は成果物を`dist/rejected/<timestamp>/`へ移し、`dist/notarized/`へ残さない。
 
-- [ ] **Step 4: 公証を実行する**
+- [x] **Step 4: 公証を実行する**
 
 Run:
 
@@ -186,7 +186,7 @@ bash scripts/release-gate-macos-tauri.sh \
 
 Expected: notary result `Accepted`、stapler validate成功、`spctl`が`Notarized Developer ID`。
 
-- [ ] **Step 5: SHA-256をreadbackする**
+- [x] **Step 5: SHA-256をreadbackする**
 
 `.sha256`の値と`shasum -a 256`の値が一致することを確認する。
 
