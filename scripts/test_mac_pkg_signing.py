@@ -352,11 +352,21 @@ case "$1" in
   --payload-files)
     printf 'pkgutil-payload\\n' >> "${FAKE_RELEASE_LOG:?}"
     if [ "${FAKE_RELEASE_PKG_MODE:-good}" = "bad_payload" ]; then
-      printf 'Library/Unexpected\\n'
+      printf '.\\n./Applications\\n./Applications/TOMOS AI.app\\nLibrary/Unexpected\\n'
     elif [ "${FAKE_RELEASE_PKG_MODE:-good}" = "path_traversal" ]; then
-      printf '../../Applications/TOMOS AI.app/Contents/Info.plist\\n'
+      printf '.\\n./Applications\\n./Applications/TOMOS AI.app\\n../../Applications/TOMOS AI.app/Contents/Info.plist\\n'
+    elif [ "${FAKE_RELEASE_PKG_MODE:-good}" = "dot_slash" ]; then
+      printf './\\n./Applications\\n./Applications/TOMOS AI.app\\n'
+    elif [ "${FAKE_RELEASE_PKG_MODE:-good}" = "repeated_prefix" ]; then
+      printf '.\\n./Applications\\n./Applications/TOMOS AI.app\\n././Applications/TOMOS AI.app/Contents/Info.plist\\n'
+    elif [ "${FAKE_RELEASE_PKG_MODE:-good}" = "absolute_path" ]; then
+      printf '.\\n./Applications\\n./Applications/TOMOS AI.app\\n/Applications/TOMOS AI.app/Contents/Info.plist\\n'
+    elif [ "${FAKE_RELEASE_PKG_MODE:-good}" = "similar_prefix" ]; then
+      printf '.\\n./Applications\\n./Applications/TOMOS AI.app\\n./Applications/TOMOS AI.app.evil/Contents/Info.plist\\n'
+    elif [ "${FAKE_RELEASE_PKG_MODE:-good}" = "missing_app_entry" ]; then
+      printf '.\\n./Applications\\n./Applications/TOMOS AI.app/Contents/Info.plist\\n'
     else
-      printf 'Applications/TOMOS AI.app\\nApplications/TOMOS AI.app/Contents/Info.plist\\n'
+      printf '.\\n./Applications\\n./Applications/TOMOS AI.app\\n./Applications/TOMOS AI.app/Contents/Info.plist\\n'
     fi
     ;;
   --expand)
@@ -865,7 +875,17 @@ def test_release_gate_rejects_nonaccepted_and_staging_copy_mutation() -> None:
 
 
 def test_release_gate_rejects_pkg_signature_team_and_payload_before_notary() -> None:
-    for mode in ("bad_signature", "wrong_team", "bad_payload", "path_traversal"):
+    for mode in (
+        "bad_signature",
+        "wrong_team",
+        "bad_payload",
+        "path_traversal",
+        "dot_slash",
+        "repeated_prefix",
+        "absolute_path",
+        "similar_prefix",
+        "missing_app_entry",
+    ):
         with _release_gate_test_root() as root:
             candidate, tools, script = _make_release_gate_fixture(root)
             original = candidate.read_bytes()

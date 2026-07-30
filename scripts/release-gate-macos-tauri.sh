@@ -222,18 +222,38 @@ validate_pkg() {
 import sys
 from pathlib import PurePosixPath
 
-paths = []
+app_path = "Applications/TOMOS AI.app"
+app_entry_found = False
 for line in sys.argv[1].splitlines():
     path = line.strip()
     if not path:
         continue
-    while path.startswith("./"):
-        path = path[2:]
-    parsed = PurePosixPath(path)
-    if not path or parsed.is_absolute() or any(part in ("", ".", "..") for part in parsed.parts):
+    if path == ".":
+        continue
+    if path == "./":
         raise SystemExit(1)
-    paths.append(str(parsed))
-if not paths or any(not (path == "Applications/TOMOS AI.app" or path.startswith("Applications/TOMOS AI.app/")) for path in paths):
+    if path.startswith("./"):
+        path = path[2:]
+        if path.startswith("./"):
+            raise SystemExit(1)
+    parsed = PurePosixPath(path)
+    normalized = str(parsed)
+    if (
+        not path
+        or parsed.is_absolute()
+        or any(part in ("", ".", "..") for part in parsed.parts)
+        or path != normalized
+    ):
+        raise SystemExit(1)
+    if normalized == "Applications":
+        continue
+    if normalized == app_path:
+        app_entry_found = True
+        continue
+    if normalized.startswith(f"{app_path}/"):
+        continue
+    raise SystemExit(1)
+if not app_entry_found:
     raise SystemExit(1)
 PY
 }
