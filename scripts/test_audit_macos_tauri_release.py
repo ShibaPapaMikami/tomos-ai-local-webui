@@ -188,6 +188,14 @@ def test_signed_audit_rejects_unapproved_runtime_symlink() -> None:
         assert "python_runtime" in _audit_signed(app)
 
 
+def test_signed_audit_rejects_stale_source_commit() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        app = make_app_fixture(Path(temporary))
+        from audit_macos_tauri_release import audit_signed_app
+
+        assert "source_commit" in audit_signed_app(app, "0.8.233", "b" * 40)
+
+
 def test_rejects_wrong_bundle_identifier() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         app = make_app_fixture(Path(temporary), bundle_id="example.invalid")
@@ -531,6 +539,7 @@ def main() -> None:
     test_signed_production_audit_accepts_current_signed_app()
     test_signed_production_audit_accepts_current_signed_app_under_private_umask()
     test_signed_audit_rejects_unapproved_runtime_symlink()
+    test_signed_audit_rejects_stale_source_commit()
     test_rejects_wrong_bundle_identifier()
     test_rejects_incomplete_and_non_executable_macho()
     test_rejects_fat_count_over_limit_before_tool_parse()

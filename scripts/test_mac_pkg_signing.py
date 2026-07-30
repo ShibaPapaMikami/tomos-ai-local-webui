@@ -21,6 +21,10 @@ IDENTITY = "Developer ID Installer: TOMOS Test (AJK3HH9G22)"
 FINGERPRINT_A = "0123456789ABCDEF0123456789ABCDEF01234567"
 FINGERPRINT_B = "FEDCBA9876543210FEDCBA9876543210FEDCBA98"
 OUTPUT_NAME = "TOMOS_AI-v0.8.233-mac-arm64.pkg"
+RELEASE_GATE = ROOT / "scripts" / "release-gate-macos-tauri.sh"
+RELEASE_PROFILE_SECRET = "private-notary-profile"
+RELEASE_RAW_SECRET = "raw-notary-secret"
+RELEASE_CANDIDATE_BYTES = b"candidate package bytes\n"
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -275,6 +279,232 @@ def _assert_failure_is_isolated(result: subprocess.CompletedProcess[str], fixtur
     assert result.returncode != 0, result.stdout + result.stderr
     assert not (fixture / "dist" / "candidate" / OUTPUT_NAME).exists()
     assert not list(fixture.glob(".tomos-pkg.*"))
+
+
+@contextmanager
+def _release_gate_test_root() -> Path:
+    root = Path(tempfile.mkdtemp(prefix="tomos-release-gate-test-", dir="/private/tmp"))
+    root.chmod(0o700)
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _make_release_gate_fake_tools(directory: Path) -> None:
+    _write_executable(
+        directory / "audit",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'audit\\n' >> "${FAKE_RELEASE_LOG:?}"
+[ "${FAKE_RELEASE_AUDIT_MODE:-good}" = "good" ]
+""",
+    )
+    _write_executable(
+        directory / "git",
+        """#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+  *"rev-parse HEAD"*) printf '%040d\\n' 0 | /usr/bin/tr '0' 'a' ;;
+  *"status --porcelain"*) [ "${FAKE_RELEASE_GIT_MODE:-clean}" = "clean" ] || printf ' M dirty\\n' ;;
+  *) exit 64 ;;
+esac
+""",
+    )
+    _write_executable(
+        directory / "codesign",
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "--verify" ]; then
+  printf 'codesign-verify\\n' >> "${FAKE_RELEASE_LOG:?}"
+  [ "${FAKE_RELEASE_APP_MODE:-good}" = "good" ]
+  exit
+fi
+if [ "${1:-}" = "-dv" ]; then
+  printf 'codesign-details\\n' >> "${FAKE_RELEASE_LOG:?}"
+  printf 'Authority=Developer ID Application: Test\\n'
+  printf 'TeamIdentifier=AJK3HH9G22\\n'
+  printf 'flags=0x10000(runtime)\\n'
+  printf 'Timestamp=Jul 29, 2026 at 22:49:20\\n'
+  exit
+fi
+exit 64
+""",
+    )
+    _write_executable(
+        directory / "pkgutil",
+        """#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  --check-signature)
+    printf 'pkgutil-signature\\n' >> "${FAKE_RELEASE_LOG:?}"
+    if [ "${FAKE_RELEASE_PKG_MODE:-good}" = "stage_mutation" ]; then
+      printf 'mutated staging bytes\\n' >> "$2"
+      exit 65
+    fi
+    [ "${FAKE_RELEASE_PKG_MODE:-good}" != "bad_signature" ] || exit 65
+    if [ "${FAKE_RELEASE_PKG_MODE:-good}" = "wrong_team" ]; then
+      printf 'Developer ID Installer: Test (OTHERTEAM)\\n'
+    else
+      printf 'Developer ID Installer: Test (AJK3HH9G22)\\n'
+    fi
+    ;;
+  --payload-files)
+    printf 'pkgutil-payload\\n' >> "${FAKE_RELEASE_LOG:?}"
+    if [ "${FAKE_RELEASE_PKG_MODE:-good}" = "bad_payload" ]; then
+      printf 'Library/Unexpected\\n'
+    elif [ "${FAKE_RELEASE_PKG_MODE:-good}" = "path_traversal" ]; then
+      printf '../../Applications/TOMOS AI.app/Contents/Info.plist\\n'
+    else
+      printf 'Applications/TOMOS AI.app\\nApplications/TOMOS AI.app/Contents/Info.plist\\n'
+    fi
+    ;;
+  --expand)
+    printf 'pkgutil-expand\\n' >> "${FAKE_RELEASE_LOG:?}"
+    destination="$3"
+    /bin/mkdir "$destination"
+    identifier="jp.local.gemma4-12b"
+    version="0.8.233"
+    install_location="/"
+    case "${FAKE_RELEASE_EXPAND_MODE:-good}" in
+      wrong_identifier) identifier="com.example.wrong" ;;
+      wrong_version) version="9.9.9" ;;
+      wrong_install_location) install_location="/tmp" ;;
+    esac
+    printf '<pkg-info identifier="%s" version="%s" install-location="%s">' "$identifier" "$version" "$install_location" > "$destination/PackageInfo"
+    if [ "${FAKE_RELEASE_EXPAND_MODE:-good}" = "scripts" ]; then
+      printf '<scripts><postinstall file="./postinstall"/></scripts>' >> "$destination/PackageInfo"
+    fi
+    printf '</pkg-info>\\n' >> "$destination/PackageInfo"
+    printf 'payload fixture\\n' > "$destination/Payload"
+    printf 'bom fixture\\n' > "$destination/Bom"
+    if [ "${FAKE_RELEASE_EXPAND_MODE:-good}" = "extra_entry" ]; then
+      printf 'unexpected\\n' > "$destination/Unexpected"
+    fi
+    ;;
+  *) exit 64 ;;
+esac
+""",
+    )
+    _write_executable(
+        directory / "ditto",
+        """#!/usr/bin/env bash
+set -euo pipefail
+[ "$1" = "-x" ] && [ "$2" = "-z" ] || exit 64
+printf 'ditto-payload\\n' >> "${FAKE_RELEASE_LOG:?}"
+destination="$4"
+/bin/mkdir -p "$destination/Applications"
+/bin/cp -pR "${FAKE_RELEASE_ROOT:?}/dist/signed/TOMOS AI.app" "$destination/Applications/TOMOS AI.app"
+case "${FAKE_RELEASE_PAYLOAD_MODE:-good}" in
+  app_bytes) printf 'different app bytes\\n' > "$destination/Applications/TOMOS AI.app/Contents/Info.plist" ;;
+  external_symlink) /bin/ln -s /private/tmp "$destination/Applications/TOMOS AI.app/Contents/external" ;;
+  extra_payload) /bin/mkdir "$destination/Library" ;;
+  path_traversal) printf 'escaped\\n' > "$destination/../escape" ;;
+esac
+""",
+    )
+    _write_executable(
+        directory / "xcrun",
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "notarytool" ] && [ "$2" = "history" ]; then
+  printf 'notary-history\\n' >> "${FAKE_RELEASE_LOG:?}"
+  printf '{"history":[],"private":"%s"}\\n' "${FAKE_RELEASE_RAW_SECRET:?}"
+  printf 'history stderr %s\\n' "${FAKE_RELEASE_RAW_SECRET:?}" >&2
+  [ "${FAKE_RELEASE_PROFILE_MODE:-good}" = "good" ]
+  exit
+fi
+if [ "$1" = "notarytool" ] && [ "$2" = "submit" ]; then
+  printf 'notary-submit\\n' >> "${FAKE_RELEASE_LOG:?}"
+  printf '{"status":"%s","private":"%s"}\\n' "${FAKE_RELEASE_NOTARY_STATUS:-Accepted}" "${FAKE_RELEASE_RAW_SECRET:?}"
+  printf 'submit stderr %s\\n' "${FAKE_RELEASE_RAW_SECRET:?}" >&2
+  exit
+fi
+if [ "$1" = "stapler" ] && [ "$2" = "staple" ]; then
+  printf 'stapler-staple\\n' >> "${FAKE_RELEASE_LOG:?}"
+  printf 'stapled\\n' >> "$3"
+  exit
+fi
+if [ "$1" = "stapler" ] && [ "$2" = "validate" ]; then
+  printf 'stapler-validate\\n' >> "${FAKE_RELEASE_LOG:?}"
+  exit
+fi
+exit 64
+""",
+    )
+    _write_executable(
+        directory / "spctl",
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'spctl\\n' >> "${FAKE_RELEASE_LOG:?}"
+[ "${FAKE_RELEASE_SPCTL_MODE:-good}" = "good" ] || exit 65
+printf 'source=Notarized Developer ID\\n'
+""",
+    )
+
+
+def _make_release_gate_fixture(
+    root: Path,
+    *,
+    marker: bool = True,
+) -> tuple[Path, Path, Path]:
+    scripts = root / "scripts"
+    tools = root / ".test-tools"
+    scripts.mkdir(parents=True)
+    tools.mkdir()
+    tools.chmod(0o700)
+    shutil.copy2(RELEASE_GATE, scripts / RELEASE_GATE.name)
+    (scripts / RELEASE_GATE.name).chmod(0o755)
+    if marker:
+        marker_path = root / ".tomos-release-gate-test-root"
+        marker_path.write_text("test only\n", encoding="utf-8")
+        marker_path.chmod(0o600)
+    candidate = root / "dist" / "candidate" / OUTPUT_NAME
+    candidate.parent.mkdir(parents=True)
+    candidate.write_bytes(RELEASE_CANDIDATE_BYTES)
+    app = root / "dist" / "signed" / "TOMOS AI.app"
+    (app / "Contents").mkdir(parents=True)
+    (app / "Contents" / "Info.plist").write_bytes(b"current signed app bytes\n")
+    (app.parent / "build-manifest.json").write_text(
+        json.dumps({"sourceCommit": "a" * 40}),
+        encoding="utf-8",
+    )
+    (root / "dist" / "notarized").mkdir()
+    (root / "dist" / "rejected").mkdir()
+    _make_release_gate_fake_tools(tools)
+    return candidate, tools, scripts / RELEASE_GATE.name
+
+
+def _run_release_gate(
+    root: Path,
+    candidate: Path,
+    tools: Path,
+    script: Path,
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    log = root / ".release.log"
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "TOMOS_NOTARY_PROFILE": RELEASE_PROFILE_SECRET,
+            "TOMOS_RELEASE_GATE_TEST_TOOLS_DIR": str(tools),
+            "FAKE_RELEASE_LOG": str(log),
+            "FAKE_RELEASE_RAW_SECRET": RELEASE_RAW_SECRET,
+            "FAKE_RELEASE_ROOT": str(root),
+        }
+    )
+    if extra_env:
+        environment.update(extra_env)
+    result = subprocess.run(
+        ["/bin/bash", str(script), str(candidate.relative_to(root))],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+    return result, log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
 def test_pkg_script_installs_tauri_app() -> None:
@@ -547,6 +777,297 @@ def test_github_actions_builds_windows_only_and_keeps_mac_signing_local() -> Non
     assert "make-mac-pkg.sh" not in workflow
 
 
+def test_release_gate_orders_signed_audit_notarization_and_atomic_publish() -> None:
+    script = RELEASE_GATE.read_text(encoding="utf-8")
+    ordered = (
+        "audit_signed_app",
+        '--verify --deep --strict',
+        '--check-signature',
+        '--payload-files',
+        'notarytool submit',
+        '--wait',
+        'Accepted',
+        'stapler staple',
+        'stapler validate',
+        '"$SPCTL" -a -vv -t install',
+        'hashlib.sha256',
+    )
+    positions = [script.index(value) for value in ordered]
+    assert positions == sorted(positions)
+    assert 'dist/notarized' in script
+    assert 'dist/rejected' in script
+    assert 'os.link(' in script
+    assert 'TOMOS AI.app' in script
+    assert 'postinstall' not in script
+
+
+def test_release_gate_behavior_success_orders_gates_and_publishes_verified_pair() -> None:
+    with _release_gate_test_root() as root:
+        candidate, tools, script = _make_release_gate_fixture(root)
+        original = candidate.read_bytes()
+        result, log = _run_release_gate(root, candidate, tools, script)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert log == [
+            "audit",
+            "codesign-verify",
+            "codesign-details",
+            "pkgutil-signature",
+            "pkgutil-payload",
+            "pkgutil-expand",
+            "ditto-payload",
+            "notary-history",
+            "notary-submit",
+            "stapler-staple",
+            "stapler-validate",
+            "spctl",
+        ]
+        published = root / "dist" / "notarized" / OUTPUT_NAME
+        digest = published.with_name(f"{OUTPUT_NAME}.sha256")
+        assert published.read_bytes() == original + b"stapled\n"
+        expected_hash = hashlib.sha256(published.read_bytes()).hexdigest()
+        assert digest.read_text(encoding="utf-8") == f"{expected_hash}  {OUTPUT_NAME}\n"
+        assert candidate.read_bytes() == original
+        assert not list(root.glob(".tomos-notary.*"))
+        combined = result.stdout + result.stderr
+        assert RELEASE_PROFILE_SECRET not in combined
+        assert RELEASE_RAW_SECRET not in combined
+        assert FINGERPRINT_A not in combined
+
+
+def test_release_gate_rejects_nonaccepted_and_staging_copy_mutation() -> None:
+    cases = (
+        ({"FAKE_RELEASE_NOTARY_STATUS": "Rejected"}, "notary-submit"),
+        ({"FAKE_RELEASE_PKG_MODE": "stage_mutation"}, "pkgutil-signature"),
+    )
+    for extra_env, last_gate in cases:
+        with _release_gate_test_root() as root:
+            candidate, tools, script = _make_release_gate_fixture(root)
+            original = candidate.read_bytes()
+            result, log = _run_release_gate(
+                root,
+                candidate,
+                tools,
+                script,
+                extra_env=extra_env,
+            )
+
+            assert result.returncode != 0
+            assert log[-1] == last_gate
+            assert not list((root / "dist" / "notarized").iterdir())
+            rejected = list((root / "dist" / "rejected").iterdir())
+            assert len(rejected) == 1
+            assert (rejected[0] / OUTPUT_NAME).is_file()
+            assert candidate.read_bytes() == original
+            combined = result.stdout + result.stderr
+            assert RELEASE_PROFILE_SECRET not in combined
+            assert RELEASE_RAW_SECRET not in combined
+
+
+def test_release_gate_rejects_pkg_signature_team_and_payload_before_notary() -> None:
+    for mode in ("bad_signature", "wrong_team", "bad_payload", "path_traversal"):
+        with _release_gate_test_root() as root:
+            candidate, tools, script = _make_release_gate_fixture(root)
+            original = candidate.read_bytes()
+            result, log = _run_release_gate(
+                root,
+                candidate,
+                tools,
+                script,
+                extra_env={"FAKE_RELEASE_PKG_MODE": mode},
+            )
+
+            assert result.returncode != 0
+            assert "notary-history" not in log
+            assert "notary-submit" not in log
+            assert not list((root / "dist" / "notarized").iterdir())
+            assert candidate.read_bytes() == original
+
+
+def test_release_gate_rejects_package_metadata_and_payload_not_bound_to_current_app() -> None:
+    cases = (
+        ({"FAKE_RELEASE_EXPAND_MODE": "wrong_identifier"}, "pkgutil-expand"),
+        ({"FAKE_RELEASE_EXPAND_MODE": "wrong_version"}, "pkgutil-expand"),
+        ({"FAKE_RELEASE_EXPAND_MODE": "wrong_install_location"}, "pkgutil-expand"),
+        ({"FAKE_RELEASE_EXPAND_MODE": "scripts"}, "pkgutil-expand"),
+        ({"FAKE_RELEASE_EXPAND_MODE": "extra_entry"}, "pkgutil-expand"),
+        ({"FAKE_RELEASE_PAYLOAD_MODE": "app_bytes"}, "ditto-payload"),
+        ({"FAKE_RELEASE_PAYLOAD_MODE": "external_symlink"}, "ditto-payload"),
+        ({"FAKE_RELEASE_PAYLOAD_MODE": "extra_payload"}, "ditto-payload"),
+        ({"FAKE_RELEASE_PAYLOAD_MODE": "path_traversal"}, "ditto-payload"),
+    )
+    for extra_env, last_gate in cases:
+        with _release_gate_test_root() as root:
+            candidate, tools, script = _make_release_gate_fixture(root)
+            original = candidate.read_bytes()
+            result, log = _run_release_gate(
+                root,
+                candidate,
+                tools,
+                script,
+                extra_env=extra_env,
+            )
+
+            assert result.returncode != 0, extra_env
+            assert log[-1] == last_gate
+            assert "notary-history" not in log
+            assert "notary-submit" not in log
+            assert not list((root / "dist" / "notarized").iterdir())
+            assert candidate.read_bytes() == original
+
+
+def test_release_gate_preflight_failures_stop_before_notary_without_leaks() -> None:
+    cases = (
+        ({"FAKE_RELEASE_GIT_MODE": "dirty"}, []),
+        ({"FAKE_RELEASE_AUDIT_MODE": "bad"}, ["audit"]),
+        (
+            {"FAKE_RELEASE_APP_MODE": "bad"},
+            ["audit", "codesign-verify"],
+        ),
+        (
+            {"FAKE_RELEASE_PROFILE_MODE": "bad"},
+            [
+                "audit",
+                "codesign-verify",
+                "codesign-details",
+                "pkgutil-signature",
+                "pkgutil-payload",
+                "pkgutil-expand",
+                "ditto-payload",
+                "notary-history",
+            ],
+        ),
+    )
+    for extra_env, expected_log in cases:
+        with _release_gate_test_root() as root:
+            candidate, tools, script = _make_release_gate_fixture(root)
+            original = candidate.read_bytes()
+            result, log = _run_release_gate(
+                root,
+                candidate,
+                tools,
+                script,
+                extra_env=extra_env,
+            )
+
+            assert result.returncode != 0, extra_env
+            assert log == expected_log
+            assert "notary-submit" not in log
+            assert candidate.read_bytes() == original
+            assert not list((root / "dist" / "notarized").iterdir())
+            combined = result.stdout + result.stderr
+            assert RELEASE_PROFILE_SECRET not in combined
+            assert RELEASE_RAW_SECRET not in combined
+            assert FINGERPRINT_A not in combined
+
+
+def test_release_gate_rejects_notarized_and_rejected_symlink_roots() -> None:
+    for directory_name in ("notarized", "rejected"):
+        with _release_gate_test_root() as root, tempfile.TemporaryDirectory(
+            prefix="tomos-release-external-",
+            dir="/private/tmp",
+        ) as external_directory:
+            candidate, tools, script = _make_release_gate_fixture(root)
+            original = candidate.read_bytes()
+            target = root / "dist" / directory_name
+            target.rmdir()
+            target.symlink_to(external_directory, target_is_directory=True)
+
+            result, log = _run_release_gate(root, candidate, tools, script)
+
+            assert result.returncode != 0
+            assert not log
+            assert candidate.read_bytes() == original
+            assert not list(Path(external_directory).iterdir())
+            combined = result.stdout + result.stderr
+            assert RELEASE_PROFILE_SECRET not in combined
+            assert RELEASE_RAW_SECRET not in combined
+
+
+def test_release_gate_second_publish_failure_rolls_back_and_preserves_existing_sha() -> None:
+    with _release_gate_test_root() as root:
+        candidate, tools, script = _make_release_gate_fixture(root)
+        original = candidate.read_bytes()
+        notarized = root / "dist" / "notarized"
+        existing_sha = notarized / f"{OUTPUT_NAME}.sha256"
+        existing_sha.write_text("keep existing sha\n", encoding="utf-8")
+
+        result, log = _run_release_gate(root, candidate, tools, script)
+
+        assert result.returncode != 0
+        assert log[-1] == "spctl"
+        assert not (notarized / OUTPUT_NAME).exists()
+        assert existing_sha.read_text(encoding="utf-8") == "keep existing sha\n"
+        assert candidate.read_bytes() == original
+        rejected = list((root / "dist" / "rejected").iterdir())
+        assert len(rejected) == 1
+        assert (rejected[0] / OUTPUT_NAME).is_file()
+        assert (rejected[0] / f"{OUTPUT_NAME}.sha256").is_file()
+
+
+def test_release_gate_rejected_quarantine_is_unique_and_no_clobber() -> None:
+    with _release_gate_test_root() as root:
+        candidate, tools, script = _make_release_gate_fixture(root)
+        collision = root / "dist" / "rejected" / "rejected-collision"
+        collision.mkdir()
+        sentinel = collision / OUTPUT_NAME
+        sentinel.write_text("keep rejected artifact\n", encoding="utf-8")
+
+        result, _log = _run_release_gate(
+            root,
+            candidate,
+            tools,
+            script,
+            extra_env={
+                "FAKE_RELEASE_NOTARY_STATUS": "Invalid",
+                "TZSTAMP": "rejected",
+            },
+        )
+
+        assert result.returncode != 0
+        assert sentinel.read_text(encoding="utf-8") == "keep rejected artifact\n"
+        rejected = list((root / "dist" / "rejected").iterdir())
+        assert len(rejected) == 2
+        created = next(path for path in rejected if path != collision)
+        assert created.name.startswith("rejected-")
+        assert (created / OUTPUT_NAME).is_file()
+
+
+def test_release_gate_test_hook_rejects_invalid_roots_markers_modes_and_symlinks() -> None:
+    with _release_gate_test_root() as root:
+        candidate, tools, script = _make_release_gate_fixture(root, marker=False)
+        result, log = _run_release_gate(root, candidate, tools, script)
+        assert result.returncode != 0
+        assert "test tool hook" in result.stderr
+        assert not log
+
+    with _release_gate_test_root() as root:
+        candidate, tools, script = _make_release_gate_fixture(root)
+        root.chmod(0o755)
+        result, log = _run_release_gate(root, candidate, tools, script)
+        assert result.returncode != 0
+        assert "test tool hook" in result.stderr
+        assert not log
+
+    with _release_gate_test_root() as root:
+        candidate, tools, script = _make_release_gate_fixture(root)
+        (tools / "xcrun").unlink()
+        (tools / "xcrun").symlink_to("/usr/bin/true")
+        result, log = _run_release_gate(root, candidate, tools, script)
+        assert result.returncode != 0
+        assert "test tool hook" in result.stderr
+        assert not log
+
+    with tempfile.TemporaryDirectory(dir="/private/tmp") as temporary:
+        root = Path(temporary)
+        root.chmod(0o700)
+        candidate, tools, script = _make_release_gate_fixture(root)
+        result, log = _run_release_gate(root, candidate, tools, script)
+        assert result.returncode != 0
+        assert "test tool hook" in result.stderr
+        assert not log
+
+
 if __name__ == "__main__":
     test_pkg_script_installs_tauri_app()
     test_pkg_builds_only_signed_app_with_atomic_no_clobber_publish()
@@ -562,4 +1083,14 @@ if __name__ == "__main__":
     test_script_uses_private_staging_and_absolute_production_tools()
     test_notarization_script_verifies_every_release_gate()
     test_github_actions_builds_windows_only_and_keeps_mac_signing_local()
+    test_release_gate_orders_signed_audit_notarization_and_atomic_publish()
+    test_release_gate_behavior_success_orders_gates_and_publishes_verified_pair()
+    test_release_gate_rejects_nonaccepted_and_staging_copy_mutation()
+    test_release_gate_rejects_pkg_signature_team_and_payload_before_notary()
+    test_release_gate_rejects_package_metadata_and_payload_not_bound_to_current_app()
+    test_release_gate_preflight_failures_stop_before_notary_without_leaks()
+    test_release_gate_rejects_notarized_and_rejected_symlink_roots()
+    test_release_gate_second_publish_failure_rolls_back_and_preserves_existing_sha()
+    test_release_gate_rejected_quarantine_is_unique_and_no_clobber()
+    test_release_gate_test_hook_rejects_invalid_roots_markers_modes_and_symlinks()
     print("macOS PKG signing tests: OK")

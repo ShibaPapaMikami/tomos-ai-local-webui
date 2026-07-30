@@ -161,17 +161,17 @@ Expected: Developer ID Installer `AJK3HH9G22`、`Applications/TOMOS AI.app`の�
 **Interfaces:**
 - Produces: `dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg`と`dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg.sha256`。
 
-- [ ] **Step 1: release gate順序testを書く**
+- [x] **Step 1: release gate順序testを書く**
 
 testは`audit -> app signature -> pkg signature -> notary submit --wait -> staple -> validate -> spctl -> sha256`の順序を固定する。
 
-- [ ] **Step 2: REDを確認する**
+- [x] **Step 2: REDを確認する**
 
 Run: `python3 scripts/test_mac_pkg_signing.py`
 
 Expected: release gate script未作成で失敗。
 
-- [ ] **Step 3: 失敗隔離付きgate scriptを実装する**
+- [x] **Step 3: 失敗隔離付きgate scriptを実装する**
 
 開始時にsource worktree clean、HEAD、version、CPU、署名identity、notary profileを確認する。途中失敗時は成果物を`dist/rejected/<timestamp>/`へ移し、`dist/notarized/`へ残さない。
 
