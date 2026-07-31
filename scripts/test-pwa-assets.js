@@ -348,10 +348,10 @@ assert.doesNotMatch(resetCacheHtml, /tomos1/);
 const releaseGuide = fs.readFileSync("docs/github-release-guide.ja.md", "utf8");
 const releaseChecklist = fs.readFileSync("docs/release-checklist.ja.md", "utf8");
 const nativeInstallerGuide = fs.readFileSync("docs/native-installers.ja.md", "utf8");
-assert.match(releaseGuide, /macOS用PKGとWindows用MSIだけを添付/);
+assert.match(releaseGuide, /公証済みPKGとSHA-256ファイルだけ/);
 assert.match(releaseGuide, /Source code \(zip\).*削除できません/);
 assert.doesNotMatch(releaseGuide, /gh release create[\s\S]*?\.zip[\s\S]*?```/);
-assert.match(releaseChecklist, /GitHub ReleaseにZIPを添付していない/);
+assert.match(releaseChecklist, /Mac ZIPを初心者向けRelease assetや導入手順へ載せていない/);
 assert.match(nativeInstallerGuide, /ZIP版は開発者の内部確認用で、GitHub Releaseには掲載しません/);
 
 console.log("pwa asset tests passed");

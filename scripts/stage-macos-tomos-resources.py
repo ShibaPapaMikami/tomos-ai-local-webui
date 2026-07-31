@@ -49,6 +49,7 @@ RESOURCE_FILES: tuple[str, ...] = (
     "web/composer.js",
     "web/desktop-starting.html",
     "web/desktop-starting.js",
+    "web/download-progress.js",
     "web/docs/ocr-setup.en.md",
     "web/docs/ocr-setup.ja.md",
     "web/i18n.js",

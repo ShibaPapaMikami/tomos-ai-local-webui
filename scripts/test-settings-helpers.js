@@ -686,7 +686,6 @@ assert.equal(
   "standard",
   "標準AIが未導入でも利用者が選んだ用途を維持する",
 );
-const appSource = fs.readFileSync("web/app.js", "utf8");
 assert.match(appSource, /localStorage\.setItem\("gemma4\.composerPurpose", selectedPurpose\)/);
 assert.match(
   appSource,
