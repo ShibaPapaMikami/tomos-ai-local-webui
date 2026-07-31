@@ -1,0 +1,24 @@
+[package]
+name = "tomos-desktop"
+version = "0.8.233"
+description = "TOMOS AI desktop shell"
+edition = "2021"
+
+[lib]
+name = "tomos_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "tomos-desktop"
+path = "src/main.rs"
+
+[features]
+development-runtime-override = []
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+getrandom = "0.3"
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"

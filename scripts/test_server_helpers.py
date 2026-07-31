@@ -1,30 +1,377 @@
 import sys
+import ast
 from pathlib import Path
 import base64
 import contextlib
+import http.client
 import json
 import socket
+import sqlite3
 import tempfile
 import threading
 import urllib.request
 import zipfile
 import urllib.error
+import os
+import subprocess
 from datetime import datetime, timezone
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server
 import sarashina_ocr_runner
+from app_paths import TomosPaths
+from migration_manager import (
+    MigrationApprovalError,
+    MigrationNotFoundError,
+    MigrationPreviewStaleError,
+    MigrationValidationError,
+)
+
+
+def test_desktop_session_token_reads_configured_value() -> None:
+    with patch.dict(os.environ, {"GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64}, clear=False):
+        assert server.desktop_session_token() == "a" * 64
+
+
+def test_desktop_guard_rejects_missing_token() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/context/memory/save",
+        {
+            "Host": "127.0.0.1:54876",
+            "Origin": "http://127.0.0.1:54876",
+            "Content-Type": "application/json",
+        },
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_session_required"
+
+
+def test_desktop_guard_accepts_matching_session() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {
+            "Host": "127.0.0.1:54876",
+            "Origin": "http://127.0.0.1:54876",
+            "Content-Type": "application/json; charset=utf-8",
+            "X-TOMOS-Session": "a" * 64,
+        },
+        expected_token="a" * 64,
+    )
+    assert allowed
+    assert error == ""
+
+
+def test_desktop_guard_rejects_untrusted_host_and_origin() -> None:
+    base_headers = {
+        "Content-Type": "application/json",
+        "X-TOMOS-Session": "a" * 64,
+    }
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {**base_headers, "Host": "example.test:54876", "Origin": "http://127.0.0.1:54876"},
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_origin_required"
+
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {**base_headers, "Host": "localhost:54876", "Origin": "http://example.test:54876"},
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_origin_required"
+
+
+def test_desktop_guard_rejects_untrusted_host_for_get() -> None:
+    allowed, error = server.desktop_request_guard(
+        "GET",
+        "/api/context/memory/list",
+        {"Host": "example.test:54876"},
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_origin_required"
+
+
+def test_desktop_guard_allows_trusted_host_get_without_session_token() -> None:
+    allowed, error = server.desktop_request_guard(
+        "GET",
+        "/api/health",
+        {"Host": "127.0.0.1:54876"},
+        expected_token="a" * 64,
+    )
+    assert allowed
+    assert error == ""
+
+
+def test_desktop_guard_requires_json_only_for_explicit_json_endpoint() -> None:
+    headers = {
+        "Host": "localhost:54876",
+        "Origin": "http://localhost:54876",
+        "X-TOMOS-Session": "a" * 64,
+    }
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        headers,
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/asr/transcribe",
+        headers,
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+    assert server.desktop_json_content_type_required("/api/chat") is True
+    assert server.desktop_json_content_type_required("/api/asr/transcribe") is True
+
+
+def test_desktop_guard_requires_json_for_tts_stream_and_workspace_pick() -> None:
+    headers = {
+        "Host": "localhost:54876",
+        "Origin": "http://localhost:54876",
+        "Content-Type": "text/plain",
+        "X-TOMOS-Session": "a" * 64,
+    }
+    for path in ("/api/tts/stream", "/api/workspace/pick"):
+        allowed, error = server.desktop_request_guard(
+            "POST",
+            path,
+            headers,
+            expected_token="a" * 64,
+        )
+        assert not allowed
+        assert error == "desktop_json_required"
+
+
+def test_desktop_child_env_removes_only_session_token_and_keeps_overrides() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+            "TOMOS_UNRELATED_TEST_VALUE": "kept",
+        },
+        clear=False,
+    ):
+        child_env = server.desktop_child_env({"TOMOS_OVERRIDE_TEST_VALUE": "override"})
+    assert "GEMMA_DESKTOP_SESSION_TOKEN" not in child_env
+    assert child_env["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
+    assert child_env["TOMOS_OVERRIDE_TEST_VALUE"] == "override"
+
+
+def test_desktop_child_env_prevents_override_from_restoring_session_token() -> None:
+    child_env = server.desktop_child_env({"GEMMA_DESKTOP_SESSION_TOKEN": "b" * 64})
+    assert "GEMMA_DESKTOP_SESSION_TOKEN" not in child_env
+
+
+def test_desktop_child_process_cannot_observe_session_token() -> None:
+    with patch.dict(os.environ, {"GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64}, clear=False):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os, sys; "
+                    "sys.exit(1 if 'GEMMA_DESKTOP_SESSION_TOKEN' in os.environ else 0)"
+                ),
+            ],
+            env=server.desktop_child_env(),
+            check=False,
+        )
+    assert result.returncode == 0
+
+
+def test_all_server_subprocesses_use_sanitized_desktop_child_env() -> None:
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    subprocess_calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if not (
+            isinstance(function, ast.Attribute)
+            and isinstance(function.value, ast.Name)
+            and function.value.id == "subprocess"
+            and function.attr in {"run", "Popen"}
+        ):
+            continue
+        subprocess_calls.append(node)
+        env_keyword = next((item for item in node.keywords if item.arg == "env"), None)
+        assert env_keyword is not None, f"server.py:{node.lineno} subprocess has no sanitized env"
+        assert (
+            isinstance(env_keyword.value, ast.Call)
+            and isinstance(env_keyword.value.func, ast.Name)
+            and env_keyword.value.func.id == "desktop_child_env"
+        ), f"server.py:{node.lineno} subprocess bypasses desktop_child_env"
+    assert subprocess_calls
+
+
+def test_all_production_default_runner_calls_use_sanitized_desktop_child_env() -> None:
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    runner_calls = []
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        positional = [*function.args.posonlyargs, *function.args.args]
+        defaults = [None] * (len(positional) - len(function.args.defaults)) + list(function.args.defaults)
+        default_runner_names = {
+            argument.arg
+            for argument, default in zip(positional, defaults)
+            if (
+                isinstance(default, ast.Attribute)
+                and isinstance(default.value, ast.Name)
+                and default.value.id == "subprocess"
+                and default.attr == "run"
+            )
+        }
+        for node in ast.walk(function):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in default_runner_names
+            ):
+                continue
+            runner_calls.append(node)
+            env_keyword = next((item for item in node.keywords if item.arg == "env"), None)
+            assert env_keyword is not None, f"server.py:{node.lineno} default runner has no sanitized env"
+            assert (
+                isinstance(env_keyword.value, ast.Call)
+                and isinstance(env_keyword.value.func, ast.Name)
+                and env_keyword.value.func.id == "desktop_child_env"
+            ), f"server.py:{node.lineno} default runner bypasses desktop_child_env"
+    assert len(runner_calls) == 5
+
+
+def test_desktop_guard_rejects_text_plain_for_tts_synthesize() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/tts/synthesize",
+        {
+            "Host": "localhost:54876",
+            "Origin": "http://localhost:54876",
+            "Content-Type": "text/plain",
+            "X-TOMOS-Session": "a" * 64,
+        },
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+
+
+def test_desktop_guard_rejects_text_plain_for_tts_cancel() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/tts/cancel",
+        {
+            "Host": "localhost:54876",
+            "Origin": "http://localhost:54876",
+            "Content-Type": "text/plain",
+            "X-TOMOS-Session": "a" * 64,
+        },
+        expected_token="a" * 64,
+    )
+    assert not allowed
+    assert error == "desktop_json_required"
+
+
+def test_desktop_guard_keeps_browser_fallback_when_token_is_unset() -> None:
+    allowed, error = server.desktop_request_guard(
+        "POST",
+        "/api/chat",
+        {},
+        expected_token="",
+    )
+    assert allowed
+    assert error == ""
+
+
+def test_tts_status_payload_defaults_to_disabled() -> None:
+    with patch.dict(os.environ, {
+        "GEMMA_TTS_ENGINE": "off",
+        "GEMMA_TTS_WORKER": "",
+        "GEMMA_TTS_WORKER_PYTHON": "",
+    }, clear=False):
+        payload = server.tts_status_payload()
+    assert payload["ok"] is True
+    assert payload["tts"]["enabled"] is False
+    assert payload["tts"]["ready"] is False
+    assert payload["tts"]["reason"] == "not_configured"
+
+
+def test_tts_long_text_is_rejected_before_worker() -> None:
+    with patch.object(server.tts_engine, "run_tts_worker") as run_worker:
+        status, payload = server.tts_synthesize_payload({
+            "requestId": "tts-long",
+            "text": "あ" * 1001,
+            "voice": "default",
+            "language": "ja",
+        })
+    assert status == 400
+    assert payload["error"] == "tts_text_too_long"
+    run_worker.assert_not_called()
+
+
+def test_tts_ready_fixture_synthesizes_audio() -> None:
+    worker = Path(__file__).resolve().parent / "tts_fixture_worker.py"
+    with patch.dict(os.environ, {
+        "GEMMA_TTS_ENGINE": "fixture",
+        "GEMMA_TTS_WORKER": str(worker),
+        "GEMMA_TTS_WORKER_PYTHON": sys.executable,
+    }, clear=False):
+        status, payload = server.tts_synthesize_payload({
+            "requestId": "tts-server-fixture",
+            "text": "こんにちは",
+            "voice": "default",
+            "language": "ja",
+        })
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["requestId"] == "tts-server-fixture"
+    assert payload["audio"]["mimeType"] == "audio/wav"
+
+
+def test_tts_stream_rejects_non_streaming_engine() -> None:
+    worker = Path(__file__).resolve().parent / "tts_fixture_worker.py"
+    with patch.dict(os.environ, {
+        "GEMMA_TTS_ENGINE": "qwen3-tts",
+        "GEMMA_TTS_WORKER": str(worker),
+        "GEMMA_TTS_WORKER_PYTHON": sys.executable,
+    }, clear=False):
+        status, payload = server.tts_stream_validation_payload({
+            "requestId": "tts-no-stream",
+            "text": "こんにちは",
+            "voice": "default",
+            "language": "ja",
+        })
+    assert status == 409
+    assert payload["error"] == "tts_streaming_unsupported"
 
 
 def test_person_photo_upload_saves_to_local_folder() -> None:
     previous_dir = server.PERSON_PHOTO_DIR
+    previous_paths = server.TOMOS_PATHS
     with tempfile.TemporaryDirectory() as tmp:
         try:
             server.PERSON_PHOTO_DIR = Path(tmp)
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
             payload = server.person_photo_upload_payload(
                 "avatar.png",
                 "image/png",
@@ -33,6 +380,7 @@ def test_person_photo_upload_saves_to_local_folder() -> None:
             assert (Path(tmp) / payload["file"]).is_file()
         finally:
             server.PERSON_PHOTO_DIR = previous_dir
+            server.TOMOS_PATHS = previous_paths
     assert payload["ok"] is True
     assert payload["file"].endswith(".png")
     assert payload["url"].startswith("/api/person-photo/view?file=")
@@ -79,7 +427,7 @@ def test_sarashina_ocr_status_payload_shape() -> None:
     assert payload["ok"] is True
     assert payload["id"] == "sarashina2.2-ocr"
     assert payload["model"] == "sbintuitions/sarashina2.2-ocr"
-    assert payload["status"] in {"ready", "needs_dependencies", "needs_model_download"}
+    assert payload["status"] in {"ready", "needs_runner", "needs_dependencies", "needs_model_download"}
     assert isinstance(payload["missing"], list)
     assert payload["externalApi"] is False
 
@@ -305,6 +653,387 @@ def test_whisper_cpp_status_shape() -> None:
     assert "modelSizeText" in status
 
 
+def test_normalize_local_whisper_server_url() -> None:
+    assert server.normalize_local_whisper_server_url("http://127.0.0.1:8178") == "http://127.0.0.1:8178"
+    assert server.normalize_local_whisper_server_url("http://localhost:8178/") == "http://localhost:8178"
+    assert server.normalize_local_whisper_server_url("http://[::1]:8178/") == "http://[::1]:8178"
+    assert server.normalize_local_whisper_server_url("https://localhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://example.com:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://192.168.1.5:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://user@localhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://localhost:8178?language=ja") == ""
+    assert server.normalize_local_whisper_server_url("http://localhost:8178#inference") == ""
+    assert server.normalize_local_whisper_server_url("http://local\nhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://local\thost:8178") == ""
+    assert server.normalize_local_whisper_server_url(" http://localhost:8178") == ""
+    assert server.normalize_local_whisper_server_url("http://localhost:8178 ") == ""
+
+
+def test_whisper_server_request_uses_wav_multipart() -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return json.dumps({"text": "こんにちは"}).encode("utf-8")
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+    with patch.object(server.urllib.request, "urlopen", side_effect=FakeOpener().open), patch.object(
+        server.urllib.request,
+        "build_opener",
+        return_value=FakeOpener(),
+    ):
+        payload = server.run_whisper_server_transcription(
+            b"RIFF-real-wav-bytes",
+            "ja",
+            "http://127.0.0.1:8178",
+        )
+
+    request = captured["request"]
+    body = request.data
+    assert request.full_url == "http://127.0.0.1:8178/inference"
+    assert request.get_method() == "POST"
+    assert captured["timeout"] == 30
+    assert b'name="file"; filename="speech.wav"' in body
+    assert b"Content-Type: audio/wav" in body
+    assert b"RIFF-real-wav-bytes" in body
+    assert b'name="language"' in body
+    assert b"\r\nja\r\n" in body
+    assert payload == {"ok": True, "text": "こんにちは", "engine": "whisper-server"}
+
+
+def test_whisper_server_ipv6_request_omits_empty_language() -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return b'{"text":"IPv6 success"}'
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            captured["request"] = request
+            return FakeResponse()
+
+    with patch.object(server.urllib.request, "urlopen", side_effect=FakeOpener().open), patch.object(
+        server.urllib.request,
+        "build_opener",
+        return_value=FakeOpener(),
+    ):
+        payload = server.run_whisper_server_transcription(
+            b"RIFF-real-wav-bytes",
+            "",
+            "http://[::1]:8178/",
+        )
+
+    request = captured["request"]
+    assert request.full_url == "http://[::1]:8178/inference"
+    assert b'name="language"' not in request.data
+    assert payload["text"] == "IPv6 success"
+
+
+def test_whisper_server_does_not_follow_redirects() -> None:
+    target_requests = []
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        def record_request(self):
+            target_requests.append(self.path)
+            body = b'{"text":"redirected"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = record_request
+        do_POST = record_request
+
+        def log_message(self, format, *args):
+            pass
+
+    target_server = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                f"http://127.0.0.1:{target_server.server_port}/inference",
+            )
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    target_thread = threading.Thread(target=target_server.serve_forever, daemon=True)
+    redirect_thread = threading.Thread(target=redirect_server.serve_forever, daemon=True)
+    target_thread.start()
+    redirect_thread.start()
+    try:
+        try:
+            server.run_whisper_server_transcription(
+                b"RIFF-real-wav-bytes",
+                "ja",
+                f"http://127.0.0.1:{redirect_server.server_port}",
+            )
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 302
+        else:
+            raise AssertionError("Whisper常駐サーバーのredirectを追従してはいけません")
+    finally:
+        redirect_server.shutdown()
+        target_server.shutdown()
+        redirect_thread.join(timeout=3)
+        target_thread.join(timeout=3)
+        redirect_server.server_close()
+        target_server.server_close()
+
+    assert target_requests == []
+
+
+def test_whisper_server_falls_back_to_cli_once() -> None:
+    calls = []
+    previous_url = getattr(server, "WHISPER_SERVER_URL", None)
+    previous_server = getattr(server, "run_whisper_server_transcription", None)
+    previous_cli = server.run_whisper_cpp_transcription
+
+    def fail_server(wav_bytes, language, server_url):
+        assert wav_bytes == b"RIFF-real-wav-bytes"
+        calls.append("server")
+        raise RuntimeError("resident unavailable")
+
+    def succeed_cli(*args, **kwargs):
+        calls.append("cli")
+        return {"ok": True, "text": "こんにちは", "engine": "whisper.cpp"}
+
+    try:
+        server.WHISPER_SERVER_URL = "http://127.0.0.1:8178"
+        server.run_whisper_server_transcription = fail_server
+        server.run_whisper_cpp_transcription = succeed_cli
+        result = server.run_asr_transcription(
+            base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+            "audio/wav",
+            server.WHISPER_CPP_FAST_MODEL,
+        )
+    finally:
+        if previous_url is None:
+            delattr(server, "WHISPER_SERVER_URL")
+        else:
+            server.WHISPER_SERVER_URL = previous_url
+        if previous_server is None:
+            delattr(server, "run_whisper_server_transcription")
+        else:
+            server.run_whisper_server_transcription = previous_server
+        server.run_whisper_cpp_transcription = previous_cli
+
+    assert result["ok"] is True
+    assert result["text"] == "こんにちは"
+    assert calls == ["server", "cli"]
+
+
+def test_whisper_server_success_skips_cli() -> None:
+    calls = []
+    previous_url = getattr(server, "WHISPER_SERVER_URL", None)
+    previous_server = getattr(server, "run_whisper_server_transcription", None)
+    previous_cli = server.run_whisper_cpp_transcription
+
+    def succeed_server(wav_bytes, language, server_url):
+        assert wav_bytes == b"RIFF-real-wav-bytes"
+        calls.append("server")
+        return {"ok": True, "text": "常駐成功", "engine": "whisper-server"}
+
+    def fail_if_called(*args, **kwargs):
+        calls.append("cli")
+        raise AssertionError("resident成功時にCLIを呼んではいけません")
+
+    try:
+        server.WHISPER_SERVER_URL = "http://localhost:8178/"
+        server.run_whisper_server_transcription = succeed_server
+        server.run_whisper_cpp_transcription = fail_if_called
+        result = server.run_asr_transcription(
+            base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+            "audio/wav",
+            server.WHISPER_CPP_FAST_MODEL,
+        )
+    finally:
+        if previous_url is None:
+            delattr(server, "WHISPER_SERVER_URL")
+        else:
+            server.WHISPER_SERVER_URL = previous_url
+        if previous_server is None:
+            delattr(server, "run_whisper_server_transcription")
+        else:
+            server.run_whisper_server_transcription = previous_server
+        server.run_whisper_cpp_transcription = previous_cli
+
+    assert result["text"] == "常駐成功"
+    assert calls == ["server"]
+
+
+def test_whisper_without_server_url_calls_cli_only() -> None:
+    calls = []
+    previous_url = getattr(server, "WHISPER_SERVER_URL", None)
+    previous_server = getattr(server, "run_whisper_server_transcription", None)
+    previous_cli = server.run_whisper_cpp_transcription
+
+    def fail_if_called(*args, **kwargs):
+        calls.append("server")
+        raise AssertionError("URL未設定時にresidentを呼んではいけません")
+
+    def succeed_cli(*args, **kwargs):
+        calls.append("cli")
+        return {"ok": True, "text": "CLI成功", "engine": "whisper.cpp"}
+
+    try:
+        server.WHISPER_SERVER_URL = ""
+        server.run_whisper_server_transcription = fail_if_called
+        server.run_whisper_cpp_transcription = succeed_cli
+        result = server.run_asr_transcription(
+            base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+            "audio/wav",
+            server.WHISPER_CPP_FAST_MODEL,
+        )
+    finally:
+        if previous_url is None:
+            delattr(server, "WHISPER_SERVER_URL")
+        else:
+            server.WHISPER_SERVER_URL = previous_url
+        if previous_server is None:
+            delattr(server, "run_whisper_server_transcription")
+        else:
+            server.run_whisper_server_transcription = previous_server
+        server.run_whisper_cpp_transcription = previous_cli
+
+    assert result["text"] == "CLI成功"
+    assert calls == ["cli"]
+
+
+def test_whisper_api_error_hides_resident_and_cli_details() -> None:
+    calls = []
+    sensitive_details = (
+        "録音本文=社外秘 /private/tmp/gemma4-asr/input.wav "
+        "model=/Users/student/models/ggml.bin token=secret-token stderr/raw stdout/raw"
+    )
+    safe_error = "音声を文字起こしできませんでした。設定を確認して、もう一度お試しください。"
+
+    def fail_server(*args, **kwargs):
+        calls.append("server")
+        raise RuntimeError("resident response with private text")
+
+    def fail_cli(*args, **kwargs):
+        calls.append("cli")
+        raise RuntimeError(sensitive_details)
+
+    with patch.object(server, "WHISPER_SERVER_URL", "http://127.0.0.1:8178"), patch.object(
+        server,
+        "run_whisper_server_transcription",
+        side_effect=fail_server,
+    ), patch.object(
+        server,
+        "run_whisper_cpp_transcription",
+        side_effect=fail_cli,
+    ), patch.object(
+        server,
+        "normalize_asr_model",
+        return_value=server.WHISPER_CPP_FAST_MODEL,
+    ), patch.object(
+        server,
+        "asr_status_payload",
+        return_value={
+            "ok": False,
+            "modelCache": {"modelPath": "/Users/student/models/ggml.bin"},
+        },
+    ), local_handler_endpoint("/api/asr/transcribe") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({
+                "audioBase64": base64.b64encode(b"RIFF-real-wav-bytes").decode("ascii"),
+                "mimeType": "audio/wav",
+                "model": server.WHISPER_CPP_FAST_MODEL,
+            }).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 501
+            response = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("residentとCLIの両方が失敗した時はHTTP 501を返す必要があります")
+
+    assert response == {"ok": False, "error": safe_error}
+    serialized = json.dumps(response, ensure_ascii=False)
+    for secret in ("社外秘", "/private/tmp", "/Users/student", "secret-token", "stderr/raw", "stdout/raw"):
+        assert secret not in serialized
+    assert calls == ["server", "cli"]
+
+
+def test_whisper_resident_wav_cleanup_on_success_and_failure() -> None:
+    for resident_succeeds in (True, False):
+        wav_paths = []
+        calls = []
+
+        def fake_ensure_wav_audio(audio_path, mime_type):
+            assert audio_path.is_file()
+            wav_dir = Path(tempfile.mkdtemp(prefix="tomos-whisper-cleanup-"))
+            wav_path = wav_dir / "input.wav"
+            wav_path.write_bytes(b"RIFF-converted-wav-bytes")
+            wav_paths.append(wav_path)
+            return wav_path, wav_dir
+
+        def resident(wav_bytes, language, server_url):
+            assert wav_bytes == b"RIFF-converted-wav-bytes"
+            calls.append("server")
+            if not resident_succeeds:
+                raise RuntimeError("resident unavailable")
+            return {"ok": True, "text": "常駐成功", "engine": "whisper-server"}
+
+        def cli(*args, **kwargs):
+            calls.append("cli")
+            return {"ok": True, "text": "CLI成功", "engine": "whisper.cpp"}
+
+        with patch.object(server, "WHISPER_SERVER_URL", "http://127.0.0.1:8178"), patch.object(
+            server,
+            "ensure_wav_audio",
+            side_effect=fake_ensure_wav_audio,
+        ), patch.object(
+            server,
+            "run_whisper_server_transcription",
+            side_effect=resident,
+        ), patch.object(
+            server,
+            "run_whisper_cpp_transcription",
+            side_effect=cli,
+        ):
+            result = server.run_asr_transcription(
+                base64.b64encode(b"browser-audio").decode("ascii"),
+                "audio/webm",
+                server.WHISPER_CPP_FAST_MODEL,
+            )
+
+        assert result["text"] == ("常駐成功" if resident_succeeds else "CLI成功")
+        assert calls == (["server"] if resident_succeeds else ["server", "cli"])
+        assert len(wav_paths) == 1
+        assert not wav_paths[0].parent.exists()
+
+
 def test_asr_status_detects_nemotron_incompatible_nemo() -> None:
     previous_runner = server.ASR_RUNNER
     previous_status = server.asr_python_environment_status
@@ -512,10 +1241,11 @@ def test_workspace_context_uses_context_record_adapter_for_knowledge() -> None:
 
 def test_context_memory_payloads_save_list_and_forget() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        db_path = Path(tmp) / "context.sqlite"
         previous_context_db = server.CONTEXT_DB_PATH
+        previous_paths = server.TOMOS_PATHS
         try:
-            server.CONTEXT_DB_PATH = db_path
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
+            server.CONTEXT_DB_PATH = server.TOMOS_PATHS.context_db
             saved = server.context_memory_save_payload({
                 "item": {
                     "text": "ユーザーは短い箇条書きを好む",
@@ -546,14 +1276,16 @@ def test_context_memory_payloads_save_list_and_forget() -> None:
             assert after["records"] == []
         finally:
             server.CONTEXT_DB_PATH = previous_context_db
+            server.TOMOS_PATHS = previous_paths
 
 
 def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        db_path = Path(tmp) / "context.sqlite"
         previous_context_db = server.CONTEXT_DB_PATH
+        previous_paths = server.TOMOS_PATHS
         try:
-            server.CONTEXT_DB_PATH = db_path
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
+            server.CONTEXT_DB_PATH = server.TOMOS_PATHS.context_db
             server.context_memory_save_payload({
                 "item": {
                     "text": "ユーザーは短い箇条書きを好む",
@@ -575,6 +1307,7 @@ def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
             payload = server.context_memory_profile_payload({"scopeType": "folder", "scopeId": "folder-1"})
         finally:
             server.CONTEXT_DB_PATH = previous_context_db
+            server.TOMOS_PATHS = previous_paths
 
     assert payload["ok"] is True
     assert payload["stableFacts"][0]["snippet"] == "ユーザーは短い箇条書きを好む"
@@ -583,10 +1316,11 @@ def test_context_memory_profile_payload_separates_stable_and_recent() -> None:
 
 def test_context_memory_update_payload_updates_saved_memory() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        db_path = Path(tmp) / "context.sqlite"
         previous_context_db = server.CONTEXT_DB_PATH
+        previous_paths = server.TOMOS_PATHS
         try:
-            server.CONTEXT_DB_PATH = db_path
+            server.TOMOS_PATHS = TomosPaths.from_root(Path(tmp) / "app-data")
+            server.CONTEXT_DB_PATH = server.TOMOS_PATHS.context_db
             saved = server.context_memory_save_payload({
                 "item": {
                     "text": "ユーザーは短い箇条書きを好む",
@@ -604,6 +1338,7 @@ def test_context_memory_update_payload_updates_saved_memory() -> None:
             listed = server.context_memory_list_payload({"scopeType": "folder", "scopeId": "folder-1"})
         finally:
             server.CONTEXT_DB_PATH = previous_context_db
+            server.TOMOS_PATHS = previous_paths
 
     assert updated["ok"] is True
     assert updated["record"]["snippet"] == "ユーザーは短く具体的な箇条書きを好む"
@@ -961,6 +1696,938 @@ def test_reconstruct_long_note_article_uses_outline_and_ordered_chunks() -> None
     assert all("全体構成" in item["system"] for item in rewrite_calls)
 
 
+def test_memory_gb_from_bytes() -> None:
+    assert server.memory_gb_from_bytes("17179869184") == 16
+    assert server.memory_gb_from_bytes("") == 0
+    assert server.memory_gb_from_bytes("-1") == 0
+
+
+def test_parse_nvidia_smi_gpu() -> None:
+    gpu = server.parse_nvidia_smi_gpu("NVIDIA GeForce RTX 4060, 8188\n")
+    assert gpu == {
+        "detected": True,
+        "name": "NVIDIA GeForce RTX 4060",
+        "vendor": "nvidia",
+        "vramGb": 8,
+        "vramConfidence": "high",
+        "unifiedMemory": False,
+        "source": "nvidia-smi",
+    }
+
+
+def test_parse_nvidia_smi_gpu_uses_largest_valid_vram() -> None:
+    gpu = server.parse_nvidia_smi_gpu(
+        "NVIDIA RTX 3060, 12288\n"
+        "invalid\n"
+        "NVIDIA RTX 4060, 8188\n"
+    )
+    assert gpu["name"] == "NVIDIA RTX 3060"
+    assert gpu["vramGb"] == 12
+    assert server.parse_nvidia_smi_gpu("NVIDIA GPU, 0\n") == server.unknown_gpu_info()
+
+
+def test_parse_windows_video_controllers() -> None:
+    gpu = server.parse_windows_video_controllers(
+        '[{"Name":"AMD Radeon 780M","AdapterRAM":4294967296}]'
+    )
+    assert gpu["detected"] is True
+    assert gpu["name"] == "AMD Radeon 780M"
+    assert gpu["vendor"] == "amd"
+    assert gpu["vramGb"] == 4
+    assert gpu["vramConfidence"] == "estimated"
+    assert gpu["source"] == "powershell"
+
+
+def test_parse_windows_video_controllers_accepts_single_object_and_rejects_invalid_vram() -> None:
+    gpu = server.parse_windows_video_controllers(
+        '{"Name":"Intel Arc A770","AdapterRAM":17179869184}'
+    )
+    assert gpu["vendor"] == "intel"
+    assert gpu["vramGb"] == 16
+    invalid = server.parse_windows_video_controllers(
+        '[{"Name":"Bad GPU","AdapterRAM":69793218560},{"Name":"Zero GPU","AdapterRAM":0}]'
+    )
+    assert invalid == server.unknown_gpu_info()
+
+
+def test_local_gpu_info_unknown_shape() -> None:
+    assert server.unknown_gpu_info() == {
+        "detected": False,
+        "name": "",
+        "vendor": "unknown",
+        "vramGb": 0,
+        "vramConfidence": "unknown",
+        "unifiedMemory": False,
+        "source": "unavailable",
+    }
+
+
+def test_local_gpu_info_apple_silicon_uses_shared_memory() -> None:
+    with patch.object(server.sys, "platform", "darwin"), patch.object(
+        server.platform,
+        "machine",
+        return_value="arm64",
+    ):
+        gpu = server.local_gpu_info(memory_gb=24)
+    assert gpu["name"] == "Apple Silicon GPU"
+    assert gpu["vendor"] == "apple"
+    assert gpu["vramGb"] == 24
+    assert gpu["vramConfidence"] == "unified"
+    assert gpu["unifiedMemory"] is True
+
+
+def test_local_memory_gb_uses_safe_platform_probes() -> None:
+    with patch.object(server.sys, "platform", "darwin"), patch.object(
+        server,
+        "run_sysctl_value",
+        return_value="17179869184",
+    ):
+        assert server.local_memory_gb() == 16
+
+    with patch.object(server.sys, "platform", "linux"), patch.object(
+        server.os,
+        "sysconf",
+        side_effect=lambda name: {
+            "SC_PAGE_SIZE": 4096,
+            "SC_PHYS_PAGES": 4194304,
+        }[name],
+    ):
+        assert server.local_memory_gb() == 16
+
+    powershell_result = SimpleNamespace(returncode=0, stdout=b"17179869184\n")
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.subprocess,
+        "run",
+        return_value=powershell_result,
+    ) as runner:
+        assert server.local_memory_gb() == 16
+    command = runner.call_args.args[0]
+    assert command[:3] == ["powershell", "-NoProfile", "-NonInteractive"]
+    assert "TotalPhysicalMemory" in command[-1]
+    assert runner.call_args.kwargs["timeout"] == 2
+    assert runner.call_args.kwargs["capture_output"] is True
+    assert runner.call_args.kwargs["check"] is False
+    assert runner.call_args.kwargs.get("shell", False) is False
+
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.subprocess,
+        "run",
+        side_effect=FileNotFoundError,
+    ):
+        assert server.local_memory_gb() == 0
+
+
+def test_local_gpu_info_windows_fallback_uses_safe_commands() -> None:
+    nvidia_missing = SimpleNamespace(returncode=1, stdout=b"")
+    powershell_gpu = SimpleNamespace(
+        returncode=0,
+        stdout=b'{"Name":"AMD Radeon 780M","AdapterRAM":4294967296}',
+    )
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.platform,
+        "machine",
+        return_value="AMD64",
+    ), patch.object(
+        server.subprocess,
+        "run",
+        side_effect=[nvidia_missing, powershell_gpu],
+    ) as runner:
+        gpu = server.local_gpu_info()
+    assert gpu["name"] == "AMD Radeon 780M"
+    assert gpu["source"] == "powershell"
+    assert len(runner.call_args_list) == 2
+    assert runner.call_args_list[0].args[0][0] == "nvidia-smi"
+    assert runner.call_args_list[1].args[0][:3] == [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+    ]
+    for call in runner.call_args_list:
+        assert call.kwargs["timeout"] == 2
+        assert call.kwargs.get("shell", False) is False
+
+    with patch.object(server.sys, "platform", "win32"), patch.object(
+        server.platform,
+        "machine",
+        return_value="AMD64",
+    ), patch.object(
+        server.subprocess,
+        "run",
+        side_effect=FileNotFoundError,
+    ):
+        assert server.local_gpu_info() == server.unknown_gpu_info()
+
+
+def test_model_benchmark_rejects_uninstalled_or_hidden_model() -> None:
+    hidden_model = "hf.co/HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced:Q4_K_M"
+    assert server.model_benchmark_allowed("missing:latest", {server.QWEN3_2507_MODEL}) is False
+    assert server.model_benchmark_allowed(hidden_model, {hidden_model}) is False
+
+
+def test_model_benchmark_allows_installed_auto_select_model() -> None:
+    installed = {server.QWEN3_2507_MODEL}
+    assert server.model_benchmark_allowed(server.QWEN3_2507_MODEL, installed) is True
+
+
+def test_model_benchmark_rejects_external_ollama_url_before_request() -> None:
+    with patch.object(server, "OLLAMA_URL", "https://example.com"), patch.object(
+        server,
+        "ollama_json",
+    ) as ollama_mock:
+        try:
+            server.benchmark_ollama_base_url()
+        except server.LocalLlmCheckError as exc:
+            assert exc.code == "non_local_url"
+        else:
+            raise AssertionError("外部Ollama URLは通信前に拒否される必要があります")
+    ollama_mock.assert_not_called()
+
+
+def test_run_local_model_benchmark_shape() -> None:
+    response = {
+        "eval_count": 24,
+        "eval_duration": 1_200_000_000,
+        "prompt_eval_count": 8,
+        "load_duration": 300_000_000,
+    }
+    with patch.object(server, "ollama_json", return_value=response) as ollama_mock:
+        result = server.run_local_model_benchmark(
+            server.QWEN3_2507_MODEL,
+            base_url="http://127.0.0.1:11434",
+        )
+    request_payload = ollama_mock.call_args.kwargs["payload"]
+    assert ollama_mock.call_args.args == ("/api/generate",)
+    assert ollama_mock.call_args.kwargs["timeout"] == 90
+    assert ollama_mock.call_args.kwargs["base_url"] == "http://127.0.0.1:11434"
+    assert request_payload["stream"] is False
+    assert request_payload["options"] == {"temperature": 0, "num_predict": 24}
+    assert result["model"] == server.QWEN3_2507_MODEL
+    assert result["promptTokens"] == 8
+    assert result["outputTokens"] == 24
+    assert result["tokensPerSecond"] == 20.0
+    assert result["status"] == "complete"
+    assert "prompt" not in result
+    assert "response" not in result
+
+
+@contextlib.contextmanager
+def local_handler_endpoint(path: str) -> object:
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_port}{path}"
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=3)
+        httpd.server_close()
+
+
+def migration_http_request(
+    method: str,
+    path: str,
+    body: object | None = None,
+    *,
+    token: str | None = None,
+    content_type: str | None = "application/json",
+    raw_body: bytes | None = None,
+) -> tuple[int, str, dict[str, object]]:
+    headers = {
+        "Host": "127.0.0.1:54876",
+        "Origin": "http://127.0.0.1:54876",
+    }
+    if content_type is not None:
+        headers["Content-Type"] = content_type
+    if token is not None:
+        headers["X-TOMOS-Session"] = token
+    data = (
+        raw_body
+        if raw_body is not None
+        else None if body is None
+        else json.dumps(body).encode("utf-8")
+    )
+    with local_handler_endpoint(path) as url:
+        parsed = urllib.parse.urlparse(url)
+        connection = http.client.HTTPConnection(
+            parsed.hostname,
+            parsed.port,
+            timeout=5,
+        )
+        try:
+            connection.request(
+                method,
+                parsed.path,
+                body=data,
+                headers=headers,
+            )
+            response = connection.getresponse()
+            return (
+                response.status,
+                response.getheader("Content-Type", ""),
+                json.loads(response.read().decode("utf-8")),
+            )
+        finally:
+            connection.close()
+
+
+def assert_json_content_type(content_type: str) -> None:
+    assert content_type.split(";", 1)[0].strip().lower() == "application/json"
+
+
+def test_migration_preview_http_returns_metadata_without_paths_or_contents() -> None:
+    manager_preview = {
+        "previewId": "a" * 64,
+        "totalFiles": 3,
+        "totalBytes": 120,
+        "latestMtime": 1234.5,
+        "excludedCount": 1,
+        "errorCount": 0,
+        "items": [
+            {
+                "kind": "knowledge",
+                "source": "/Users/private/legacy/index.sqlite",
+                "destination": "/Users/private/managed/knowledge.sqlite",
+                "totalFiles": 3,
+                "totalBytes": 120,
+                "latestMtime": 1234.5,
+                "conflict": False,
+                "excludedCount": 1,
+                "errorCount": 0,
+            },
+            {
+                "kind": "study-packs",
+                "source": "/Users/private/legacy/study-packs",
+                "destination": "/Users/private/managed/study-packs",
+                "totalFiles": 1,
+                "totalBytes": 20,
+                "latestMtime": 1200.0,
+                "conflict": True,
+                "excludedCount": 0,
+                "errorCount": 0,
+            },
+        ],
+        "files": [
+            {
+                "path": "/Users/private/legacy/secret-token.txt",
+                "bytes": 120,
+                "mtime": 1234.5,
+                "contents": "do-not-return",
+            }
+        ],
+    }
+    with patch.object(
+        server,
+        "detect_legacy_sources",
+        return_value=[object()],
+    ), patch.object(
+        server,
+        "build_migration_preview",
+        return_value=manager_preview,
+    ):
+        status, content_type, payload = migration_http_request(
+            "GET",
+            "/api/desktop/migration/preview",
+        )
+
+    assert status == 200
+    assert_json_content_type(content_type)
+    assert payload == {
+        "ok": True,
+        "preview": {
+            "previewId": "a" * 64,
+            "totalFiles": 3,
+            "totalBytes": 120,
+            "latestMtime": 1234.5,
+            "excludedCount": 1,
+            "errorCount": 0,
+            "items": [
+                {
+                    "kind": "knowledge",
+                    "totalFiles": 3,
+                    "totalBytes": 120,
+                    "latestMtime": 1234.5,
+                    "conflict": False,
+                    "excludedCount": 1,
+                    "errorCount": 0,
+                },
+                {
+                    "kind": "study-packs",
+                    "totalFiles": 1,
+                    "totalBytes": 20,
+                    "latestMtime": 1200.0,
+                    "conflict": True,
+                    "excludedCount": 0,
+                    "errorCount": 0,
+                }
+            ],
+        },
+    }
+    encoded = json.dumps(payload, ensure_ascii=False)
+    assert "/Users/private" not in encoded
+    assert "secret-token" not in encoded
+    assert "do-not-return" not in encoded
+
+
+def test_migration_preview_http_is_zero_write_on_real_legacy_root() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        temp_root = Path(tmp)
+        legacy_home = temp_root / "home"
+        legacy_root = temp_root / "legacy-root"
+        source = legacy_home / ".gemma4-data/knowledge/index.sqlite"
+        source.parent.mkdir(parents=True)
+        connection = sqlite3.connect(source)
+        try:
+            connection.execute(
+                "CREATE TABLE sample (value TEXT NOT NULL)"
+            )
+            connection.execute(
+                "INSERT INTO sample(value) VALUES ('legacy')"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        data_root = temp_root / "app-data"
+
+        def filesystem_tree() -> list[tuple[str, bool, int, int]]:
+            return [
+                (
+                    path.relative_to(temp_root).as_posix(),
+                    path.is_dir(),
+                    path.stat().st_size,
+                    path.stat().st_mtime_ns,
+                )
+                for path in sorted(temp_root.rglob("*"))
+            ]
+
+        before = filesystem_tree()
+        previous_legacy_home = server.LEGACY_HOME
+        previous_root = server.ROOT
+        previous_paths = server.TOMOS_PATHS
+        try:
+            server.LEGACY_HOME = legacy_home
+            server.ROOT = legacy_root
+            server.TOMOS_PATHS = TomosPaths.from_root(data_root)
+            status, content_type, payload = migration_http_request(
+                "GET",
+                "/api/desktop/migration/preview",
+            )
+        finally:
+            server.LEGACY_HOME = previous_legacy_home
+            server.ROOT = previous_root
+            server.TOMOS_PATHS = previous_paths
+
+        after = filesystem_tree()
+        assert status == 200
+        assert_json_content_type(content_type)
+        assert payload["ok"] is True
+        assert payload["preview"]["totalFiles"] == 1
+        assert before == after
+        assert not data_root.exists()
+
+
+def test_migration_apply_http_rejects_missing_empty_and_invalid_approval() -> None:
+    cases = [
+        ({}, "missing approval"),
+        ({"previewId": "a" * 64}, "missing items"),
+        (
+            {"previewId": "a" * 64, "approvedItems": []},
+            "empty items",
+        ),
+        (
+            {"previewId": "a" * 64, "approvedItems": "knowledge"},
+            "invalid item type",
+        ),
+        (
+            {"previewId": "a" * 64, "approvedItems": [1]},
+            "invalid item value",
+        ),
+    ]
+    for body, case in cases:
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/apply",
+            body,
+        )
+        assert status == 400, case
+        assert_json_content_type(content_type)
+        assert payload == {
+            "ok": False,
+            "error": "migration_approval_required",
+        }, case
+
+
+def test_migration_apply_http_maps_fixed_errors_and_statuses() -> None:
+    cases = [
+        (
+            MigrationApprovalError("unknown item /Users/private"),
+            400,
+            "migration_approval_required",
+        ),
+        (
+            MigrationPreviewStaleError("stale /Users/private"),
+            409,
+            "migration_preview_stale",
+        ),
+        (
+            MigrationValidationError("invalid /Users/private"),
+            400,
+            "migration_validation_failed",
+        ),
+    ]
+    body = {"previewId": "a" * 64, "approvedItems": ["knowledge"]}
+    for error, expected_status, expected_code in cases:
+        with patch.object(server, "apply_migration", side_effect=error):
+            status, content_type, payload = migration_http_request(
+                "POST",
+                "/api/desktop/migration/apply",
+                body,
+            )
+        assert status == expected_status
+        assert_json_content_type(content_type)
+        assert payload == {"ok": False, "error": expected_code}
+        assert "/Users/private" not in json.dumps(payload)
+
+
+def assert_migration_post_requires_current_desktop_session(
+    path: str,
+    body: dict[str, object],
+    manager_name: str,
+) -> None:
+    token = "a" * 64
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": token},
+        clear=False,
+    ), patch.object(
+        server,
+        "read_json_body",
+        side_effect=AssertionError("body must not be parsed"),
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        missing_status, missing_type, missing_payload = migration_http_request(
+            "POST",
+            path,
+            body,
+        )
+        wrong_status, wrong_type, wrong_payload = migration_http_request(
+            "POST",
+            path,
+            body,
+            token="0" * 64,
+        )
+
+    assert missing_status == 403
+    assert_json_content_type(missing_type)
+    assert missing_payload == {
+        "ok": False,
+        "error": "desktop_session_required",
+    }
+    assert wrong_status == 403
+    assert_json_content_type(wrong_type)
+    assert wrong_payload == {
+        "ok": False,
+        "error": "desktop_session_required",
+    }
+
+
+def test_migration_apply_http_requires_current_desktop_session() -> None:
+    assert_migration_post_requires_current_desktop_session(
+        "/api/desktop/migration/apply",
+        {
+            "previewId": "b" * 64,
+            "approvedItems": ["knowledge"],
+        },
+        "apply_migration",
+    )
+
+
+def test_migration_rollback_http_requires_current_desktop_session() -> None:
+    assert_migration_post_requires_current_desktop_session(
+        "/api/desktop/migration/rollback",
+        {"migrationId": "c" * 32},
+        "snapshot_id_for_migration",
+    )
+
+
+def assert_migration_post_rejects_bad_json_input(
+    path: str,
+    body: dict[str, object],
+    manager_name: str,
+) -> None:
+    token = "a" * 64
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": token},
+        clear=False,
+    ), patch.object(
+        server,
+        "read_json_body",
+        side_effect=AssertionError("body must not be parsed"),
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        for content_type in (None, "text/plain"):
+            status, response_type, payload = migration_http_request(
+                "POST",
+                path,
+                body,
+                token=token,
+                content_type=content_type,
+            )
+            assert status == 403
+            assert_json_content_type(response_type)
+            assert payload == {
+                "ok": False,
+                "error": "desktop_session_required",
+            }
+
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": token},
+        clear=False,
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        status, response_type, payload = migration_http_request(
+            "POST",
+            path,
+            token=token,
+            raw_body=b"{not-json",
+        )
+    assert status == 400
+    assert_json_content_type(response_type)
+    assert payload == {
+        "ok": False,
+        "error": "migration_validation_failed",
+    }
+
+
+def test_migration_apply_http_rejects_bad_json_input() -> None:
+    assert_migration_post_rejects_bad_json_input(
+        "/api/desktop/migration/apply",
+        {
+            "previewId": "b" * 64,
+            "approvedItems": ["knowledge"],
+        },
+        "apply_migration",
+    )
+
+
+def test_migration_rollback_http_rejects_bad_json_input() -> None:
+    assert_migration_post_rejects_bad_json_input(
+        "/api/desktop/migration/rollback",
+        {"migrationId": "c" * 32},
+        "snapshot_id_for_migration",
+    )
+
+
+def assert_invalid_session_precedes_migration_body_handling(
+    path: str,
+    manager_name: str,
+) -> None:
+    with patch.dict(
+        os.environ,
+        {"GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64},
+        clear=False,
+    ), patch.object(
+        server,
+        "read_json_body",
+        side_effect=AssertionError("body must not be parsed"),
+    ), patch.object(
+        server,
+        manager_name,
+        side_effect=AssertionError("migration manager must not run"),
+    ):
+        for content_type in ("text/plain", "application/json"):
+            status, response_type, payload = migration_http_request(
+                "POST",
+                path,
+                token="0" * 64,
+                content_type=content_type,
+                raw_body=b"{not-json",
+            )
+            assert status == 403
+            assert_json_content_type(response_type)
+            assert payload == {
+                "ok": False,
+                "error": "desktop_session_required",
+            }
+
+
+def test_migration_apply_invalid_session_precedes_body_handling() -> None:
+    assert_invalid_session_precedes_migration_body_handling(
+        "/api/desktop/migration/apply",
+        "apply_migration",
+    )
+
+
+def test_migration_rollback_invalid_session_precedes_body_handling() -> None:
+    assert_invalid_session_precedes_migration_body_handling(
+        "/api/desktop/migration/rollback",
+        "snapshot_id_for_migration",
+    )
+
+
+def test_migration_apply_http_success_is_json() -> None:
+    result = {
+        "status": "completed",
+        "migrationId": "c" * 32,
+        "snapshotId": "d" * 32,
+        "approvedItems": ["knowledge"],
+        "cleanupPending": False,
+    }
+    with patch.object(
+        server,
+        "apply_migration",
+        return_value=result,
+    ):
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/apply",
+            {
+                "previewId": "b" * 64,
+                "approvedItems": ["knowledge"],
+            },
+        )
+    assert status == 200
+    assert_json_content_type(content_type)
+    assert payload == {"ok": True, "migration": result}
+
+
+def test_migration_rollback_http_resolves_existing_migration_id() -> None:
+    migration_id = "c" * 32
+    snapshot_id = "d" * 32
+
+    def resolve(received_id: str, paths: TomosPaths) -> str:
+        assert received_id == migration_id
+        assert paths is server.TOMOS_PATHS
+        return snapshot_id
+
+    def rollback(received_id: str, paths: TomosPaths) -> dict:
+        assert received_id == snapshot_id
+        assert paths is server.TOMOS_PATHS
+        return {
+            "status": "rolled_back",
+            "migrationId": migration_id,
+            "snapshotId": snapshot_id,
+        }
+
+    with patch.object(
+        server,
+        "snapshot_id_for_migration",
+        side_effect=resolve,
+    ), patch.object(
+        server,
+        "rollback_migration",
+        side_effect=rollback,
+    ):
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/rollback",
+            {"migrationId": migration_id},
+        )
+
+    assert status == 200
+    assert_json_content_type(content_type)
+    assert payload == {
+        "ok": True,
+        "migration": {
+            "status": "rolled_back",
+            "migrationId": migration_id,
+            "snapshotId": snapshot_id,
+        },
+    }
+
+
+def test_migration_rollback_http_rejects_invalid_and_unknown_migration() -> None:
+    invalid_cases = [{}, {"migrationId": ""}, {"migrationId": 1}]
+    for body in invalid_cases:
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/rollback",
+            body,
+        )
+        assert status == 404
+        assert_json_content_type(content_type)
+        assert payload == {
+            "ok": False,
+            "error": "migration_not_found",
+        }
+
+    with patch.object(
+        server,
+        "snapshot_id_for_migration",
+        side_effect=MigrationNotFoundError("not found /Users/private"),
+    ):
+        status, content_type, payload = migration_http_request(
+            "POST",
+            "/api/desktop/migration/rollback",
+            {"migrationId": "e" * 32},
+        )
+    assert status == 404
+    assert_json_content_type(content_type)
+    assert payload == {
+        "ok": False,
+        "error": "migration_not_found",
+    }
+
+
+def test_migration_post_unexpected_errors_are_fixed_json() -> None:
+    cases = [
+        (
+            "/api/desktop/migration/apply",
+            {
+                "previewId": "b" * 64,
+                "approvedItems": ["knowledge"],
+            },
+            "apply_migration",
+        ),
+        (
+            "/api/desktop/migration/rollback",
+            {"migrationId": "e" * 32},
+            "snapshot_id_for_migration",
+        ),
+    ]
+    for path, body, manager_name in cases:
+        with patch.object(
+            server,
+            manager_name,
+            side_effect=RuntimeError("secret-token /Users/private/source.json"),
+        ):
+            status, content_type, payload = migration_http_request(
+                "POST",
+                path,
+                body,
+            )
+        assert status == 500
+        assert_json_content_type(content_type)
+        assert payload == {
+            "ok": False,
+            "error": "migration_validation_failed",
+        }
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert "secret-token" not in serialized
+        assert "/Users/private" not in serialized
+
+
+def test_model_benchmark_http_rejects_disallowed_model() -> None:
+    benchmark_calls = []
+    with patch.object(
+        server,
+        "benchmark_available_models",
+        return_value={server.QWEN3_2507_MODEL},
+    ), patch.object(
+        server,
+        "run_local_model_benchmark",
+        side_effect=lambda model: benchmark_calls.append(model),
+    ), local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"model": "missing:latest"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            response = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("許可外モデルはHTTP 400で拒否される必要があります")
+    assert response == {"ok": False, "error": "benchmark_model_not_allowed"}
+    assert benchmark_calls == []
+
+
+def test_model_benchmark_http_rejects_external_ollama_before_tags() -> None:
+    with patch.object(server, "OLLAMA_URL", "https://example.com"), patch.object(
+        server,
+        "ollama_json",
+    ) as ollama_mock, local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"model": server.QWEN3_2507_MODEL}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            response = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("外部Ollama URLはtags取得前にHTTP 400で拒否される必要があります")
+    assert response == {"ok": False, "error": "benchmark_localhost_required"}
+    ollama_mock.assert_not_called()
+
+
+def test_model_benchmark_http_runs_allowed_model_once() -> None:
+    result = {
+        "model": server.QWEN3_2507_MODEL,
+        "elapsedMs": 1200,
+        "loadMs": 300,
+        "promptTokens": 8,
+        "outputTokens": 24,
+        "tokensPerSecond": 20.0,
+        "status": "complete",
+    }
+    with patch.object(
+        server,
+        "benchmark_available_models",
+        return_value={server.QWEN3_2507_MODEL},
+    ), patch.object(
+        server,
+        "run_local_model_benchmark",
+        return_value=result,
+    ) as benchmark_mock, local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"model": server.QWEN3_2507_MODEL}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+            payload = json.loads(response.read().decode("utf-8"))
+    assert payload == {"ok": True, "benchmark": result}
+    benchmark_mock.assert_called_once_with(
+        server.QWEN3_2507_MODEL,
+        base_url="http://127.0.0.1:11434",
+    )
+
+
+def test_model_benchmark_http_rejects_concurrent_request() -> None:
+    with patch.object(
+        server,
+        "benchmark_available_models",
+        return_value={server.QWEN3_2507_MODEL},
+    ), local_handler_endpoint("/api/diagnostics/model-benchmark") as url:
+        assert server.MODEL_BENCHMARK_LOCK.acquire(blocking=False) is True
+        try:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps({"model": server.QWEN3_2507_MODEL}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                urllib.request.urlopen(request, timeout=5)
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 409
+                response = json.loads(exc.read().decode("utf-8"))
+            else:
+                raise AssertionError("同時ベンチマークはHTTP 409で拒否される必要があります")
+        finally:
+            server.MODEL_BENCHMARK_LOCK.release()
+    assert response == {"ok": False, "error": "benchmark_in_progress"}
+
+
 def test_pc_diagnostics_recommendation_levels() -> None:
     comfortable = server.pc_diagnostics_recommendation({
         "memoryGb": 32,
@@ -1022,8 +2689,11 @@ def test_pc_diagnostics_payload_shape() -> None:
     assert payload["recommendation"]["label"] in {"快適", "重い", "激重い"}
     assert "memoryGb" in payload["system"]
     assert "gpu" in payload["system"]
+    assert "gpuInfo" in payload["system"]
     assert "hasGpu" in payload["system"]
     assert "recommended" in payload["recommendation"]
+    assert payload["recommendation"]["basis"] == "theoretical"
+    assert payload["benchmark"] is None
 
 
 def test_internet_layer_diagnostics_payload_shape() -> None:
@@ -1128,11 +2798,21 @@ def test_agent_reach_doctor_payload_reads_runner_output() -> None:
 
     def fake_runner(*args, **kwargs):
         assert args[0][-2:] == ["doctor", "--json"]
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
         return FakeRunResult()
 
     try:
         server.AGENT_REACH_COMMAND_CANDIDATES = ["python3"]
-        payload = server.agent_reach_doctor_payload(runner=fake_runner)
+        with patch.dict(
+            os.environ,
+            {
+                "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+                "TOMOS_UNRELATED_TEST_VALUE": "kept",
+            },
+            clear=False,
+        ):
+            payload = server.agent_reach_doctor_payload(runner=fake_runner)
     finally:
         server.AGENT_REACH_COMMAND_CANDIDATES = previous
     assert payload["ok"] is True
@@ -2938,6 +4618,8 @@ def test_github_repo_result_uses_gh_runner(monkeypatch=None) -> None:
     def fake_runner(command, **kwargs):
         assert command[:3] == ["gh", "repo", "view"]
         assert command[3] == "Panniantong/Agent-Reach"
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
 
         class FakeRunResult:
             returncode = 0
@@ -2946,7 +4628,15 @@ def test_github_repo_result_uses_gh_runner(monkeypatch=None) -> None:
 
         return FakeRunResult()
 
-    result = server.github_repo_result("Panniantong/Agent-Reach", runner=fake_runner)
+    with patch.dict(
+        os.environ,
+        {
+            "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+            "TOMOS_UNRELATED_TEST_VALUE": "kept",
+        },
+        clear=False,
+    ):
+        result = server.github_repo_result("Panniantong/Agent-Reach", runner=fake_runner)
     assert result is not None
     assert result["title"] == "GitHubリポジトリ: Panniantong/Agent-Reach"
     assert "Internet router" in result["snippet"]
@@ -2956,6 +4646,8 @@ def test_github_repo_result_uses_gh_runner(monkeypatch=None) -> None:
 def test_github_search_results_uses_gh_runner(monkeypatch=None) -> None:
     def fake_runner(command, **kwargs):
         assert command[:3] == ["gh", "search", "repos"]
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
 
         class FakeRunResult:
             returncode = 0
@@ -2964,7 +4656,15 @@ def test_github_search_results_uses_gh_runner(monkeypatch=None) -> None:
 
         return FakeRunResult()
 
-    results = server.github_search_results("github coding agent", runner=fake_runner, limit=1)
+    with patch.dict(
+        os.environ,
+        {
+            "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+            "TOMOS_UNRELATED_TEST_VALUE": "kept",
+        },
+        clear=False,
+    ):
+        results = server.github_search_results("github coding agent", runner=fake_runner, limit=1)
     assert len(results) == 1
     assert results[0]["url"] == "https://github.com/openai/codex"
     assert "coding agent" in results[0]["snippet"]
@@ -3046,6 +4746,8 @@ def test_youtube_transcript_result_uses_runner_output(monkeypatch=None) -> None:
 
     def fake_runner(command, **kwargs):
         calls.append(command)
+        assert "GEMMA_DESKTOP_SESSION_TOKEN" not in kwargs["env"]
+        assert kwargs["env"]["TOMOS_UNRELATED_TEST_VALUE"] == "kept"
         if "--dump-json" in command:
             return FakeRunResult(stdout=b'{"id":"vid123","title":"Demo Video","description":"Demo description"}\n')
         output_template = command[command.index("-o") + 1]
@@ -3059,7 +4761,15 @@ def test_youtube_transcript_result_uses_runner_output(monkeypatch=None) -> None:
     previous = server.agent_reach_venv_ytdlp_command
     try:
         server.agent_reach_venv_ytdlp_command = lambda: ["python", "-m", "yt_dlp"]
-        result = server.youtube_transcript_result("https://www.youtube.com/watch?v=vid123", runner=fake_runner)
+        with patch.dict(
+            os.environ,
+            {
+                "GEMMA_DESKTOP_SESSION_TOKEN": "a" * 64,
+                "TOMOS_UNRELATED_TEST_VALUE": "kept",
+            },
+            clear=False,
+        ):
+            result = server.youtube_transcript_result("https://www.youtube.com/watch?v=vid123", runner=fake_runner)
     finally:
         server.agent_reach_venv_ytdlp_command = previous
     assert result is not None
@@ -3316,6 +5026,26 @@ def test_parse_ollama_pull_progress_and_download_jobs() -> None:
 
 
 if __name__ == "__main__":
+    test_desktop_session_token_reads_configured_value()
+    test_desktop_guard_rejects_missing_token()
+    test_desktop_guard_accepts_matching_session()
+    test_desktop_guard_rejects_untrusted_host_and_origin()
+    test_desktop_guard_rejects_untrusted_host_for_get()
+    test_desktop_guard_allows_trusted_host_get_without_session_token()
+    test_desktop_guard_requires_json_only_for_explicit_json_endpoint()
+    test_desktop_guard_requires_json_for_tts_stream_and_workspace_pick()
+    test_desktop_child_env_removes_only_session_token_and_keeps_overrides()
+    test_desktop_child_env_prevents_override_from_restoring_session_token()
+    test_desktop_child_process_cannot_observe_session_token()
+    test_all_server_subprocesses_use_sanitized_desktop_child_env()
+    test_all_production_default_runner_calls_use_sanitized_desktop_child_env()
+    test_desktop_guard_rejects_text_plain_for_tts_synthesize()
+    test_desktop_guard_rejects_text_plain_for_tts_cancel()
+    test_desktop_guard_keeps_browser_fallback_when_token_is_unset()
+    test_tts_status_payload_defaults_to_disabled()
+    test_tts_long_text_is_rejected_before_worker()
+    test_tts_ready_fixture_synthesizes_audio()
+    test_tts_stream_rejects_non_streaming_engine()
     test_contract_pdf_import_status_payload_shape()
     test_contract_pdf_import_connection_test_payload_shape()
     test_sarashina_ocr_status_payload_shape()
@@ -3332,6 +5062,15 @@ if __name__ == "__main__":
     test_asr_status_payload_shape()
     test_asr_model_normalization()
     test_whisper_cpp_status_shape()
+    test_normalize_local_whisper_server_url()
+    test_whisper_server_request_uses_wav_multipart()
+    test_whisper_server_ipv6_request_omits_empty_language()
+    test_whisper_server_does_not_follow_redirects()
+    test_whisper_server_falls_back_to_cli_once()
+    test_whisper_server_success_skips_cli()
+    test_whisper_without_server_url_calls_cli_only()
+    test_whisper_api_error_hides_resident_and_cli_details()
+    test_whisper_resident_wav_cleanup_on_success_and_failure()
     test_asr_status_detects_nemotron_incompatible_nemo()
     test_asr_runner_missing_is_clear()
     test_asr_suffix_for_mime()
@@ -3370,6 +5109,37 @@ if __name__ == "__main__":
     test_context_size_error_message_only_hides_raw_json_and_tokens()
     test_split_note_article_keeps_order_and_limits_chunks()
     test_reconstruct_long_note_article_uses_outline_and_ordered_chunks()
+    test_memory_gb_from_bytes()
+    test_parse_nvidia_smi_gpu()
+    test_parse_nvidia_smi_gpu_uses_largest_valid_vram()
+    test_parse_windows_video_controllers()
+    test_parse_windows_video_controllers_accepts_single_object_and_rejects_invalid_vram()
+    test_local_gpu_info_unknown_shape()
+    test_local_gpu_info_apple_silicon_uses_shared_memory()
+    test_local_memory_gb_uses_safe_platform_probes()
+    test_local_gpu_info_windows_fallback_uses_safe_commands()
+    test_model_benchmark_rejects_uninstalled_or_hidden_model()
+    test_model_benchmark_allows_installed_auto_select_model()
+    test_model_benchmark_rejects_external_ollama_url_before_request()
+    test_run_local_model_benchmark_shape()
+    test_migration_preview_http_returns_metadata_without_paths_or_contents()
+    test_migration_preview_http_is_zero_write_on_real_legacy_root()
+    test_migration_apply_http_rejects_missing_empty_and_invalid_approval()
+    test_migration_apply_http_maps_fixed_errors_and_statuses()
+    test_migration_apply_http_requires_current_desktop_session()
+    test_migration_rollback_http_requires_current_desktop_session()
+    test_migration_apply_http_rejects_bad_json_input()
+    test_migration_rollback_http_rejects_bad_json_input()
+    test_migration_apply_invalid_session_precedes_body_handling()
+    test_migration_rollback_invalid_session_precedes_body_handling()
+    test_migration_apply_http_success_is_json()
+    test_migration_rollback_http_resolves_existing_migration_id()
+    test_migration_rollback_http_rejects_invalid_and_unknown_migration()
+    test_migration_post_unexpected_errors_are_fixed_json()
+    test_model_benchmark_http_rejects_disallowed_model()
+    test_model_benchmark_http_rejects_external_ollama_before_tags()
+    test_model_benchmark_http_runs_allowed_model_once()
+    test_model_benchmark_http_rejects_concurrent_request()
     test_pc_diagnostics_recommendation_levels()
     test_pc_diagnostics_payload_shape()
     test_internet_layer_diagnostics_payload_shape()

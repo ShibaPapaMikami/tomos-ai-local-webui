@@ -1,9 +1,11 @@
 (() => {
   const CHROME_MIC_SETTINGS_URL = "chrome://settings/content/microphone";
   const PARTIAL_TRANSCRIPTION_INTERVAL_SECONDS = 3;
-  const PARTIAL_MIN_RMS = 0.006;
-  const PARTIAL_MIN_PEAK = 0.025;
+  const PARTIAL_MIN_RMS = 0.003;
+  const PARTIAL_MIN_PEAK = 0.01;
   let activeVoiceStop = null;
+  let activeVoiceSession = null;
+  let voiceSessionGeneration = 0;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -143,6 +145,13 @@
     if (status) status.textContent = message || (active ? t("settings.asrMicLevelActive") : t("settings.asrMicLevelIdle"));
   }
 
+  function micCaptureDebugState(track, context) {
+    const trackState = track
+      ? `${track.readyState || "unknown"} / ${track.muted ? "muted" : "unmuted"} / ${track.enabled ? "enabled" : "disabled"}`
+      : "no-track";
+    return `${trackState} / audio: ${context?.state || "unknown"}`;
+  }
+
   async function startMicLevelMonitor({
     rootElement,
     deviceId = "",
@@ -186,12 +195,9 @@
     await context.resume?.();
     const data = new Uint8Array(analyser.fftSize || 2048);
     const trackLabel = track?.label || t("settings.asrMicDeviceDefault");
-    const trackState = () => track
-      ? `${track.readyState || "unknown"} / ${track.muted ? "muted" : "unmuted"} / ${track.enabled ? "enabled" : "disabled"}`
-      : "no-track";
     const debugMessage = (key, level = maxLevel) => t(key, {
       device: trackLabel,
-      state: trackState(),
+      state: micCaptureDebugState(track, context),
       level: Math.round(level),
     });
     const virtualDevice = isVirtualAudioDeviceLabel(trackLabel);
@@ -458,11 +464,33 @@
     els.composerStatus.classList?.toggle("recording", status === "recording" && Boolean(message));
   }
 
-  function renderAsrStatus({ els, t = (key) => key, status = "idle", seconds = 0, message = "" }) {
+  function renderAsrStatus({
+    els,
+    t = (key) => key,
+    status = "idle",
+    seconds = 0,
+    message = "",
+    signalLevel = null,
+  }) {
     const voiceButton = els?.voiceInput;
     if (voiceButton) {
-      voiceButton.classList.toggle("recording", status === "recording" || status === "partial" || status === "live");
+      voiceButton.classList.toggle("recording", status === "recording" || status === "waiting" || status === "input" || status === "speech" || status === "partial" || status === "live");
       if (voiceButton.dataset) voiceButton.dataset.asrStatus = status;
+    }
+    if (els?.composerStatus?.dataset) {
+      const hasSignalLevel = signalLevel !== null && signalLevel !== undefined;
+      const safeSignalLevel = Number(signalLevel);
+      if (
+        hasSignalLevel
+        && Number.isInteger(safeSignalLevel)
+        && safeSignalLevel >= 0
+        && safeSignalLevel <= 4
+        && ["recording", "waiting", "input", "speech", "partial", "live", "finalizing"].includes(status)
+      ) {
+        els.composerStatus.dataset.voiceLevel = String(safeSignalLevel);
+      } else {
+        delete els.composerStatus.dataset.voiceLevel;
+      }
     }
 
     if (status === "checking") {
@@ -473,12 +501,36 @@
       setComposerStatus({ els, message: t("composer.voiceRecording", { seconds }), status });
       return;
     }
+    if (status === "waiting") {
+      setComposerStatus({ els, message: t("composer.voiceWaitingForSpeech"), status: "recording" });
+      return;
+    }
+    if (status === "input") {
+      setComposerStatus({ els, message: t("composer.voiceInputDetected"), status: "recording" });
+      return;
+    }
+    if (status === "speech") {
+      setComposerStatus({ els, message: t("composer.voiceSpeechDetected"), status: "recording" });
+      return;
+    }
     if (status === "partial") {
       setComposerStatus({ els, message: message || t("composer.voicePartialTranscribing", { seconds }), status: "recording" });
       return;
     }
     if (status === "live") {
       setComposerStatus({ els, message: t("composer.voiceLiveRecording", { seconds }), status: "recording" });
+      return;
+    }
+    if (status === "finalizing") {
+      setComposerStatus({
+        els,
+        message: message || t("composer.voiceFinalizing"),
+        status: signalLevel === null || signalLevel === undefined ? "idle" : "recording",
+      });
+      return;
+    }
+    if (status === "stopped") {
+      setComposerStatus({ els, message: t("composer.voiceStopped") });
       return;
     }
     if (status === "unavailable") {
@@ -543,6 +595,7 @@
     model = "",
     fetchImpl = window.fetch,
     base64Encoder = blobToBase64,
+    signal,
   } = {}) {
     if (!audioBlob) throw new Error("No audio was recorded.");
     const audioBase64 = await base64Encoder(audioBlob);
@@ -552,6 +605,7 @@
         Accept: "application/json",
         "Content-Type": "application/json",
       },
+      signal,
       body: JSON.stringify({
         audioBase64,
         mimeType: audioBlob.type || "audio/webm",
@@ -568,13 +622,18 @@
   async function recordAudio({
     maxSeconds = 0,
     navigatorImpl = window.navigator,
+    root = window,
     mediaRecorderFactory,
     micGain = 1,
     micDeviceId = "",
     onTick,
     onPartialBlob,
+    onSpeechStart,
+    onFinalizing,
+    onAudioLevel,
     partialIntervalSeconds = PARTIAL_TRANSCRIPTION_INTERVAL_SECONDS,
     stopElement,
+    session: providedSession,
   } = {}) {
     if (!navigatorImpl?.mediaDevices?.getUserMedia) {
       throw new Error("Microphone recording is not supported in this browser.");
@@ -582,45 +641,80 @@
     if (typeof MediaRecorder === "undefined") {
       throw new Error("MediaRecorder is not supported in this browser.");
     }
+    const session = providedSession || {
+      id: ++voiceSessionGeneration,
+      stopped: false,
+      finalizing: false,
+      partialAbortController: null,
+      finalAbortController: null,
+      timers: [],
+    };
+    session.timers = Array.isArray(session.timers) ? session.timers : [];
     const stream = await navigatorImpl.mediaDevices.getUserMedia(audioConstraintsForDevice(micDeviceId));
+    session.mediaStream = stream;
+    if (session.stopped || session.captureStopRequested) {
+      stopVoiceCapture(session);
+      return null;
+    }
     return new Promise((resolve, reject) => {
       const chunks = [];
       let recorder;
-      let timer = null;
-      let tickTimer = null;
-      let partialTimer = null;
       let seconds = 0;
       let partialChunks = [];
-      const recording = gainAdjustedStream({ stream, gain: micGain });
-      const wavPartialCapture = createWavPartialCapture({
-        stream: recording.stream,
-        intervalSeconds: partialIntervalSeconds,
-        onPartialBlob,
-      });
-      const stopTracks = () => {
-        stream.getTracks?.().forEach((track) => track.stop?.());
-        if (recording.stream !== stream) {
-          recording.stream.getTracks?.().forEach((track) => track.stop?.());
-        }
-        recording.cleanup?.();
+      let settled = false;
+      let finalWavBlob = null;
+      const recording = gainAdjustedStream({ stream, gain: micGain, root });
+      session.captureStopped = false;
+      session.adjustedMediaStream = recording.stream;
+      session.streamCleanup = recording.cleanup;
+      session.stopElement = stopElement;
+      session.speechStarted = false;
+      const addTimer = (type, id) => {
+        session.timers.push({ type, id, root });
+        return id;
       };
-      const cleanup = () => {
-        window.clearTimeout(timer);
-        window.clearInterval(tickTimer);
-        window.clearInterval(partialTimer);
-        wavPartialCapture?.stop?.();
-        stopElement?.removeEventListener?.("click", stopRecording);
-        clearActiveVoiceStop(stopRecording);
-        stopTracks();
+      const finish = (blob) => {
+        if (settled) return;
+        settled = true;
+        stopVoiceCapture(session);
+        resolve(blob);
       };
-      const stopRecording = () => {
-        if (recorder?.state && recorder.state !== "inactive") recorder.stop();
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        stopVoiceCapture(session);
+        reject(error);
       };
       try {
         recorder = mediaRecorderFactory ? mediaRecorderFactory(recording.stream) : new MediaRecorder(recording.stream, mediaRecorderOptions());
       } catch (error) {
-        stopTracks();
+        stopVoiceCapture(session);
         reject(error);
+        return;
+      }
+      session.mediaRecorder = recorder;
+      const wavPartialCapture = createWavPartialCapture({
+        stream: recording.stream,
+        root,
+        intervalSeconds: partialIntervalSeconds,
+        onPartialBlob,
+        onSpeechStart: () => {
+          session.speechStarted = true;
+          onSpeechStart?.();
+        },
+        onAudioLevel,
+        onFinalBlob: (blob) => {
+          if (session.stopped || session.finalizing) return;
+          session.finalizing = true;
+          onFinalizing?.();
+          finalWavBlob = blob;
+          stopVoiceCapture(session);
+        },
+      });
+      session.wavCapture = wavPartialCapture;
+      session.audioContext = wavPartialCapture?.context || null;
+      if (!wavPartialCapture) {
+        fail(new Error("Voice activity detection is not supported in this browser."));
         return;
       }
       recorder.addEventListener("dataavailable", (event) => {
@@ -630,40 +724,42 @@
         }
       });
       recorder.addEventListener("error", (event) => {
-        cleanup();
-        reject(event.error || new Error("Audio recording failed."));
+        fail(event.error || new Error("Audio recording failed."));
       });
       recorder.addEventListener("stop", () => {
-        cleanup();
-        resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+        const mediaBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        if (session.stopped) finish(null);
+        else if (finalWavBlob) finish(finalWavBlob);
+        else if (wavPartialCapture && !session.speechStarted) finish(null);
+        else finish(mediaBlob);
       });
       recorder.start();
       wavPartialCapture?.start?.();
-      setActiveVoiceStop(stopRecording);
       onTick?.(0);
-      stopElement?.addEventListener?.("click", stopRecording);
       const emitPartial = () => {
-        if (!partialChunks.length || typeof onPartialBlob !== "function") return;
+        if (session.stopped || !partialChunks.length || typeof onPartialBlob !== "function") return;
         const blob = new Blob(partialChunks, { type: recorder.mimeType || "audio/webm" });
         partialChunks = [];
         Promise.resolve(onPartialBlob(blob, seconds)).catch(() => {});
       };
-      tickTimer = window.setInterval(() => {
+      addTimer("interval", root.setInterval(() => {
         seconds += 1;
         onTick?.(seconds);
-      }, 1000);
+      }, 1000));
       if (!wavPartialCapture && typeof onPartialBlob === "function" && Number(partialIntervalSeconds) > 0) {
-        partialTimer = window.setInterval(() => {
+        addTimer("interval", root.setInterval(() => {
           if (recorder.state === "recording" && typeof recorder.requestData === "function") {
             recorder.requestData();
-            window.setTimeout(emitPartial, 250);
+            addTimer("timeout", root.setTimeout(emitPartial, 250));
           }
-        }, Number(partialIntervalSeconds) * 1000);
+        }, Number(partialIntervalSeconds) * 1000));
       }
       if (Number(maxSeconds) > 0) {
-        timer = window.setTimeout(() => {
-          if (recorder.state !== "inactive") recorder.stop();
-        }, maxSeconds * 1000);
+        addTimer("timeout", root.setTimeout(() => {
+          if (session.stopped || recorder.state === "inactive") return;
+          if (wavPartialCapture && session.speechStarted) wavPartialCapture.finalize?.();
+          else stopVoiceCapture(session);
+        }, maxSeconds * 1000));
       }
     });
   }
@@ -726,6 +822,122 @@
     return `${base}${separator}${transcript}`;
   }
 
+  function mergeAsrTranscript({ baseText = "", partialText = "", finalText = "" } = {}) {
+    const base = String(baseText || "").trim();
+    const transcript = String(finalText || partialText || "").trim();
+    return [base, transcript].filter(Boolean).join(" ");
+  }
+
+  function shouldApplyAsrResult({ activeSessionId, resultSessionId, stopped = false } = {}) {
+    return !stopped && activeSessionId === resultSessionId;
+  }
+
+  function createAbortController(root = window) {
+    const Controller = root?.AbortController;
+    if (typeof Controller === "function") return new Controller();
+    let aborted = false;
+    return {
+      signal: {
+        get aborted() {
+          return aborted;
+        },
+      },
+      abort() {
+        aborted = true;
+      },
+    };
+  }
+
+  function clearVoiceSessionTimer(timer) {
+    if (!timer) return;
+    if (timer.type === "interval") timer.root?.clearInterval?.(timer.id);
+    else timer.root?.clearTimeout?.(timer.id);
+  }
+
+  function addVoiceSessionTimer(session, timer) {
+    if (!session || !timer) return;
+    session.timers = Array.isArray(session.timers) ? session.timers : [];
+    session.timers.push(timer);
+  }
+
+  function removeVoiceSessionTimer(session, id, root) {
+    if (!Array.isArray(session?.timers)) return;
+    session.timers = session.timers.filter((timer) => timer.id !== id || timer.root !== root);
+  }
+
+  function stopVoiceCapture(session) {
+    if (!session) return false;
+    session.captureStopRequested = true;
+    let cleaned = false;
+    const browserRecognitionStop = session.browserRecognitionStop;
+    session.browserRecognitionStop = null;
+    if (typeof browserRecognitionStop === "function") {
+      cleaned = true;
+      browserRecognitionStop();
+    }
+    if ((session.timers || []).length) cleaned = true;
+    Array.from(session.timers || []).forEach(clearVoiceSessionTimer);
+    session.timers = [];
+    const wavCapture = session.wavCapture;
+    session.wavCapture = null;
+    const audioContext = session.audioContext;
+    session.audioContext = null;
+    if (wavCapture) {
+      cleaned = true;
+      wavCapture.stop?.();
+    } else if (audioContext) {
+      cleaned = true;
+      audioContext.close?.();
+    }
+    const mediaRecorder = session.mediaRecorder;
+    session.mediaRecorder = null;
+    if (mediaRecorder?.state && mediaRecorder.state !== "inactive") {
+      cleaned = true;
+      mediaRecorder.stop();
+    }
+    const mediaStream = session.mediaStream;
+    const adjustedMediaStream = session.adjustedMediaStream;
+    session.mediaStream = null;
+    session.adjustedMediaStream = null;
+    const tracks = new Set();
+    new Set([mediaStream, adjustedMediaStream]).forEach((stream) => {
+      (stream?.getTracks?.() || []).forEach((track) => tracks.add(track));
+    });
+    if (tracks.size) cleaned = true;
+    tracks.forEach((track) => track.stop?.());
+    const streamCleanup = session.streamCleanup;
+    session.streamCleanup = null;
+    if (typeof streamCleanup === "function") {
+      cleaned = true;
+      streamCleanup();
+    }
+    session.stopElement?.removeEventListener?.("click", session.cancelHandler);
+    session.captureStopped = true;
+    return cleaned;
+  }
+
+  function cancelVoiceSession(session) {
+    if (!session || session.stopped) return false;
+    session.stopped = true;
+    stopVoiceCapture(session);
+    session.partialAbortController?.abort?.();
+    session.finalAbortController?.abort?.();
+    if (session.els?.prompt) {
+      session.els.prompt.value = session.baseText;
+      session.onResize?.();
+    }
+    if (activeVoiceSession === session) activeVoiceSession = null;
+    clearActiveVoiceStop(session.cancelHandler);
+    renderAsrStatus({ els: session.els, t: session.t, status: "stopped" });
+    return true;
+  }
+
+  function completeVoiceSession(session) {
+    if (!session) return;
+    if (activeVoiceSession === session) activeVoiceSession = null;
+    clearActiveVoiceStop(session.cancelHandler);
+  }
+
   function setActiveVoiceStop(stopFn) {
     activeVoiceStop = typeof stopFn === "function" ? stopFn : null;
   }
@@ -767,9 +979,79 @@
     };
   }
 
+  function voiceSignalLevel({ rms = 0, peak = 0, phase = "idle" } = {}) {
+    const safeRms = Number.isFinite(Number(rms)) && Number(rms) > 0 ? Number(rms) : 0;
+    const safePeak = Number.isFinite(Number(peak)) && Number(peak) > 0 ? Number(peak) : 0;
+    const safePhase = ["idle", "candidate", "speaking"].includes(phase) ? phase : "idle";
+    if (safePhase === "speaking" && (safeRms >= 0.012 || safePeak >= 0.04)) return 4;
+    if (safePhase === "speaking") return 3;
+    if (safePhase === "candidate") return 2;
+    if (safeRms >= 0.001 || safePeak >= 0.004) return 1;
+    return 0;
+  }
+
   function hasAudibleSignal(samples, { minRms = PARTIAL_MIN_RMS, minPeak = PARTIAL_MIN_PEAK } = {}) {
     const stats = audioSignalStats(samples);
     return stats.rms >= minRms || stats.peak >= minPeak;
+  }
+
+  function voiceActivityState({
+    state = {},
+    nowMs = 0,
+    rms = 0,
+    peak = 0,
+    minRms = 0.003,
+    minPeak = 0.01,
+    minSpeechMs = 180,
+    silenceToFinalizeMs = 650,
+  } = {}) {
+    const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : 0;
+    const audible = (Number.isFinite(Number(rms)) && Number(rms) >= minRms)
+      || (Number.isFinite(Number(peak)) && Number(peak) >= minPeak);
+    const current = {
+      phase: ["idle", "candidate", "speaking"].includes(state?.phase) ? state.phase : "idle",
+      candidateStartedAtMs: state?.candidateStartedAtMs ?? null,
+      speechStartedAtMs: state?.speechStartedAtMs ?? null,
+      lastAudibleAtMs: state?.lastAudibleAtMs ?? null,
+    };
+    const idle = () => ({
+      phase: "idle",
+      candidateStartedAtMs: null,
+      speechStartedAtMs: null,
+      lastAudibleAtMs: null,
+    });
+
+    if (current.phase === "idle") {
+      return {
+        state: audible ? { ...current, phase: "candidate", candidateStartedAtMs: now } : current,
+        action: "none",
+      };
+    }
+    if (current.phase === "candidate") {
+      if (!audible) return { state: idle(), action: "none" };
+      const candidateStartedAtMs = Number.isFinite(Number(current.candidateStartedAtMs))
+        ? Number(current.candidateStartedAtMs)
+        : now;
+      if (now - candidateStartedAtMs >= minSpeechMs) {
+        return {
+          state: {
+            ...current,
+            phase: "speaking",
+            candidateStartedAtMs,
+            speechStartedAtMs: now,
+            lastAudibleAtMs: now,
+          },
+          action: "speech-start",
+        };
+      }
+      return { state: { ...current, candidateStartedAtMs }, action: "none" };
+    }
+    if (audible) return { state: { ...current, lastAudibleAtMs: now }, action: "none" };
+    const lastAudibleAtMs = Number.isFinite(Number(current.lastAudibleAtMs))
+      ? Number(current.lastAudibleAtMs)
+      : now;
+    if (now - lastAudibleAtMs >= silenceToFinalizeMs) return { state: idle(), action: "speech-finalize" };
+    return { state: { ...current, lastAudibleAtMs }, action: "none" };
   }
 
   function wavBlobFromFloat32(samples, sampleRate, BlobCtor = Blob) {
@@ -809,39 +1091,126 @@
     root = window,
     intervalSeconds = PARTIAL_TRANSCRIPTION_INTERVAL_SECONDS,
     onPartialBlob,
+    onFinalBlob,
+    onSpeechStart,
+    onAudioLevel,
+    now = () => root.performance?.now?.() ?? Date.now(),
     BlobCtor = Blob,
   } = {}) {
     const AudioContextCtor = root.AudioContext || root.webkitAudioContext;
-    if (!stream || !AudioContextCtor || typeof onPartialBlob !== "function") return null;
+    if (!stream || !AudioContextCtor) return null;
+    if (
+      typeof onPartialBlob !== "function"
+      && typeof onFinalBlob !== "function"
+      && typeof onAudioLevel !== "function"
+    ) return null;
     let context;
     let source;
     let processor;
     let sinkGain;
     let timer = null;
-    let sampleChunks = [];
+    let partialChunks = [];
+    let speechChunks = [];
     let emittedSeconds = 0;
+    let vadState = {
+      phase: "idle",
+      candidateStartedAtMs: null,
+      speechStartedAtMs: null,
+      lastAudibleAtMs: null,
+    };
+    let finalized = false;
+    let stopped = false;
+    let lastAudioLevelAtMs = Number.NEGATIVE_INFINITY;
     const safeIntervalSeconds = Math.max(2, Number(intervalSeconds) || PARTIAL_TRANSCRIPTION_INTERVAL_SECONDS);
-    const flush = () => {
-      if (!sampleChunks.length || !context?.sampleRate) return;
-      const samples = mergeFloat32Chunks(sampleChunks);
-      sampleChunks = [];
+    const flushPartial = () => {
+      if (typeof onPartialBlob !== "function") return;
+      if (finalized || vadState.phase !== "speaking" || !partialChunks.length || !context?.sampleRate) return;
+      const samples = mergeFloat32Chunks(partialChunks);
+      partialChunks = [];
       if (samples.length < context.sampleRate * 0.8) return;
       if (!hasAudibleSignal(samples)) return;
       emittedSeconds += samples.length / context.sampleRate;
       const blob = wavBlobFromFloat32(samples, context.sampleRate, BlobCtor);
       Promise.resolve(onPartialBlob(blob, Math.round(emittedSeconds))).catch(() => {});
     };
+    const finalize = () => {
+      if (finalized || !speechChunks.length || !context?.sampleRate) return null;
+      finalized = true;
+      root.clearInterval?.(timer);
+      const samples = mergeFloat32Chunks(speechChunks);
+      partialChunks = [];
+      speechChunks = [];
+      const blob = wavBlobFromFloat32(samples, context.sampleRate, BlobCtor);
+      Promise.resolve(onFinalBlob?.(blob)).catch(() => {});
+      return blob;
+    };
     try {
       context = new AudioContextCtor();
       source = context.createMediaStreamSource(stream);
       processor = context.createScriptProcessor?.(4096, 1, 1);
-      if (!processor) return null;
+      if (!processor) {
+        source.disconnect?.();
+        context.close?.();
+        return null;
+      }
       sinkGain = context.createGain?.();
       if (sinkGain) sinkGain.gain.value = 0;
       processor.onaudioprocess = (event) => {
         const input = event.inputBuffer?.getChannelData?.(0);
-        if (!input?.length) return;
-        sampleChunks.push(new Float32Array(input));
+        if (!input?.length || finalized || stopped) return;
+        const chunk = new Float32Array(input);
+        const stats = audioSignalStats(chunk);
+        const previousPhase = vadState.phase;
+        const currentNow = now();
+        const transition = voiceActivityState({
+          state: vadState,
+          nowMs: currentNow,
+          rms: stats.rms,
+          peak: stats.peak,
+        });
+        vadState = transition.state;
+        const signalLevel = voiceSignalLevel({
+          rms: stats.rms,
+          peak: stats.peak,
+          phase: vadState.phase,
+        });
+        if (
+          typeof onAudioLevel === "function"
+          && (
+            currentNow - lastAudioLevelAtMs >= 100
+            || transition.action !== "none"
+            || previousPhase !== vadState.phase
+          )
+        ) {
+          lastAudioLevelAtMs = currentNow;
+          onAudioLevel({
+            level: signalLevel,
+            rms: stats.rms,
+            peak: stats.peak,
+            phase: vadState.phase,
+          });
+        }
+
+        if (previousPhase === "idle") {
+          if (vadState.phase === "candidate") {
+            speechChunks = [chunk];
+            partialChunks = [chunk];
+          }
+        } else if (previousPhase === "candidate") {
+          if (vadState.phase === "idle") {
+            speechChunks = [];
+            partialChunks = [];
+          } else {
+            speechChunks.push(chunk);
+            partialChunks.push(chunk);
+          }
+        } else if (previousPhase === "speaking") {
+          speechChunks.push(chunk);
+          partialChunks.push(chunk);
+        }
+
+        if (transition.action === "speech-start") onSpeechStart?.();
+        if (transition.action === "speech-finalize") finalize();
       };
       source.connect(processor);
       if (sinkGain && context.destination) {
@@ -851,13 +1220,16 @@
         processor.connect(context.destination);
       }
       return {
+        context,
+        finalize,
         start() {
           context.resume?.();
-          timer = root.setInterval?.(flush, safeIntervalSeconds * 1000);
+          timer = root.setInterval?.(flushPartial, safeIntervalSeconds * 1000);
         },
         stop() {
+          if (stopped) return;
+          stopped = true;
           root.clearInterval?.(timer);
-          flush();
           processor.disconnect?.();
           source.disconnect?.();
           sinkGain?.disconnect?.();
@@ -883,6 +1255,8 @@
     root = window,
     recognitionFactory,
     stopElement,
+    shouldApplyResult = () => true,
+    session,
   } = {}) {
     const Recognition = recognitionFactory || speechRecognitionConstructor(root);
     if (!Recognition) {
@@ -897,20 +1271,26 @@
     let stopTimer = null;
     let stopFallbackTimer = null;
     let settled = false;
+    let stopRequested = false;
+    let sessionStop = null;
 
     const updatePrompt = () => {
-      if (!els?.prompt) return;
+      if (!els?.prompt || !shouldApplyResult()) return;
       els.prompt.value = composeLivePromptValue(baseValue, finalText, interimText);
       onResize?.();
     };
 
-    return new Promise((resolve, reject) => {
+    const promise = new Promise((resolve, reject) => {
       const cleanup = () => {
         root.clearInterval?.(tickTimer);
         root.clearTimeout?.(stopTimer);
         root.clearTimeout?.(stopFallbackTimer);
+        removeVoiceSessionTimer(session, tickTimer, root);
+        removeVoiceSessionTimer(session, stopTimer, root);
+        removeVoiceSessionTimer(session, stopFallbackTimer, root);
         stopElement?.removeEventListener?.("click", stopRecognition);
         clearActiveVoiceStop(stopRecognition);
+        if (session?.browserRecognitionStop === sessionStop) session.browserRecognitionStop = null;
       };
       const finish = () => {
         if (settled) return;
@@ -926,8 +1306,13 @@
         cleanup();
         reject(error);
       };
-      const stopRecognition = () => {
-        if (settled) return;
+      const stopRecognition = (forceFinish = false) => {
+        if (settled) return false;
+        if (stopRequested) {
+          if (forceFinish) finish();
+          return false;
+        }
+        stopRequested = true;
         try {
           recognition.stop();
         } catch {
@@ -937,14 +1322,24 @@
             // Ignore abort errors and fall through to the forced finish.
           }
         }
+        if (settled) return true;
+        if (forceFinish) {
+          finish();
+          return true;
+        }
         stopFallbackTimer = root.setTimeout?.(finish, 800);
+        addVoiceSessionTimer(session, { type: "timeout", id: stopFallbackTimer, root });
+        return true;
       };
+      sessionStop = () => stopRecognition(true);
+      if (session) session.browserRecognitionStop = sessionStop;
 
       recognition.lang = language || "ja-JP";
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
+        if (settled || stopRequested) return;
         interimText = "";
         const results = event?.results || [];
         for (let index = event?.resultIndex || 0; index < results.length; index += 1) {
@@ -975,16 +1370,20 @@
         fail(error);
         return;
       }
-      setActiveVoiceStop(stopRecognition);
+      if (!session) setActiveVoiceStop(stopRecognition);
       stopElement?.addEventListener?.("click", stopRecognition);
       tickTimer = root.setInterval?.(() => {
         seconds += 1;
         renderAsrStatus({ els, t, status: "live", seconds });
       }, 1000);
+      addVoiceSessionTimer(session, { type: "interval", id: tickTimer, root });
       if (Number(maxSeconds) > 0) {
         stopTimer = root.setTimeout?.(stopRecognition, Number(maxSeconds) * 1000);
+        addVoiceSessionTimer(session, { type: "timeout", id: stopTimer, root });
       }
     });
+    if (session) session.browserRecognitionPromise = promise;
+    return promise;
   }
 
   async function handleVoiceInputClick({
@@ -1004,6 +1403,7 @@
     onResize,
   } = {}) {
     if (els?.voiceInput?.dataset) els.voiceInput.dataset.asrBusy = "true";
+    let session = null;
     const runLiveFallback = async () => {
       if (!liveSpeechRecognitionAvailable(speechRoot)) return null;
       renderAsrStatus({ els, t, status: "live", seconds: 0 });
@@ -1043,47 +1443,94 @@
         renderAsrStatus({ els, t, status: "unavailable", message: asrUnavailableMessage(status, t) });
         return status;
       }
-      renderAsrStatus({ els, t, status: "recording", seconds: 0 });
       const basePromptValue = String(els?.prompt?.value || "");
-      const partialTexts = [];
-      let recordingDone = false;
+      session = {
+        id: ++voiceSessionGeneration,
+        stopped: false,
+        finalizing: false,
+        mediaRecorder: null,
+        mediaStream: null,
+        audioContext: null,
+        partialAbortController: null,
+        finalAbortController: null,
+        timers: [],
+        els,
+        t,
+        onResize,
+        baseText: basePromptValue,
+        lastSignalLevel: 0,
+        lastSignalStatus: "waiting",
+      };
+      session.cancelHandler = () => cancelVoiceSession(session);
+      activeVoiceSession = session;
+      setActiveVoiceStop(session.cancelHandler);
+      renderAsrStatus({ els, t, status: "waiting", signalLevel: 0 });
+      let partialText = "";
       let partialBusy = false;
       let elapsedSeconds = 0;
       let livePreviewStarted = false;
       const partialMode = normalizePartialTranscriptionMode(getPartialMode?.());
       const renderPartialTranscript = () => {
-        if (recordingDone || !els?.prompt || !partialTexts.length) return;
-        els.prompt.value = composeLivePromptValue(basePromptValue, partialTexts.join(" "), "");
+        if (session.stopped || !els?.prompt || !partialText) return;
+        els.prompt.value = mergeAsrTranscript({
+          baseText: basePromptValue,
+          partialText,
+          finalText: "",
+        });
         onResize?.();
       };
       if (partialMode === "browser" && els?.prompt && liveSpeechRecognitionAvailable(speechRoot)) {
         livePreviewStarted = true;
-        Promise.resolve(liveRecorder({
+        session.browserRecognitionPromise = Promise.resolve(liveRecorder({
           els,
           t,
           onResize,
           stopElement: els?.voiceInput,
           root: speechRoot,
           maxSeconds: 0,
-        })).catch(() => {});
+          session,
+          shouldApplyResult: () => shouldApplyAsrResult({
+            activeSessionId: activeVoiceSession?.id,
+            resultSessionId: session.id,
+            stopped: session.stopped,
+          }),
+        }));
+        session.browserRecognitionPromise.catch(() => {});
+        setActiveVoiceStop(session.cancelHandler);
       }
       const handleLocalPartial = partialMode === "local"
         ? async (partialBlob) => {
-          if (recordingDone || partialBusy || !partialBlob?.size) return;
+          if (session.stopped || partialBusy || !partialBlob?.size) return;
           partialBusy = true;
           renderAsrStatus({ els, t, status: "partial", seconds: elapsedSeconds });
+          const resultSessionId = session.id;
+          const controller = createAbortController(speechRoot);
+          session.partialAbortController = controller;
           try {
-            const partial = await transcribeAudio({ audioBlob: partialBlob, model: selectedModel, fetchImpl, base64Encoder });
+            const partial = await transcribeAudio({
+              audioBlob: partialBlob,
+              model: selectedModel,
+              fetchImpl,
+              base64Encoder,
+              signal: controller.signal,
+            });
             const text = String(partial?.text || "").trim();
-            if (text && !recordingDone) {
-              partialTexts.push(text);
+            if (text && !session.finalizing && shouldApplyAsrResult({
+              activeSessionId: activeVoiceSession?.id,
+              resultSessionId,
+              stopped: session.stopped,
+            })) {
+              partialText = text;
               renderPartialTranscript();
             }
           } catch {
             // Partial transcription is best-effort. The final transcription still runs after stop.
           } finally {
+            if (session.partialAbortController === controller) session.partialAbortController = null;
             partialBusy = false;
-            if (!recordingDone) renderAsrStatus({ els, t, status: "recording", seconds: elapsedSeconds });
+            if (!session.stopped && activeVoiceSession === session) {
+              renderAsrStatus({ els, t, status: "recording", seconds: elapsedSeconds });
+            }
           }
         }
         : null;
@@ -1093,30 +1540,112 @@
         partialIntervalSeconds: normalizePartialIntervalSeconds(getPartialIntervalSeconds?.()),
         onTick: (seconds) => {
           elapsedSeconds = seconds;
-          renderAsrStatus({ els, t, status: partialBusy ? "partial" : "recording", seconds });
+          renderAsrStatus({
+            els,
+            t,
+            status: partialBusy ? "partial" : session.lastSignalStatus,
+            seconds,
+            signalLevel: session.lastSignalLevel,
+          });
         },
         onPartialBlob: handleLocalPartial,
+        onSpeechStart: () => {
+          if (!session.stopped) {
+            renderAsrStatus({
+              els,
+              t,
+              status: "speech",
+              signalLevel: session.lastSignalLevel,
+            });
+          }
+        },
+        onFinalizing: () => {
+          if (!session.stopped) {
+            renderAsrStatus({
+              els,
+              t,
+              status: "finalizing",
+              signalLevel: session.lastSignalLevel,
+            });
+          }
+        },
+        onAudioLevel: ({ level, phase }) => {
+          if (
+            session.stopped
+            || session.finalizing
+            || activeVoiceSession?.id !== session.id
+          ) return;
+          session.lastSignalLevel = level;
+          session.lastSignalStatus = phase === "candidate" || phase === "speaking"
+            ? "speech"
+            : (level > 0 ? "input" : "waiting");
+          renderAsrStatus({
+            els,
+            t,
+            status: session.lastSignalStatus,
+            signalLevel: level,
+          });
+        },
         stopElement: els?.voiceInput,
+        session,
       });
-      recordingDone = true;
-      renderAsrStatus({ els, t, status: "checking", message: t("composer.voiceTranscribing") });
-      const result = await transcribeAudio({ audioBlob, model: selectedModel, fetchImpl, base64Encoder });
+      if (session.stopped || !audioBlob) {
+        if (!session.stopped) {
+          stopVoiceCapture(session);
+          completeVoiceSession(session);
+          renderAsrStatus({ els, t, status: "unavailable", message: t("composer.voiceEmpty") });
+        }
+        return { ok: false, stopped: session.stopped, empty: !audioBlob };
+      }
+      stopVoiceCapture(session);
+      session.finalizing = true;
+      renderAsrStatus({
+        els,
+        t,
+        status: "finalizing",
+        signalLevel: session.lastSignalLevel,
+      });
+      const resultSessionId = session.id;
+      const finalController = createAbortController(speechRoot);
+      session.finalAbortController = finalController;
+      const result = await transcribeAudio({
+        audioBlob,
+        model: selectedModel,
+        fetchImpl,
+        base64Encoder,
+        signal: finalController.signal,
+      });
+      if (!shouldApplyAsrResult({
+        activeSessionId: activeVoiceSession?.id,
+        resultSessionId,
+        stopped: session.stopped,
+      })) {
+        return { ...result, ignored: true };
+      }
       if (result.text) {
-        if (els?.prompt && (partialTexts.length || livePreviewStarted)) {
+        if (els?.prompt && (partialText || livePreviewStarted)) {
           els.prompt.value = basePromptValue;
           onResize?.();
         }
         onTranscript?.(result.text);
         renderAsrStatus({ els, t, status: "idle" });
       } else {
+        if (els?.prompt && (partialText || livePreviewStarted)) {
+          els.prompt.value = basePromptValue;
+          onResize?.();
+        }
         renderAsrStatus({ els, t, status: "unavailable", message: result.message || t("composer.voiceEmpty") });
       }
+      completeVoiceSession(session);
       return result;
     } catch (error) {
+      if (session?.stopped) return { ok: false, stopped: true };
+      if (session && activeVoiceSession !== session) return null;
       renderAsrStatus({ els, t, status: "error", message: error.message || t("composer.voiceError") });
       return null;
     } finally {
-      if (els?.voiceInput?.dataset) els.voiceInput.dataset.asrBusy = "false";
+      if (session && activeVoiceSession === session) completeVoiceSession(session);
+      if (!activeVoiceSession && els?.voiceInput?.dataset) els.voiceInput.dataset.asrBusy = "false";
     }
   }
 
@@ -1184,6 +1713,8 @@
     gainAdjustedStream,
     listAudioInputDevices,
     liveSpeechRecognitionAvailable,
+    micCaptureDebugState,
+    mergeAsrTranscript,
     mergeFloat32Chunks,
     hasAudibleSignal,
     isVirtualAudioDeviceLabel,
@@ -1197,7 +1728,10 @@
     setMicLevelUi,
     startMicLevelMonitor,
     supportedAudioMimeType,
+    shouldApplyAsrResult,
     transcribeAudio,
+    voiceActivityState,
+    voiceSignalLevel,
     wavBlobFromFloat32,
   };
 })();

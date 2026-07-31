@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "TOMOS main window with core window capabilities only",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

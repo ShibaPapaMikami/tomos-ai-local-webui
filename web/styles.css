@@ -826,6 +826,247 @@ h1 {
   font-weight: 700;
 }
 
+.migration-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border-block: 1px solid var(--line);
+  padding: 16px 0;
+}
+
+.migration-heading,
+.migration-actions,
+.migration-confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.migration-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.migration-heading strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.migration-heading span,
+.migration-note,
+.migration-empty,
+.migration-status {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.migration-note,
+.migration-empty,
+.migration-status {
+  margin: 0;
+}
+
+.migration-list {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  border-block: 1px solid var(--line);
+}
+
+.migration-item {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) repeat(4, minmax(88px, 1fr));
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.migration-item:last-child {
+  border-bottom: 0;
+}
+
+.migration-item-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.migration-item-target input {
+  flex: 0 0 auto;
+}
+
+.migration-item-target span,
+.migration-fact strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.migration-fact {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.migration-fact span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.migration-fact strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.migration-status {
+  min-height: 19px;
+  color: var(--muted-strong);
+  font-weight: 650;
+}
+
+.migration-status[data-state="completed"] {
+  color: var(--accent);
+}
+
+.migration-status[data-state="error"] {
+  color: var(--danger);
+}
+
+.migration-actions .ghost-button:disabled,
+.local-storage-transfer .ghost-button:disabled,
+.local-storage-file-input:disabled {
+  border-color: var(--line);
+  background: var(--panel-soft);
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.68;
+  filter: none;
+}
+
+.local-storage-transfer {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.local-storage-transfer-heading,
+.local-storage-transfer-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.local-storage-transfer-heading strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.local-storage-transfer-heading span,
+.local-storage-transfer-warning {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.local-storage-transfer-warning {
+  margin: 0;
+  color: var(--muted-strong);
+  font-weight: 650;
+}
+
+.local-storage-transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.local-storage-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  border: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.local-storage-import-preview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+
+.local-storage-import-preview[hidden] {
+  display: none;
+}
+
+.local-storage-import-preview > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border-block: 1px solid var(--line);
+  padding: 8px 0;
+}
+
+.local-storage-import-preview dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.local-storage-import-preview dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.migration-confirm-dialog {
+  width: min(460px, calc(100% - 32px));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+  padding: 0;
+}
+
+.migration-confirm-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.migration-confirm-dialog form {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.migration-confirm-dialog p {
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .person-relationship-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2557,8 +2798,16 @@ h1 {
 .pc-diagnostics-actions {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
+}
+
+.pc-diagnostics-basis {
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .pc-diagnostics-refresh {
@@ -2744,6 +2993,44 @@ h1 {
   height: 1px;
   background: var(--line);
   margin: 0 10px;
+}
+
+.pc-diagnostics-benchmark {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--active-line);
+  border-radius: 7px;
+  background: var(--active-bg);
+  padding: 10px;
+}
+
+.pc-diagnostics-benchmark > strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.pc-diagnostics-benchmark .ghost-button {
+  justify-self: start;
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pc-diagnostics-benchmark-status {
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pc-diagnostics-benchmark-status.complete {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.pc-diagnostics-benchmark-status.error {
+  color: #8a2d2d;
+  font-weight: 800;
 }
 
 .pc-diagnostics-update {
@@ -5035,7 +5322,9 @@ select:focus {
 
 .message-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  max-width: 100%;
 }
 
 .message-actions button {
@@ -5052,6 +5341,11 @@ select:focus {
 .message-actions button:hover {
   border-color: var(--active-line);
   color: var(--accent);
+}
+
+.message-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .message-actions .icon-action {
@@ -5779,15 +6073,22 @@ select:focus {
 .composer-status.recording::before {
   content: "";
   display: block;
-  width: 84px;
+  width: 36px;
   height: 14px;
   background:
-    linear-gradient(90deg, transparent 0 8px, currentColor 8px 10px, transparent 10px 18px) 0 50% / 18px 2px repeat-x,
-    linear-gradient(currentColor, currentColor) 50% 50% / 2px 14px no-repeat,
-    linear-gradient(currentColor, currentColor) 42% 50% / 2px 8px no-repeat,
-    linear-gradient(currentColor, currentColor) 58% 50% / 2px 8px no-repeat;
-  opacity: 0.72;
+    linear-gradient(currentColor, currentColor) 0 50% / 4px var(--voice-bar-1, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 8px 50% / 4px var(--voice-bar-2, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 16px 50% / 4px var(--voice-bar-3, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 24px 50% / 4px var(--voice-bar-4, 2px) no-repeat,
+    linear-gradient(currentColor, currentColor) 32px 50% / 4px var(--voice-bar-5, 2px) no-repeat;
+  opacity: 0.78;
 }
+
+.composer-status[data-voice-level="0"] { --voice-bar-1: 2px; --voice-bar-2: 2px; --voice-bar-3: 2px; --voice-bar-4: 2px; --voice-bar-5: 2px; }
+.composer-status[data-voice-level="1"] { --voice-bar-1: 4px; --voice-bar-2: 6px; --voice-bar-3: 4px; --voice-bar-4: 6px; --voice-bar-5: 4px; }
+.composer-status[data-voice-level="2"] { --voice-bar-1: 6px; --voice-bar-2: 10px; --voice-bar-3: 8px; --voice-bar-4: 10px; --voice-bar-5: 6px; }
+.composer-status[data-voice-level="3"] { --voice-bar-1: 10px; --voice-bar-2: 14px; --voice-bar-3: 12px; --voice-bar-4: 14px; --voice-bar-5: 10px; }
+.composer-status[data-voice-level="4"] { --voice-bar-1: 14px; --voice-bar-2: 14px; --voice-bar-3: 14px; --voice-bar-4: 14px; --voice-bar-5: 14px; }
 
 .send-button:hover {
   filter: brightness(1.03);
@@ -5942,6 +6243,30 @@ select:focus {
 
   .management-card {
     grid-template-columns: 1fr;
+  }
+
+  .migration-heading,
+  .migration-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .migration-heading .ghost-button,
+  .migration-actions button,
+  .local-storage-transfer-actions button {
+    width: 100%;
+  }
+
+  .migration-item {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .migration-item-target {
+    grid-column: 1 / -1;
+  }
+
+  .local-storage-import-preview {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .mobile-connect-body {

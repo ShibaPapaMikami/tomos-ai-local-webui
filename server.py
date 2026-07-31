@@ -6,6 +6,7 @@ import base64
 import binascii
 from dataclasses import dataclass
 import hashlib
+import hmac
 import importlib.util
 import ipaddress
 import io
@@ -36,7 +37,22 @@ import uuid
 import webbrowser
 import zipfile
 import xml.etree.ElementTree as ET
+from typing import Mapping
 
+from app_paths import TomosPaths, ensure_data_directories, tomos_data_root
+from migration_manager import (
+    MigrationApprovalError,
+    MigrationNotFoundError,
+    MigrationPreviewStaleError,
+    MigrationValidationError,
+    apply_migration,
+    build_migration_preview,
+    detect_legacy_sources,
+    managed_data_write,
+    prepare_managed_data_startup,
+    rollback_migration,
+    snapshot_id_for_migration,
+)
 from search_tools import build_search_context, search_web
 from agent_reach_adapter import DoctorCache, RouteDecision, run_exa_search, select_route
 from pdf_reader import (
@@ -50,14 +66,8 @@ from pdf_reader import (
     pdf_page_count,
     usable_pdf_text,
 )
-from knowledge_layer import (
-    default_db_path,
-    index_folder as index_knowledge_folder,
-    knowledge_status,
-    search_knowledge,
-)
+from knowledge_layer import index_folder as index_knowledge_folder, knowledge_status, search_knowledge
 from context_core import build_context as build_local_context
-from context_core import context_db_path
 from context_core import forget_context_record
 from context_core import knowledge_result_to_records
 from context_core import list_context_records
@@ -65,15 +75,10 @@ from context_core import profile as context_profile
 from context_core import remember
 from context_core import save_context_record
 from context_core import update_context_record
-from contract_ledger import (
-    default_contract_db_path,
-    delete_contract,
-    extract_contract_candidate,
-    list_contracts,
-    save_contract,
-)
+from contract_ledger import delete_contract, extract_contract_candidate, list_contracts, save_contract
 from sarashina_ocr_runner import sarashina_compare_page_payload, sarashina_ocr_status
 from study_pack_manager import build_catalog, install_pack, remove_pack
+import tts_engine
 
 try:
     import segno
@@ -83,13 +88,13 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
-APP_SUPPORT_DIR = os.environ.get("TOMOS_APP_SUPPORT_DIR", "").strip()
-PERSISTENT_ROOT = Path(APP_SUPPORT_DIR).expanduser() if APP_SUPPORT_DIR else ROOT
-KNOWLEDGE_DB_PATH = default_db_path(PERSISTENT_ROOT)
-CONTEXT_DB_PATH = context_db_path(PERSISTENT_ROOT)
-CONTRACT_DB_PATH = default_contract_db_path(PERSISTENT_ROOT)
-PERSON_PHOTO_DIR = PERSISTENT_ROOT / "data" / "person-photos"
-STUDY_PACK_INSTALL_ROOT = PERSISTENT_ROOT / ".gemma4-data" / "study-packs"
+LEGACY_HOME = Path.home()
+TOMOS_PATHS = TomosPaths.from_root(tomos_data_root())
+KNOWLEDGE_DB_PATH = TOMOS_PATHS.knowledge_db
+CONTEXT_DB_PATH = TOMOS_PATHS.context_db
+CONTRACT_DB_PATH = TOMOS_PATHS.contracts_db
+PERSON_PHOTO_DIR = TOMOS_PATHS.person_photos
+STUDY_PACK_INSTALL_ROOT = TOMOS_PATHS.study_packs
 NOTE_ARTICLE_PACK_VERSION = "0.1.0"
 NOTE_ARTICLE_PACK_RELEASE_URL = (
     "https://github.com/ShibaPapaMikami/tomos-ai-local-webui/releases/download/"
@@ -105,7 +110,49 @@ PERSON_PHOTO_MIME_EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
 }
-APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.230")
+APP_VERSION = os.environ.get("GEMMA_APP_VERSION", "0.8.233")
+DESKTOP_GUARD_HOSTS = frozenset({"127.0.0.1:54876", "localhost:54876"})
+DESKTOP_GUARD_ORIGINS = frozenset({"http://127.0.0.1:54876", "http://localhost:54876"})
+DESKTOP_JSON_CONTENT_TYPE_PATHS = frozenset({
+    "/api/attachment/read",
+    "/api/asr/transcribe",
+    "/api/chat",
+    "/api/context/memory/forget",
+    "/api/context/memory/save",
+    "/api/context/memory/update",
+    "/api/contracts/delete",
+    "/api/contracts/extract",
+    "/api/contracts/import-gaps",
+    "/api/contracts/pdf-import/auto",
+    "/api/contracts/pdf-import/sarashina/compare-page",
+    "/api/contracts/pdf-import/try-page",
+    "/api/contracts/save",
+    "/api/diagnostics/model-benchmark",
+    "/api/image/generate",
+    "/api/knowledge/index",
+    "/api/knowledge/search",
+    "/api/llm/check",
+    "/api/desktop/migration/apply",
+    "/api/desktop/migration/rollback",
+    "/api/models/pull",
+    "/api/models/remove",
+    "/api/note-article/reconstruct",
+    "/api/person-photo/upload",
+    "/api/search",
+    "/api/tts/cancel",
+    "/api/tts/stream",
+    "/api/tts/synthesize",
+    "/api/weather",
+    "/api/workspace/codegraph/init",
+    "/api/workspace/codegraph/read",
+    "/api/workspace/pick",
+    "/api/workspace/read",
+    "/api/workspace/reveal",
+    "/api/workspace/search",
+    "/api/workspace/tree",
+    "/api/workspace/validate",
+    "/api/workspace/write",
+})
 GEMMA_BASE_MODEL = "gemma4:12b"
 GEMMA_MLX_MODEL = "gemma4:12b-mlx"
 QWEN3_2507_MODEL = "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL"
@@ -156,11 +203,13 @@ def run_note_article_pack_install() -> None:
                     "totalBytes": total,
                 })
 
-        result = install_pack(
-            entry,
-            install_root=STUDY_PACK_INSTALL_ROOT,
-            progress_callback=update_progress,
-        )
+        with managed_data_write(TOMOS_PATHS):
+            ensure_data_directories(TOMOS_PATHS)
+            result = install_pack(
+                entry,
+                install_root=STUDY_PACK_INSTALL_ROOT,
+                progress_callback=update_progress,
+            )
         with STUDY_PACK_INSTALL_LOCK:
             STUDY_PACK_INSTALL_JOB.update({
                 "status": "done",
@@ -204,7 +253,10 @@ def install_note_article_pack_payload() -> dict:
 
 
 def remove_note_article_pack_payload() -> dict:
-    return remove_pack("note-article-writing", install_root=STUDY_PACK_INSTALL_ROOT)
+    return remove_pack(
+        "note-article-writing",
+        install_root=STUDY_PACK_INSTALL_ROOT,
+    )
 
 SUBPROCESS_OUTPUT_ENCODINGS = tuple(dict.fromkeys(
     encoding
@@ -246,6 +298,14 @@ WHISPER_CPP_BINARY = os.environ.get("GEMMA_WHISPER_CPP_BINARY", "").strip()
 WHISPER_CPP_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_MODEL", "").strip()
 WHISPER_CPP_FAST_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_FAST_MODEL", "").strip()
 WHISPER_CPP_ACCURATE_MODEL_PATH = os.environ.get("GEMMA_WHISPER_CPP_ACCURATE_MODEL", "").strip()
+WHISPER_SERVER_URL = os.environ.get("GEMMA_WHISPER_SERVER_URL", "")
+WHISPER_TRANSCRIPTION_ERROR = "音声を文字起こしできませんでした。設定を確認して、もう一度お試しください。"
+
+
+class WhisperTranscriptionError(RuntimeError):
+    pass
+
+
 ASR_MODEL_CANDIDATES = [
     {
         "model": "nvidia/nemotron-3.5-asr-streaming-0.6b",
@@ -415,6 +475,7 @@ OCR_SETUP_JOB: dict[str, object] = {}
 OCR_SETUP_LOCK = threading.Lock()
 INTERNET_LAYER_SETUP_JOB: dict[str, object] = {}
 INTERNET_LAYER_SETUP_LOCK = threading.Lock()
+MODEL_BENCHMARK_LOCK = threading.Lock()
 ASR_WORKER_PROCESS: subprocess.Popen | None = None
 ASR_WORKER_OUTPUTS: queue.Queue[str] = queue.Queue()
 ASR_WORKER_LOCK = threading.Lock()
@@ -460,7 +521,7 @@ IGNORED_DIRS = {
 }
 CODEGRAPH_DIR_NAME = ".codegraph"
 CODEGRAPH_SUMMARY_FILE = "summary.json"
-CODEGRAPH_APP_CACHE_DIR = PERSISTENT_ROOT / ".gemma4-data" / "codegraph"
+CODEGRAPH_APP_CACHE_DIR = TOMOS_PATHS.codegraph
 CODEGRAPH_MAX_FILES = 350
 CODEGRAPH_MAX_FILE_BYTES = 220_000
 CODEGRAPH_MAX_SYMBOLS_PER_FILE = 24
@@ -614,12 +675,185 @@ def stream_json_event(handler: BaseHTTPRequestHandler, payload: dict) -> None:
     handler.wfile.flush()
 
 
+def current_tts_config() -> dict[str, object]:
+    return tts_engine.normalize_tts_config(dict(os.environ))
+
+
+def tts_status_payload() -> dict[str, object]:
+    config = current_tts_config()
+    public_status = {
+        key: config[key]
+        for key in (
+            "enabled",
+            "engine",
+            "ready",
+            "supportsStreaming",
+            "supportsCancel",
+            "reason",
+        )
+    }
+    return {"ok": True, "tts": public_status}
+
+
+def tts_synthesize_payload(payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    request = tts_engine.validate_tts_request(payload)
+    if not request["ok"]:
+        return 400, request
+    config = current_tts_config()
+    if not config["ready"]:
+        return 503, {"ok": False, "error": "tts_unavailable"}
+    result = tts_engine.run_tts_worker(config, request)
+    return (200 if result["ok"] else 502), result
+
+
+def tts_stream_validation_payload(payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    request = tts_engine.validate_tts_request(payload)
+    if not request["ok"]:
+        return 400, request
+    config = current_tts_config()
+    if not config["ready"]:
+        return 503, {"ok": False, "error": "tts_unavailable"}
+    if not config["supportsStreaming"]:
+        return 409, {"ok": False, "error": "tts_streaming_unsupported"}
+    return 200, {"ok": True, "request": request, "config": config}
+
+
+def tts_stream_response(handler: BaseHTTPRequestHandler, payload: dict[str, object]) -> None:
+    status, validation = tts_stream_validation_payload(payload)
+    if status != 200:
+        json_response(handler, status, validation)
+        return
+    request = validation["request"]
+    config = validation["config"]
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    try:
+        for event in tts_engine.iter_tts_worker_events(config, request):
+            stream_json_event(handler, event)
+    except (BrokenPipeError, ConnectionResetError):
+        tts_engine.cancel_tts_request(str(request["requestId"]))
+
+
+def tts_cancel_payload(payload: dict[str, object]) -> tuple[int, dict[str, object]]:
+    request_id = payload.get("requestId")
+    if not isinstance(request_id, str) or not request_id.strip() or len(request_id) > 128:
+        return 400, {"ok": False, "error": "tts_request_id_invalid"}
+    cancelled = tts_engine.cancel_tts_request(request_id)
+    return 200, {
+        "ok": True,
+        "requestId": request_id,
+        "cancelled": cancelled,
+    }
+
+
 def read_json_body(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length", "0"))
     if length <= 0:
         return {}
     raw = handler.rfile.read(length)
     return json.loads(raw.decode("utf-8"))
+
+
+def migration_preview_payload() -> dict[str, object]:
+    preview = build_migration_preview(
+        detect_legacy_sources([LEGACY_HOME, ROOT], TOMOS_PATHS)
+    )
+    items = [
+        {
+            "kind": item["kind"],
+            "totalFiles": item["totalFiles"],
+            "totalBytes": item["totalBytes"],
+            "latestMtime": item["latestMtime"],
+            "conflict": bool(item.get("conflict", False)),
+            "excludedCount": item["excludedCount"],
+            "errorCount": item["errorCount"],
+        }
+        for item in preview["items"]
+    ]
+    return {
+        "ok": True,
+        "preview": {
+            "previewId": preview["previewId"],
+            "totalFiles": preview["totalFiles"],
+            "totalBytes": preview["totalBytes"],
+            "latestMtime": preview["latestMtime"],
+            "excludedCount": preview["excludedCount"],
+            "errorCount": preview["errorCount"],
+            "items": items,
+        },
+    }
+
+
+def migration_error_response(
+    error: Exception,
+) -> tuple[int, dict[str, object]]:
+    if isinstance(error, MigrationApprovalError):
+        status, code = 400, "migration_approval_required"
+    elif isinstance(error, MigrationPreviewStaleError):
+        status, code = 409, "migration_preview_stale"
+    elif isinstance(error, MigrationNotFoundError):
+        status, code = 404, "migration_not_found"
+    else:
+        status, code = 400, "migration_validation_failed"
+    return status, {"ok": False, "error": code}
+
+
+def migration_apply_payload(body: object) -> dict:
+    if not isinstance(body, dict):
+        raise MigrationApprovalError(
+            "migration approval is required"
+        )
+    approved_items = body.get("approvedItems")
+    if (
+        not isinstance(approved_items, list)
+        or not approved_items
+        or any(
+            not isinstance(item, str) or not item.strip()
+            for item in approved_items
+        )
+    ):
+        raise MigrationApprovalError(
+            "migration approval is required"
+        )
+    preview_id = body.get("previewId")
+    if not isinstance(preview_id, str) or not preview_id.strip():
+        raise MigrationPreviewStaleError(
+            "migration preview is unavailable"
+        )
+    return {
+        "ok": True,
+        "migration": apply_migration(
+            preview_id,
+            approved_items,
+            TOMOS_PATHS,
+        ),
+    }
+
+
+def migration_rollback_payload(body: object) -> dict:
+    if not isinstance(body, dict):
+        raise MigrationNotFoundError(
+            "migration was not found"
+        )
+    migration_id = body.get("migrationId")
+    if not isinstance(migration_id, str) or not migration_id.strip():
+        raise MigrationNotFoundError(
+            "migration was not found"
+        )
+    snapshot_id = snapshot_id_for_migration(
+        migration_id,
+        TOMOS_PATHS,
+    )
+    return {
+        "ok": True,
+        "migration": rollback_migration(
+            snapshot_id,
+            TOMOS_PATHS,
+        ),
+    }
 
 
 def person_photo_upload_payload(name: str, mime: str, base64_value: str) -> dict:
@@ -640,9 +874,10 @@ def person_photo_upload_payload(name: str, mime: str, base64_value: str) -> dict
         return {"ok": False, "error": "empty image data"}
     if len(body) > PERSON_PHOTO_MAX_BYTES:
         return {"ok": False, "error": "image too large"}
-    PERSON_PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-    stored_name = f"{uuid.uuid4().hex}{suffix}"
-    (PERSON_PHOTO_DIR / stored_name).write_bytes(body)
+    with managed_data_write(TOMOS_PATHS):
+        ensure_data_directories(TOMOS_PATHS)
+        stored_name = f"{uuid.uuid4().hex}{suffix}"
+        (PERSON_PHOTO_DIR / stored_name).write_bytes(body)
     return {
         "ok": True,
         "file": stored_name,
@@ -692,6 +927,7 @@ def local_lan_ipv4_addresses() -> list[str]:
     try:
         result = subprocess.run(
             ["ifconfig"],
+            env=desktop_child_env(),
             capture_output=True,
             text=True,
             timeout=2,
@@ -871,6 +1107,54 @@ def static_preview_get_api_allowed(path: str, allow_mobile_sync: bool = False) -
     return allow_mobile_sync and path.startswith("/api/mobile/")
 
 
+def desktop_session_token() -> str:
+    return os.environ.get("GEMMA_DESKTOP_SESSION_TOKEN", "").strip()
+
+
+def desktop_child_env(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
+    child_env = dict(os.environ)
+    child_env.pop("GEMMA_DESKTOP_SESSION_TOKEN", None)
+    if overrides:
+        child_env.update({str(key): str(value) for key, value in overrides.items()})
+        child_env.pop("GEMMA_DESKTOP_SESSION_TOKEN", None)
+    return child_env
+
+
+def desktop_json_content_type_required(path: str) -> bool:
+    return path in DESKTOP_JSON_CONTENT_TYPE_PATHS
+
+
+def _desktop_header(headers: Mapping[str, str], name: str) -> str:
+    expected_name = name.lower()
+    for key, value in headers.items():
+        if str(key).lower() == expected_name:
+            return str(value).strip()
+    return ""
+
+
+def desktop_request_guard(
+    method: str,
+    path: str,
+    headers: Mapping[str, str],
+    expected_token: str,
+) -> tuple[bool, str]:
+    if not expected_token:
+        return True, ""
+    if _desktop_header(headers, "Host").lower() not in DESKTOP_GUARD_HOSTS:
+        return False, "desktop_origin_required"
+    if str(method or "").upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return True, ""
+    if not hmac.compare_digest(_desktop_header(headers, "X-TOMOS-Session"), expected_token):
+        return False, "desktop_session_required"
+    if _desktop_header(headers, "Origin").lower() not in DESKTOP_GUARD_ORIGINS:
+        return False, "desktop_origin_required"
+    if desktop_json_content_type_required(path):
+        content_type = _desktop_header(headers, "Content-Type").lower().split(";", 1)[0].strip()
+        if content_type != "application/json":
+            return False, "desktop_json_required"
+    return True, ""
+
+
 def is_loopback_client(host: str) -> bool:
     normalized = str(host or "").lower()
     return normalized == "localhost" or normalized == "::1" or normalized.startswith("127.")
@@ -945,6 +1229,7 @@ def asr_python_environment_status() -> dict[str, object]:
         result = subprocess.run(
             [*command, "-c", script],
             cwd=str(ROOT),
+            env=desktop_child_env(),
             capture_output=True,
             check=False,
             text=True,
@@ -1019,6 +1304,41 @@ def whisper_cpp_binary_path() -> str:
         if candidate and Path(candidate).expanduser().exists():
             return str(Path(candidate).expanduser())
     return ""
+
+
+def normalize_local_whisper_server_url(value: str) -> str:
+    raw = value or ""
+    if (
+        not raw
+        or any(character.isspace() or ord(character) < 32 or 127 <= ord(character) <= 159 for character in raw)
+        or "?" in raw
+        or "#" in raw
+    ):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        port = parsed.port
+    except ValueError:
+        return ""
+    hostname = (parsed.hostname or "").lower()
+    if (
+        parsed.scheme.lower() != "http"
+        or hostname not in {"localhost", "127.0.0.1", "::1"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return ""
+    host = f"[{hostname}]" if hostname == "::1" else hostname
+    authority = f"{host}:{port}" if port is not None else host
+    path = parsed.path.rstrip("/")
+    return urllib.parse.urlunsplit(("http", authority, path, "", ""))
+
+
+class RejectWhisperServerRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
 
 
 def normalize_whisper_cpp_model(model: str) -> str:
@@ -1328,6 +1648,7 @@ def ensure_wav_audio(audio_path: Path, mime_type: str) -> tuple[Path, Path | Non
             "16000",
             str(wav_path),
         ],
+        env=desktop_child_env(),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -1351,6 +1672,49 @@ def clean_whisper_cpp_output(text: str) -> str:
             continue
         lines.append(clean)
     return " ".join(" ".join(lines).split()).strip()
+
+
+def run_whisper_server_transcription(wav_bytes: bytes, language: str, server_url: str) -> dict[str, object]:
+    normalized_url = normalize_local_whisper_server_url(server_url)
+    if not normalized_url:
+        raise ValueError("Whisper常駐サーバーURLはlocalhostのみ指定できます。")
+
+    boundary = f"----TOMOSWhisper{uuid.uuid4().hex}"
+    parts = [
+        f"--{boundary}\r\n".encode("ascii"),
+        b'Content-Disposition: form-data; name="file"; filename="speech.wav"\r\n',
+        b"Content-Type: audio/wav\r\n\r\n",
+        wav_bytes,
+        b"\r\n",
+    ]
+    clean_language = (language or "").strip()
+    if clean_language:
+        parts.extend([
+            f"--{boundary}\r\n".encode("ascii"),
+            b'Content-Disposition: form-data; name="language"\r\n\r\n',
+            clean_language.encode("utf-8"),
+            b"\r\n",
+        ])
+    parts.append(f"--{boundary}--\r\n".encode("ascii"))
+    request = urllib.request.Request(
+        f"{normalized_url}/inference",
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        RejectWhisperServerRedirects(),
+    )
+    with opener.open(request, timeout=30) as response:
+        try:
+            payload = json.loads(response.read().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Whisper常駐サーバーの応答を読み取れませんでした。") from exc
+    text = payload.get("text") if isinstance(payload, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError("Whisper常駐サーバーの文字起こし結果が空でした。")
+    return {"ok": True, "text": text.strip(), "engine": "whisper-server"}
 
 
 def run_whisper_cpp_transcription(audio_path: Path, mime_type: str, model: str = WHISPER_CPP_FAST_MODEL) -> dict:
@@ -1380,6 +1744,7 @@ def run_whisper_cpp_transcription(audio_path: Path, mime_type: str, model: str =
         result = subprocess.run(
             command,
             cwd=ROOT,
+            env=desktop_child_env(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1421,6 +1786,7 @@ def start_asr_worker_process() -> subprocess.Popen:
     process = subprocess.Popen(
         command,
         cwd=ROOT,
+        env=desktop_child_env(),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -1501,7 +1867,26 @@ def run_asr_transcription(audio_base64: str, mime_type: str, model: str) -> dict
         audio_path = Path(handle.name)
     try:
         if is_whisper_cpp_model(model):
-            payload = run_whisper_cpp_transcription(audio_path, mime_type, model)
+            server_url = normalize_local_whisper_server_url(WHISPER_SERVER_URL)
+            if server_url:
+                wav_temp_dir = None
+                try:
+                    wav_path, wav_temp_dir = ensure_wav_audio(audio_path, mime_type)
+                    language = "ja" if ASR_LANGUAGE.lower().startswith("ja") else ASR_LANGUAGE.split("-")[0]
+                    payload = run_whisper_server_transcription(wav_path.read_bytes(), language, server_url)
+                except Exception:
+                    try:
+                        payload = run_whisper_cpp_transcription(audio_path, mime_type, model)
+                    except Exception:
+                        raise WhisperTranscriptionError(WHISPER_TRANSCRIPTION_ERROR) from None
+                finally:
+                    if wav_temp_dir:
+                        shutil.rmtree(wav_temp_dir, ignore_errors=True)
+            else:
+                try:
+                    payload = run_whisper_cpp_transcription(audio_path, mime_type, model)
+                except Exception:
+                    raise WhisperTranscriptionError(WHISPER_TRANSCRIPTION_ERROR) from None
         elif ASR_WORKER:
             payload = run_asr_worker_transcription(audio_path, mime_type, model)
         else:
@@ -1518,6 +1903,7 @@ def run_asr_transcription(audio_base64: str, mime_type: str, model: str) -> dict
             result = subprocess.run(
                 command,
                 cwd=ROOT,
+                env=desktop_child_env(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1633,6 +2019,74 @@ def installed_ollama_models(force_refresh: bool = False) -> set[str]:
     return models
 
 
+def benchmark_ollama_base_url() -> str:
+    return normalize_local_llm_base_url(OLLAMA_URL)
+
+
+def benchmark_available_models(base_url: str | None = None) -> set[str]:
+    safe_base_url = (
+        normalize_local_llm_base_url(base_url)
+        if str(base_url or "").strip()
+        else benchmark_ollama_base_url()
+    )
+    tags = ollama_json("/api/tags", timeout=3, base_url=safe_base_url).get("models", [])
+    return {str(item.get("name", "")) for item in tags if item.get("name")}
+
+
+def model_benchmark_allowed(model: str, available_models: set[str]) -> bool:
+    normalized_model = str(model or "").strip()
+    if not normalized_model or normalized_model not in available_models:
+        return False
+    return any(
+        str(item.get("model") or "") == normalized_model
+        and item.get("allowAutoSelect") is True
+        for item in PULLABLE_MODELS
+    )
+
+
+def run_local_model_benchmark(model: str, base_url: str | None = None) -> dict[str, object]:
+    safe_base_url = (
+        normalize_local_llm_base_url(base_url)
+        if str(base_url or "").strip()
+        else benchmark_ollama_base_url()
+    )
+    payload = {
+        "model": model,
+        "prompt": "日本語で一文だけ、準備できましたと答えてください。",
+        "stream": False,
+        "options": {
+            "temperature": 0,
+            "num_predict": 24,
+        },
+    }
+    started_at = time.monotonic()
+    response = ollama_json(
+        "/api/generate",
+        payload=payload,
+        timeout=90,
+        base_url=safe_base_url,
+    )
+    elapsed_ms = round((time.monotonic() - started_at) * 1000)
+    prompt_tokens = max(0, int(response.get("prompt_eval_count") or 0))
+    output_tokens = max(0, int(response.get("eval_count") or 0))
+    eval_duration_ns = max(0, int(response.get("eval_duration") or 0))
+    load_duration_ns = max(0, int(response.get("load_duration") or 0))
+    tokens_per_second = (
+        round(output_tokens / (eval_duration_ns / 1_000_000_000), 2)
+        if output_tokens > 0 and eval_duration_ns > 0
+        else 0
+    )
+    return {
+        "model": model,
+        "elapsedMs": elapsed_ms,
+        "loadMs": round(load_duration_ns / 1_000_000),
+        "promptTokens": prompt_tokens,
+        "outputTokens": output_tokens,
+        "tokensPerSecond": tokens_per_second,
+        "status": "complete",
+    }
+
+
 def select_translation_model() -> str:
     models = installed_ollama_models()
     if TRANSLATION_MODEL and TRANSLATION_MODEL in models:
@@ -1655,6 +2109,7 @@ def app_commit() -> str:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=ROOT,
+            env=desktop_child_env(),
             check=True,
             capture_output=True,
             text=True,
@@ -2157,6 +2612,7 @@ def pick_workspace_folder() -> dict:
         script = 'POSIX path of (choose folder with prompt "フォルダーを選択")'
         result = subprocess.run(
             ["osascript", "-e", script],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             text=True,
@@ -2197,6 +2653,7 @@ def pick_contract_pdf_import_file() -> dict[str, object]:
         script = 'POSIX path of (choose file with prompt "PDFファイルを選択")'
         result = subprocess.run(
             ["osascript", "-e", script],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             text=True,
@@ -2933,8 +3390,12 @@ def build_codegraph_summary(root: str) -> dict:
         storage = "app"
         output_path = codegraph_cache_path(root_path)
         try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            with managed_data_write(TOMOS_PATHS):
+                ensure_data_directories(TOMOS_PATHS)
+                output_path.write_text(
+                    json.dumps(summary, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
         except OSError as cache_error:
             raise ValueError(
                 "コード理解の解析結果を保存できませんでした。"
@@ -3075,7 +3536,7 @@ def reveal_workspace_path(root: str, relative_path: str) -> dict:
         args = ["explorer", f"/select,{path}"] if path.exists() else ["explorer", str(target)]
     else:
         args = ["xdg-open", str(target if target.is_dir() else target.parent)]
-    subprocess.Popen(args)
+    subprocess.Popen(args, env=desktop_child_env())
     return {"path": path.relative_to(root_path).as_posix() if path != root_path else "", "opened": str(target)}
 
 
@@ -3099,6 +3560,7 @@ def node_check(source: str, suffix: str = ".js") -> list[str]:
     try:
         result = subprocess.run(
             ["node", "--check", temp_path],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             text=True,
@@ -3349,7 +3811,11 @@ def context_memory_forget_payload(body: dict[str, object]) -> dict[str, object]:
     record_id = str(body.get("id") or "").strip()
     if not record_id:
         return {"ok": False, "error": "id is required"}
-    return forget_context_record(CONTEXT_DB_PATH, record_id, reason=str(body.get("reason") or ""))
+    return forget_context_record(
+        CONTEXT_DB_PATH,
+        record_id,
+        reason=str(body.get("reason") or ""),
+    )
 
 
 def context_memory_update_payload(body: dict[str, object]) -> dict[str, object]:
@@ -3357,7 +3823,11 @@ def context_memory_update_payload(body: dict[str, object]) -> dict[str, object]:
     if not record_id:
         return {"ok": False, "error": "id is required"}
     updates = body.get("updates") if isinstance(body.get("updates"), dict) else body
-    return update_context_record(CONTEXT_DB_PATH, record_id, updates if isinstance(updates, dict) else {})
+    return update_context_record(
+        CONTEXT_DB_PATH,
+        record_id,
+        updates if isinstance(updates, dict) else {},
+    )
 
 
 def object_choice(object_info: dict, node: str, field: str, fallback: str) -> list[str]:
@@ -3637,6 +4107,7 @@ def run_sysctl_value(name: str) -> str:
     try:
         result = subprocess.run(
             ["sysctl", "-n", name],
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             timeout=2,
@@ -3648,12 +4119,186 @@ def run_sysctl_value(name: str) -> str:
     return decode_subprocess_output(result.stdout).strip()
 
 
-def local_memory_gb() -> int:
-    value = run_sysctl_value("hw.memsize")
+def memory_gb_from_bytes(value: str | int) -> int:
     try:
-        return max(0, round(int(value) / (1024 ** 3)))
+        byte_count = int(value)
     except (TypeError, ValueError):
         return 0
+    if byte_count <= 0:
+        return 0
+    return max(0, round(byte_count / (1024 ** 3)))
+
+
+def local_memory_gb() -> int:
+    if sys.platform == "darwin":
+        return memory_gb_from_bytes(run_sysctl_value("hw.memsize"))
+    if sys.platform.startswith("linux"):
+        try:
+            page_size = int(os.sysconf("SC_PAGE_SIZE"))
+            page_count = int(os.sysconf("SC_PHYS_PAGES"))
+        except (OSError, TypeError, ValueError):
+            return 0
+        return memory_gb_from_bytes(page_size * page_count)
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+                ],
+                env=desktop_child_env(),
+                check=False,
+                capture_output=True,
+                timeout=2,
+            )
+        except Exception:
+            return 0
+        if result.returncode != 0:
+            return 0
+        return memory_gb_from_bytes(decode_subprocess_output(result.stdout).strip())
+    return 0
+
+
+def unknown_gpu_info() -> dict[str, object]:
+    return {
+        "detected": False,
+        "name": "",
+        "vendor": "unknown",
+        "vramGb": 0,
+        "vramConfidence": "unknown",
+        "unifiedMemory": False,
+        "source": "unavailable",
+    }
+
+
+def gpu_vendor_from_name(name: str) -> str:
+    normalized = name.lower()
+    if "nvidia" in normalized or "geforce" in normalized or "quadro" in normalized:
+        return "nvidia"
+    if "amd" in normalized or "radeon" in normalized:
+        return "amd"
+    if "intel" in normalized:
+        return "intel"
+    if "apple" in normalized:
+        return "apple"
+    return "unknown"
+
+
+def parse_nvidia_smi_gpu(output: str) -> dict[str, object]:
+    candidates: list[tuple[int, str]] = []
+    for raw_line in str(output or "").splitlines():
+        name, separator, raw_memory = raw_line.rpartition(",")
+        if not separator:
+            continue
+        try:
+            memory_mib = int(raw_memory.strip())
+        except ValueError:
+            continue
+        vram_gb = round(memory_mib / 1024)
+        if not name.strip() or vram_gb <= 0:
+            continue
+        candidates.append((vram_gb, name.strip()))
+    if not candidates:
+        return unknown_gpu_info()
+    vram_gb, name = max(candidates, key=lambda item: item[0])
+    return {
+        "detected": True,
+        "name": name,
+        "vendor": "nvidia",
+        "vramGb": vram_gb,
+        "vramConfidence": "high",
+        "unifiedMemory": False,
+        "source": "nvidia-smi",
+    }
+
+
+def parse_windows_video_controllers(output: str) -> dict[str, object]:
+    try:
+        parsed = json.loads(str(output or ""))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return unknown_gpu_info()
+    controllers = parsed if isinstance(parsed, list) else [parsed]
+    candidates: list[tuple[int, str]] = []
+    for controller in controllers:
+        if not isinstance(controller, dict):
+            continue
+        name = str(controller.get("Name") or "").strip()
+        try:
+            adapter_bytes = int(controller.get("AdapterRAM") or 0)
+        except (TypeError, ValueError):
+            continue
+        vram_gb = memory_gb_from_bytes(adapter_bytes)
+        if not name or vram_gb <= 0 or vram_gb > 64:
+            continue
+        candidates.append((vram_gb, name))
+    if not candidates:
+        return unknown_gpu_info()
+    vram_gb, name = max(candidates, key=lambda item: item[0])
+    return {
+        "detected": True,
+        "name": name,
+        "vendor": gpu_vendor_from_name(name),
+        "vramGb": vram_gb,
+        "vramConfidence": "estimated",
+        "unifiedMemory": False,
+        "source": "powershell",
+    }
+
+
+def local_gpu_info(memory_gb: int | None = None) -> dict[str, object]:
+    machine = (platform.machine() or "").lower()
+    if sys.platform == "darwin" and machine in {"arm64", "aarch64"}:
+        shared_memory_gb = local_memory_gb() if memory_gb is None else max(0, int(memory_gb))
+        return {
+            "detected": True,
+            "name": "Apple Silicon GPU",
+            "vendor": "apple",
+            "vramGb": shared_memory_gb,
+            "vramConfidence": "unified",
+            "unifiedMemory": True,
+            "source": "system",
+        }
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            env=desktop_child_env(),
+            check=False,
+            capture_output=True,
+            timeout=2,
+        )
+    except Exception:
+        result = None
+    if result is not None and result.returncode == 0:
+        nvidia = parse_nvidia_smi_gpu(decode_subprocess_output(result.stdout))
+        if nvidia["detected"]:
+            return nvidia
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json -Compress",
+                ],
+                env=desktop_child_env(),
+                check=False,
+                capture_output=True,
+                timeout=2,
+            )
+        except Exception:
+            return unknown_gpu_info()
+        if result.returncode == 0:
+            return parse_windows_video_controllers(decode_subprocess_output(result.stdout))
+    return unknown_gpu_info()
 
 
 def local_cpu_name() -> str:
@@ -3669,15 +4314,18 @@ def local_pc_system_info(available_models: set[str] | list[str] | None = None, o
     cpu_name = local_cpu_name()
     machine = platform.machine() or ""
     is_apple_silicon = sys.platform == "darwin" and machine.lower() in {"arm64", "aarch64"}
-    gpu_name = "Apple Silicon GPU" if is_apple_silicon else ""
+    memory_gb = local_memory_gb()
+    gpu_info = local_gpu_info(memory_gb=memory_gb)
+    gpu_name = str(gpu_info.get("name") or "")
     models = sorted(str(model) for model in (available_models or []) if model)
     return {
         "os": platform.platform() or sys.platform,
         "cpu": cpu_name,
         "machine": machine,
-        "memoryGb": local_memory_gb(),
+        "memoryGb": memory_gb,
         "gpu": gpu_name,
-        "hasGpu": bool(gpu_name),
+        "hasGpu": bool(gpu_info.get("detected")),
+        "gpuInfo": gpu_info,
         "isAppleSilicon": is_apple_silicon,
         "ollamaVersion": ollama_version,
         "availableModels": models,
@@ -3719,6 +4367,7 @@ def pc_diagnostics_recommendation(system_info: dict[str, object]) -> dict[str, o
     coding = AGENTIC_CODER_MODEL if has_agentic else standard
 
     return {
+        "basis": "theoretical",
         "level": level,
         "label": label,
         "summary": summary,
@@ -3739,6 +4388,7 @@ def pc_diagnostics_payload(available_models: set[str] | list[str] | None = None,
         "ok": True,
         "system": system_info,
         "recommendation": pc_diagnostics_recommendation(system_info),
+        "benchmark": None,
     }
 
 
@@ -5111,7 +5761,13 @@ def github_repo_result(repo: str, runner=subprocess.run) -> dict[str, str] | Non
         "--json",
         "nameWithOwner,description,url,stargazerCount,primaryLanguage",
     ]
-    result = runner(command, check=False, capture_output=True, timeout=GITHUB_TIMEOUT_SECONDS)
+    result = runner(
+        command,
+        env=desktop_child_env(),
+        check=False,
+        capture_output=True,
+        timeout=GITHUB_TIMEOUT_SECONDS,
+    )
     if getattr(result, "returncode", 1) != 0:
         raise RuntimeError(decode_subprocess_output(getattr(result, "stderr", "")) or "GitHubリポジトリ情報を取得できませんでした。")
     payload = json.loads(decode_subprocess_output(getattr(result, "stdout", "")) or "{}")
@@ -5149,7 +5805,13 @@ def github_search_results(query: str, runner=subprocess.run, limit: int = 5) -> 
         "--json",
         "fullName,description,url,stargazersCount",
     ]
-    result = runner(command, check=False, capture_output=True, timeout=GITHUB_TIMEOUT_SECONDS)
+    result = runner(
+        command,
+        env=desktop_child_env(),
+        check=False,
+        capture_output=True,
+        timeout=GITHUB_TIMEOUT_SECONDS,
+    )
     if getattr(result, "returncode", 1) != 0:
         raise RuntimeError(decode_subprocess_output(getattr(result, "stderr", "")) or "GitHub検索に失敗しました。")
     payload = json.loads(decode_subprocess_output(getattr(result, "stdout", "")) or "[]")
@@ -5277,6 +5939,7 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
         return None
     metadata_result = runner(
         [*command_base, *YOUTUBE_YTDLP_CLIENT_ARGS, "--dump-json", "--skip-download", "--no-warnings", url],
+        env=desktop_child_env(),
         check=False,
         capture_output=True,
         timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
@@ -5308,6 +5971,7 @@ def youtube_transcript_result(url: str, runner=subprocess.run) -> dict[str, str]
                     output_template,
                     url,
                 ],
+                env=desktop_child_env(),
                 check=False,
                 capture_output=True,
                 timeout=YOUTUBE_TRANSCRIPT_TIMEOUT_SECONDS,
@@ -5641,6 +6305,7 @@ def agent_reach_doctor_payload(runner=subprocess.run) -> dict[str, object]:
     try:
         result = runner(
             command,
+            env=desktop_child_env(),
             check=False,
             capture_output=True,
             timeout=AGENT_REACH_DOCTOR_TIMEOUT_SECONDS,
@@ -5740,6 +6405,7 @@ def run_internet_layer_setup_command(command: list[str], message: str, step: int
     process = subprocess.Popen(
         command,
         cwd=ROOT,
+        env=desktop_child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -6023,6 +6689,7 @@ def run_model_pull(model: str) -> None:
     try:
         process = subprocess.Popen(
             ["ollama", "pull", model],
+            env=desktop_child_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -6104,6 +6771,7 @@ def remove_model(model: str) -> dict:
     normalized = validate_model_remove(model)
     process = subprocess.run(
         ["ollama", "rm", normalized],
+        env=desktop_child_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -6140,6 +6808,7 @@ def run_asr_setup() -> None:
         process = subprocess.Popen(
             ["bash", str(script)],
             cwd=ROOT,
+            env=desktop_child_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -6206,6 +6875,7 @@ def run_ocr_setup() -> None:
         process = subprocess.Popen(
             ["bash", str(script)],
             cwd=ROOT,
+            env=desktop_child_env(),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -6286,6 +6956,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
+        if not self.mobile_sync_only:
+            allowed, error = desktop_request_guard(
+                "GET",
+                parsed.path,
+                self.headers,
+                desktop_session_token(),
+            )
+            if not allowed:
+                json_response(self, 403, {"ok": False, "error": "desktop_session_required"})
+                return
         if parsed.path.startswith("/api/mobile/") and not mobile_api_access_allowed(
             "GET",
             parsed.path,
@@ -6341,8 +7021,27 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/mobile/imports":
             json_response(self, 200, {"ok": True, "imports": mobile_pending_imports()})
             return
+        if parsed.path == "/api/desktop/migration/preview":
+            try:
+                json_response(self, 200, migration_preview_payload())
+            except MigrationValidationError as exc:
+                status, payload = migration_error_response(exc)
+                json_response(self, status, payload)
+            except Exception:
+                json_response(
+                    self,
+                    500,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            return
         if parsed.path == "/api/asr/status":
             json_response(self, 200, asr_status_payload())
+            return
+        if parsed.path == "/api/tts/status":
+            json_response(self, 200, tts_status_payload())
             return
         if parsed.path == "/api/asr/setup/status":
             json_response(self, 200, asr_setup_status())
@@ -6443,6 +7142,17 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        request_path = urllib.parse.urlparse(self.path).path
+        if not self.mobile_sync_only:
+            allowed, error = desktop_request_guard(
+                "POST",
+                request_path,
+                self.headers,
+                desktop_session_token(),
+            )
+            if not allowed:
+                json_response(self, 403, {"ok": False, "error": "desktop_session_required"})
+                return
         if self.path.startswith("/api/mobile/") and not mobile_api_access_allowed(
             "POST",
             self.path,
@@ -6452,6 +7162,113 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.static_only or (self.mobile_sync_only and not self.path.startswith("/api/mobile/")):
             json_response(self, 403, {"ok": False, "error": "mobile static preview blocks API writes"})
+            return
+        if self.path == "/api/desktop/migration/apply":
+            try:
+                json_response(
+                    self,
+                    200,
+                    migration_apply_payload(read_json_body(self)),
+                )
+            except (
+                json.JSONDecodeError,
+                UnicodeDecodeError,
+                ValueError,
+            ):
+                json_response(
+                    self,
+                    400,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            except (
+                MigrationApprovalError,
+                MigrationPreviewStaleError,
+                MigrationValidationError,
+            ) as exc:
+                status, payload = migration_error_response(exc)
+                json_response(self, status, payload)
+            except Exception:
+                json_response(
+                    self,
+                    500,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            return
+        if self.path == "/api/desktop/migration/rollback":
+            try:
+                json_response(
+                    self,
+                    200,
+                    migration_rollback_payload(read_json_body(self)),
+                )
+            except (
+                json.JSONDecodeError,
+                UnicodeDecodeError,
+                ValueError,
+            ):
+                json_response(
+                    self,
+                    400,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            except (
+                MigrationNotFoundError,
+                MigrationValidationError,
+            ) as exc:
+                status, payload = migration_error_response(exc)
+                json_response(self, status, payload)
+            except Exception:
+                json_response(
+                    self,
+                    500,
+                    {
+                        "ok": False,
+                        "error": "migration_validation_failed",
+                    },
+                )
+            return
+        if self.path == "/api/diagnostics/model-benchmark":
+            try:
+                body = read_json_body(self)
+                model = str(body.get("model") or "").strip()
+                base_url = benchmark_ollama_base_url()
+            except LocalLlmCheckError:
+                json_response(self, 400, {"ok": False, "error": "benchmark_localhost_required"})
+                return
+            except Exception:
+                json_response(self, 400, {"ok": False, "error": "benchmark_model_not_allowed"})
+                return
+            if not MODEL_BENCHMARK_LOCK.acquire(blocking=False):
+                json_response(self, 409, {"ok": False, "error": "benchmark_in_progress"})
+                return
+            try:
+                available_models = benchmark_available_models(base_url)
+                if not model_benchmark_allowed(model, available_models):
+                    json_response(self, 400, {"ok": False, "error": "benchmark_model_not_allowed"})
+                    return
+                json_response(
+                    self,
+                    200,
+                    {
+                        "ok": True,
+                        "benchmark": run_local_model_benchmark(model, base_url=base_url),
+                    },
+                )
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            except Exception:
+                json_response(self, 502, {"ok": False, "error": "benchmark_failed"})
+            finally:
+                MODEL_BENCHMARK_LOCK.release()
             return
         if self.path == "/api/search":
             self.handle_search()
@@ -6508,6 +7325,32 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/asr/transcribe":
             self.handle_asr_transcribe()
+            return
+        if self.path == "/api/tts/synthesize":
+            try:
+                body = read_json_body(self)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                json_response(self, 400, {"ok": False, "error": "tts_request_json_invalid"})
+                return
+            status, payload = tts_synthesize_payload(body)
+            json_response(self, status, payload)
+            return
+        if self.path == "/api/tts/stream":
+            try:
+                body = read_json_body(self)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                json_response(self, 400, {"ok": False, "error": "tts_request_json_invalid"})
+                return
+            tts_stream_response(self, body)
+            return
+        if self.path == "/api/tts/cancel":
+            try:
+                body = read_json_body(self)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                json_response(self, 400, {"ok": False, "error": "tts_request_json_invalid"})
+                return
+            status, payload = tts_cancel_payload(body)
+            json_response(self, status, payload)
             return
         if self.path == "/api/asr/setup":
             self.handle_asr_setup()
@@ -6985,6 +7828,8 @@ class Handler(BaseHTTPRequestHandler):
             mime_type = str(body.get("mimeType") or "audio/webm").strip()
             result = run_asr_transcription(audio_base64, mime_type, model)
             json_response(self, 200, result)
+        except WhisperTranscriptionError:
+            json_response(self, 501, {"ok": False, "error": WHISPER_TRANSCRIPTION_ERROR})
         except RuntimeError as exc:
             json_response(self, 501, {"ok": False, "error": str(exc), "asr": asr_status_payload()})
         except ValueError as exc:
@@ -7193,11 +8038,17 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, 200, contract_import_gap_payload(root, folder_id))
                 return
             if self.path == "/api/contracts/save":
-                saved = save_contract(CONTRACT_DB_PATH, body.get("contract", body))
+                saved = save_contract(
+                    CONTRACT_DB_PATH,
+                    body.get("contract", body),
+                )
                 json_response(self, 200, {"ok": True, "contract": saved})
                 return
             if self.path == "/api/contracts/delete":
-                json_response(self, 200, delete_contract(CONTRACT_DB_PATH, str(body.get("id", ""))))
+                result = delete_contract(
+                    CONTRACT_DB_PATH, str(body.get("id", ""))
+                )
+                json_response(self, 200, result)
                 return
             self.send_error(404)
         except Exception as exc:
@@ -7267,6 +8118,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    prepare_managed_data_startup(TOMOS_PATHS)
     parser = argparse.ArgumentParser(description="TOMOS AI local Web UI")
     parser.add_argument("--host", default=os.environ.get("GEMMA_WEB_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GEMMA_WEB_PORT", "54876")))

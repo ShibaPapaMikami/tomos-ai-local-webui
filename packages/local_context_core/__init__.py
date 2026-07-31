@@ -8,6 +8,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app_paths import TomosPaths
+import migration_manager
+
 
 ACTIVE_STATUS = {"active"}
 MEMORY_TYPES = {"fact", "preference", "activity", "temporary"}
@@ -31,7 +34,7 @@ def stable_record_id(*parts: object) -> str:
 
 
 def context_db_path(root: Path) -> Path:
-    return root / ".gemma4-data" / "context" / "context.sqlite"
+    return TomosPaths.from_root(root).context_db
 
 
 @dataclass
@@ -98,15 +101,25 @@ def contains_sensitive_text(text: str) -> bool:
     return any(pattern in lowered for pattern in SENSITIVE_PATTERNS)
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+def _connect_write(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(str(db_path))
     connection.row_factory = sqlite3.Row
-    ensure_schema(connection)
+    _ensure_schema(connection)
     return connection
 
 
-def ensure_schema(connection: sqlite3.Connection) -> None:
+def connect(db_path: Path) -> sqlite3.Connection:
+    """Open an existing context database without schema writes."""
+    connection = sqlite3.connect(
+        f"{Path(db_path).absolute().as_uri()}?mode=ro",
+        uri=True,
+    )
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only = ON")
+    return connection
+
+
+def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(
         """
         CREATE TABLE IF NOT EXISTS context_records (
@@ -369,9 +382,10 @@ def forget(record: dict[str, object] | ContextRecord, *, reason: str = "") -> di
     return {"ok": True, "record": target.to_dict()}
 
 
+@migration_manager.managed_database_writer("context")
 def save_context_record(db_path: Path, record: dict[str, object] | ContextRecord) -> dict[str, object]:
     values = record_values(record)
-    with connect(db_path) as connection:
+    with _connect_write(db_path) as connection:
         connection.execute(
             """
             INSERT INTO context_records (
@@ -417,6 +431,8 @@ def list_context_records(
     include_inactive: bool = False,
     limit: int = 100,
 ) -> list[ContextRecord]:
+    if not Path(db_path).is_file():
+        return []
     normalized = normalize_scope(scope)
     conditions: list[str] = []
     params: list[object] = []
@@ -446,8 +462,11 @@ def list_context_records(
     return [record for record in records if record_is_active(record)]
 
 
+@migration_manager.managed_database_writer("context")
 def forget_context_record(db_path: Path, record_id: str, *, reason: str = "") -> dict[str, object]:
-    with connect(db_path) as connection:
+    if not Path(db_path).is_file():
+        return {"ok": False, "error": "記憶が見つかりません。"}
+    with _connect_write(db_path) as connection:
         row = connection.execute("SELECT * FROM context_records WHERE id = ?", (str(record_id),)).fetchone()
         if row is None:
             return {"ok": False, "error": "記憶が見つかりません。"}
@@ -464,11 +483,14 @@ def forget_context_record(db_path: Path, record_id: str, *, reason: str = "") ->
     return {"ok": True, "record": forgotten}
 
 
+@migration_manager.managed_database_writer("context")
 def update_context_record(db_path: Path, record_id: str, updates: dict[str, object]) -> dict[str, object]:
     text = str(updates.get("text") or "").strip() if isinstance(updates, dict) else ""
     if not text:
         return {"ok": False, "error": "記憶する内容がありません。"}
-    with connect(db_path) as connection:
+    if not Path(db_path).is_file():
+        return {"ok": False, "error": "記憶が見つかりません。"}
+    with _connect_write(db_path) as connection:
         row = connection.execute("SELECT * FROM context_records WHERE id = ?", (str(record_id),)).fetchone()
         if row is None:
             return {"ok": False, "error": "記憶が見つかりません。"}

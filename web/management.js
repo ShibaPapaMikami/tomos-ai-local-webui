@@ -1109,6 +1109,14 @@ window.GEMMA_MANAGEMENT = (() => {
   }
 
   function handleEscapeKey({ els, state, onRender }) {
+    const migrationDialog = document.querySelector("#migration-confirm-dialog");
+    if (migrationDialog?.open || migrationDialog?.hasAttribute?.("open")) {
+      return "migration-dialog";
+    }
+    const localStorageImportDialog = document.querySelector("#local-storage-import-dialog");
+    if (localStorageImportDialog?.open || localStorageImportDialog?.hasAttribute?.("open")) {
+      return "local-storage-import-dialog";
+    }
     const visiblePanels = visibleManagementPanels(els);
     if (visiblePanels.length > 0) {
       closeManagementPanels({ els });
@@ -1520,6 +1528,750 @@ window.GEMMA_MANAGEMENT = (() => {
     renderPluginsPanel({ state, els, t });
   }
 
+  const MIGRATION_KIND_KEYS = {
+    knowledge: "management.migrationKindKnowledge",
+    context: "management.migrationKindContext",
+    contracts: "management.migrationKindContracts",
+    "study-packs": "management.migrationKindStudyPacks",
+    "person-photos": "management.migrationKindPersonPhotos",
+  };
+  const MIGRATION_KIND_LABELS = {
+    knowledge: "長期記憶",
+    context: "会話コンテキスト",
+    contracts: "契約書データ",
+    "study-packs": "教材パック",
+    "person-photos": "人物写真",
+  };
+  const migrationState = {
+    status: "idle",
+    preview: null,
+    migrationId: "",
+    previewGeneration: 0,
+    operationGeneration: 0,
+    previewPending: false,
+    applyPending: false,
+    rollbackPending: false,
+  };
+
+  function migrationActionLabel(status = "idle", t) {
+    const labels = {
+      idle: ["management.migrationPreview", "内容を確認"],
+      ready: ["management.migrationApply", "選択したデータをコピー"],
+      copying: ["management.migrationCopying", "コピーしています"],
+      completed: ["management.migrationCompleted", "コピーが完了しました"],
+      error: ["management.migrationRetry", "もう一度確認"],
+      rollback: ["management.migrationRollingBack", "元に戻しています"],
+    };
+    const [key, fallback] = labels[status] || labels.idle;
+    return t ? t(key) : fallback;
+  }
+
+  function formatMigrationBytes(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    if (bytes < 1024) return `${Math.round(bytes)} B`;
+    const units = ["KB", "MB", "GB", "TB"];
+    let size = bytes / 1024;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    const rounded = size >= 10 ? Math.round(size) : Math.round(size * 10) / 10;
+    return `${rounded} ${units[unitIndex]}`;
+  }
+
+  function formatMigrationMtime(value, t) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return t ? t("management.migrationNoUpdate") : "更新なし";
+    }
+    const date = new Date(seconds * 1000);
+    if (Number.isNaN(date.getTime())) {
+      return t ? t("management.migrationNoUpdate") : "更新なし";
+    }
+    const parts = new Intl.DateTimeFormat("ja-JP", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+    const part = (type) => parts.find((item) => item.type === type)?.value || "";
+    return `${part("year")}/${part("month")}/${part("day")} ${part("hour")}:${part("minute")}`;
+  }
+
+  function migrationPreviewRows(preview = {}, t) {
+    const items = Array.isArray(preview?.items) ? preview.items : [];
+    return items
+      .filter((item) => Object.prototype.hasOwnProperty.call(MIGRATION_KIND_KEYS, String(item?.kind || "")))
+      .map((item) => {
+        const kind = String(item.kind);
+        const totalFiles = Math.max(0, Number(item.totalFiles) || 0);
+        const conflict = typeof item.conflict === "boolean"
+          ? item.conflict
+            ? t ? t("management.migrationConflictFound") : "既存データあり"
+            : t ? t("management.migrationConflictNone") : "なし"
+          : t ? t("management.migrationConflictUnknown") : "未確認";
+        return {
+          kind,
+          name: t ? t(MIGRATION_KIND_KEYS[kind]) : MIGRATION_KIND_LABELS[kind],
+          count: t ? t("management.migrationItemsCount", { count: totalFiles }) : `${totalFiles}件`,
+          size: formatMigrationBytes(item.totalBytes),
+          updatedAt: formatMigrationMtime(item.latestMtime, t),
+          conflict,
+          selectable: totalFiles > 0 && Math.max(0, Number(item.errorCount) || 0) === 0,
+        };
+      });
+  }
+
+  function migrationElements() {
+    return {
+      section: document.querySelector("#legacy-data-migration"),
+      list: document.querySelector("#migration-list"),
+      status: document.querySelector("#migration-status"),
+      previewAction: document.querySelector("#migration-preview-action"),
+      applyAction: document.querySelector("#migration-apply-action"),
+      rollbackAction: document.querySelector("#migration-rollback-action"),
+      dialog: document.querySelector("#migration-confirm-dialog"),
+      cancel: document.querySelector("#migration-confirm-cancel"),
+      confirm: document.querySelector("#migration-confirm-apply"),
+    };
+  }
+
+  function selectedMigrationKinds(els = migrationElements()) {
+    return Array.from(
+      els.list?.querySelectorAll('input[data-migration-kind]:checked') || [],
+      (input) => input.dataset.migrationKind,
+    ).filter((kind) => Object.prototype.hasOwnProperty.call(MIGRATION_KIND_KEYS, kind));
+  }
+
+  function setMigrationStatus(els, status, text) {
+    if (!els.status) return;
+    els.status.dataset.state = status;
+    els.status.textContent = text;
+  }
+
+  function updateMigrationControls({ els = migrationElements(), t }) {
+    const busy = migrationState.previewPending
+      || migrationState.applyPending
+      || migrationState.rollbackPending;
+    const selected = selectedMigrationKinds(els);
+    if (els.previewAction) {
+      els.previewAction.textContent = migrationActionLabel(
+        migrationState.status === "error" ? "error" : "idle",
+        t,
+      );
+      els.previewAction.disabled = busy;
+    }
+    if (els.applyAction) {
+      const applyStatus = ["copying", "completed", "rollback"].includes(migrationState.status)
+        ? migrationState.status
+        : "ready";
+      els.applyAction.textContent = migrationActionLabel(applyStatus, t);
+      els.applyAction.disabled = migrationState.status !== "ready" || selected.length === 0;
+    }
+    if (els.rollbackAction) {
+      els.rollbackAction.hidden = !migrationState.migrationId;
+      els.rollbackAction.disabled = !migrationState.migrationId || busy;
+      els.rollbackAction.textContent = migrationState.status === "rollback"
+        ? migrationActionLabel("rollback", t)
+        : t("management.migrationRollback");
+    }
+    els.list?.querySelectorAll('input[data-migration-kind]').forEach((input) => {
+      input.disabled = migrationState.status !== "ready" || !input.dataset.migrationSelectable;
+    });
+  }
+
+  function migrationFact(label, value) {
+    const fact = document.createElement("div");
+    fact.className = "migration-fact";
+    const labelElement = document.createElement("span");
+    labelElement.textContent = label;
+    const valueElement = document.createElement("strong");
+    valueElement.textContent = value;
+    fact.append(labelElement, valueElement);
+    return fact;
+  }
+
+  function renderMigrationRows({ els = migrationElements(), preview = {}, t }) {
+    if (!els.list) return;
+    const rows = migrationPreviewRows(preview, t);
+    els.list.replaceChildren();
+    if (rows.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "migration-empty";
+      empty.textContent = t("management.migrationStatusEmpty");
+      els.list.append(empty);
+      updateMigrationControls({ els, t });
+      return;
+    }
+    rows.forEach((row) => {
+      const item = document.createElement("div");
+      item.className = "migration-item";
+      const target = document.createElement("label");
+      target.className = "migration-item-target";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.migrationKind = row.kind;
+      if (row.selectable) checkbox.dataset.migrationSelectable = "true";
+      checkbox.disabled = !row.selectable;
+      checkbox.setAttribute("aria-label", row.name);
+      const name = document.createElement("span");
+      name.textContent = row.name;
+      target.append(checkbox, name);
+      item.append(
+        target,
+        migrationFact(t("management.migrationCount"), row.count),
+        migrationFact(t("management.migrationSize"), row.size),
+        migrationFact(t("management.migrationUpdated"), row.updatedAt),
+        migrationFact(t("management.migrationConflict"), row.conflict),
+      );
+      els.list.append(item);
+    });
+    updateMigrationControls({ els, t });
+  }
+
+  function migrationErrorStatus(code, t) {
+    if (code === "migration_preview_stale") return t("management.migrationStatusStale");
+    if (code === "migration_not_found") return t("management.migrationStatusNotFound");
+    return t("management.migrationStatusError");
+  }
+
+  async function fetchMigrationJson(url, options = {}) {
+    const response = await fetch(url, options);
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!response.ok || !payload?.ok) {
+      const error = new Error("migration_request_failed");
+      error.code = typeof payload?.error === "string" ? payload.error : "migration_validation_failed";
+      throw error;
+    }
+    return payload;
+  }
+
+  async function refreshMigrationPreview({ t, els = migrationElements() }) {
+    if (migrationState.applyPending || migrationState.rollbackPending) return;
+    const generation = ++migrationState.previewGeneration;
+    migrationState.previewPending = true;
+    migrationState.status = "idle";
+    migrationState.preview = null;
+    setMigrationStatus(els, "idle", t("management.migrationStatusLoading"));
+    updateMigrationControls({ els, t });
+    try {
+      const payload = await fetchMigrationJson("/api/desktop/migration/preview", { cache: "no-store" });
+      const preview = payload.preview;
+      if (!preview || typeof preview.previewId !== "string" || !Array.isArray(preview.items)) {
+        throw new Error("migration_invalid_preview");
+      }
+      if (
+        generation !== migrationState.previewGeneration
+        || migrationState.applyPending
+        || migrationState.rollbackPending
+      ) return;
+      migrationState.preview = preview;
+      migrationState.status = "ready";
+      renderMigrationRows({ els, preview, t });
+      const hasSelectable = migrationPreviewRows(preview, t).some((row) => row.selectable);
+      setMigrationStatus(
+        els,
+        "ready",
+        hasSelectable ? t("management.migrationStatusReady") : t("management.migrationStatusEmpty"),
+      );
+    } catch (error) {
+      if (
+        generation !== migrationState.previewGeneration
+        || migrationState.applyPending
+        || migrationState.rollbackPending
+      ) return;
+      migrationState.status = "error";
+      migrationState.preview = null;
+      renderMigrationRows({ els, preview: {}, t });
+      setMigrationStatus(els, "error", migrationErrorStatus(error?.code, t));
+    } finally {
+      if (generation === migrationState.previewGeneration) {
+        migrationState.previewPending = false;
+        updateMigrationControls({ els, t });
+      }
+    }
+  }
+
+  function closeMigrationDialog(els) {
+    if (!els.dialog) return;
+    if (typeof els.dialog.close === "function" && els.dialog.open) {
+      els.dialog.close();
+    } else {
+      els.dialog.removeAttribute?.("open");
+    }
+  }
+
+  function openMigrationDialog(els) {
+    if (!els.dialog || migrationState.status !== "ready" || selectedMigrationKinds(els).length === 0) return;
+    if (typeof els.dialog.showModal === "function") {
+      if (!els.dialog.open) els.dialog.showModal();
+    } else {
+      els.dialog.setAttribute?.("open", "");
+    }
+    els.confirm?.focus?.();
+  }
+
+  async function applySelectedMigration({ t, els = migrationElements() }) {
+    if (
+      migrationState.applyPending
+      || migrationState.rollbackPending
+      || migrationState.status !== "ready"
+      || !migrationState.preview?.previewId
+    ) return;
+    const previewId = migrationState.preview.previewId;
+    const approvedItems = [...selectedMigrationKinds(els)];
+    if (approvedItems.length === 0) return;
+    const operationGeneration = ++migrationState.operationGeneration;
+    migrationState.previewGeneration += 1;
+    migrationState.previewPending = false;
+    migrationState.applyPending = true;
+    migrationState.status = "copying";
+    setMigrationStatus(els, "copying", t("management.migrationStatusCopying"));
+    updateMigrationControls({ els, t });
+    closeMigrationDialog(els);
+    try {
+      const payload = await fetchMigrationJson("/api/desktop/migration/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          previewId,
+          approvedItems,
+        }),
+      });
+      if (
+        operationGeneration !== migrationState.operationGeneration
+        || !migrationState.applyPending
+      ) return;
+      const migrationId = String(payload.migration?.migrationId || "");
+      if (!migrationId) throw new Error("migration_invalid_result");
+      migrationState.migrationId = migrationId;
+      migrationState.status = "completed";
+      setMigrationStatus(els, "completed", t("management.migrationStatusCompleted"));
+    } catch (error) {
+      if (
+        operationGeneration !== migrationState.operationGeneration
+        || !migrationState.applyPending
+      ) return;
+      migrationState.status = "error";
+      migrationState.preview = null;
+      renderMigrationRows({ els, preview: {}, t });
+      setMigrationStatus(els, "error", migrationErrorStatus(error?.code, t));
+    } finally {
+      if (operationGeneration === migrationState.operationGeneration) {
+        migrationState.applyPending = false;
+        updateMigrationControls({ els, t });
+      }
+    }
+  }
+
+  async function rollbackMigration({ t, els = migrationElements() }) {
+    if (
+      !migrationState.migrationId
+      || migrationState.applyPending
+      || migrationState.rollbackPending
+    ) return;
+    const migrationId = migrationState.migrationId;
+    const operationGeneration = ++migrationState.operationGeneration;
+    migrationState.previewGeneration += 1;
+    migrationState.previewPending = false;
+    migrationState.rollbackPending = true;
+    migrationState.status = "rollback";
+    setMigrationStatus(els, "rollback", t("management.migrationRollingBack"));
+    updateMigrationControls({ els, t });
+    try {
+      await fetchMigrationJson("/api/desktop/migration/rollback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ migrationId }),
+      });
+      if (
+        operationGeneration !== migrationState.operationGeneration
+        || !migrationState.rollbackPending
+      ) return;
+      migrationState.status = "idle";
+      migrationState.preview = null;
+      migrationState.migrationId = "";
+      renderMigrationRows({ els, preview: {}, t });
+      setMigrationStatus(els, "completed", t("management.migrationStatusRolledBack"));
+    } catch (error) {
+      if (
+        operationGeneration !== migrationState.operationGeneration
+        || !migrationState.rollbackPending
+      ) return;
+      if (error?.code === "migration_not_found") migrationState.migrationId = "";
+      migrationState.status = "error";
+      setMigrationStatus(els, "error", migrationErrorStatus(error?.code, t));
+    } finally {
+      if (operationGeneration === migrationState.operationGeneration) {
+        migrationState.rollbackPending = false;
+        updateMigrationControls({ els, t });
+      }
+    }
+  }
+
+  function bindMigrationEvents({ t }) {
+    const migrationEls = migrationElements();
+    if (!migrationEls.section || migrationEls.section.dataset.migrationBound === "true") return;
+    migrationEls.section.dataset.migrationBound = "true";
+    migrationEls.previewAction?.addEventListener("click", () => {
+      if (migrationState.previewPending) return;
+      refreshMigrationPreview({ t, els: migrationEls });
+    });
+    migrationEls.list?.addEventListener("change", () => {
+      updateMigrationControls({ els: migrationEls, t });
+    });
+    migrationEls.applyAction?.addEventListener("click", () => {
+      openMigrationDialog(migrationEls);
+    });
+    migrationEls.cancel?.addEventListener("click", () => {
+      closeMigrationDialog(migrationEls);
+    });
+    migrationEls.confirm?.addEventListener("click", () => {
+      applySelectedMigration({ t, els: migrationEls });
+    });
+    migrationEls.rollbackAction?.addEventListener("click", () => {
+      rollbackMigration({ t, els: migrationEls });
+    });
+    migrationEls.dialog?.addEventListener("close", () => {
+      const origin = migrationEls.applyAction;
+      if (
+        origin
+        && !origin.hidden
+        && !origin.disabled
+        && origin.isConnected !== false
+        && (typeof origin.getClientRects !== "function" || origin.getClientRects().length > 0)
+      ) {
+        origin.focus?.();
+      }
+    });
+    updateMigrationControls({ els: migrationEls, t });
+  }
+
+  const localStorageTransferState = {
+    preview: null,
+    status: "idle",
+    readGeneration: 0,
+    readPending: false,
+    applyPending: false,
+    exportPending: false,
+  };
+  const LOCAL_STORAGE_EXPORT_GUARD_MS = 750;
+
+  function localStorageTransferElements() {
+    return {
+      section: document.querySelector("#local-storage-transfer"),
+      exportAction: document.querySelector("#local-storage-export-action"),
+      exportStatus: document.querySelector("#local-storage-export-status"),
+      chooseAction: document.querySelector("#local-storage-import-choose"),
+      fileInput: document.querySelector("#local-storage-import-file"),
+      preview: document.querySelector("#local-storage-import-preview"),
+      acceptedCount: document.querySelector("#local-storage-import-accepted-count"),
+      rejectedCount: document.querySelector("#local-storage-import-rejected-count"),
+      exportedAt: document.querySelector("#local-storage-import-exported-at"),
+      applyAction: document.querySelector("#local-storage-import-apply"),
+      importStatus: document.querySelector("#local-storage-import-status"),
+      dialog: document.querySelector("#local-storage-import-dialog"),
+      cancel: document.querySelector("#local-storage-import-cancel"),
+      confirm: document.querySelector("#local-storage-import-confirm"),
+    };
+  }
+
+  function setLocalStorageTransferStatus(element, state, text) {
+    if (!element) return;
+    element.dataset.state = state;
+    element.textContent = text;
+  }
+
+  function updateLocalStorageTransferControls(els) {
+    const busy = localStorageTransferState.readPending
+      || localStorageTransferState.applyPending
+      || localStorageTransferState.exportPending;
+    if (els.exportAction) els.exportAction.disabled = busy;
+    if (els.chooseAction) els.chooseAction.disabled = busy;
+    if (els.fileInput) els.fileInput.disabled = busy;
+    if (els.applyAction) {
+      els.applyAction.disabled = busy
+        || localStorageTransferState.status !== "ready"
+        || !localStorageTransferState.preview
+        || localStorageTransferState.preview.acceptedKeys.length === 0;
+    }
+    if (els.confirm) els.confirm.disabled = localStorageTransferState.applyPending;
+  }
+
+  function formatLocalStorageExportedAt(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const locale = document.documentElement?.lang === "en" ? "en-US" : "ja-JP";
+    return new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(date);
+  }
+
+  function renderLocalStorageImportPreview(els, preview) {
+    if (!els.preview) return;
+    const ready = preview?.status === "ready";
+    els.preview.hidden = !ready;
+    if (els.acceptedCount) els.acceptedCount.textContent = ready ? String(preview.acceptedKeys.length) : "0";
+    if (els.rejectedCount) els.rejectedCount.textContent = ready ? String(preview.rejectedCount) : "0";
+    if (els.exportedAt) els.exportedAt.textContent = ready ? formatLocalStorageExportedAt(preview.exportedAt) : "";
+  }
+
+  function closeLocalStorageImportDialog(els) {
+    if (!els.dialog) return;
+    if (typeof els.dialog.close === "function" && els.dialog.open) {
+      els.dialog.close();
+    } else {
+      els.dialog.removeAttribute?.("open");
+    }
+  }
+
+  function openLocalStorageImportDialog(els) {
+    if (
+      localStorageTransferState.status !== "ready"
+      || localStorageTransferState.applyPending
+      || !localStorageTransferState.preview
+      || localStorageTransferState.preview.acceptedKeys.length === 0
+      || !els.dialog
+    ) return;
+    if (typeof els.dialog.showModal === "function") {
+      if (!els.dialog.open) els.dialog.showModal();
+    } else {
+      els.dialog.setAttribute?.("open", "");
+    }
+    els.confirm?.focus?.();
+  }
+
+  function exportTomosLocalStorage({ t, els, schedule }) {
+    const transfer = window.TOMOS_LOCAL_STORAGE_TRANSFER;
+    if (
+      localStorageTransferState.exportPending
+      || !transfer?.buildTomosLocalStorageExport
+    ) return;
+    localStorageTransferState.exportPending = true;
+    setLocalStorageTransferStatus(
+      els.exportStatus,
+      "pending",
+      t("management.localStorageExporting"),
+    );
+    updateLocalStorageTransferControls(els);
+    let finalStatus = "completed";
+    let finalMessageKey = "management.localStorageExportCompleted";
+    try {
+      const exportedAt = new Date().toISOString();
+      const payload = transfer.buildTomosLocalStorageExport(localStorage, exportedAt);
+      const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+        type: "application/json",
+      });
+      const objectUrl = URL.createObjectURL(blob);
+      const download = document.createElement("a");
+      download.href = objectUrl;
+      download.download = `tomos-settings-${exportedAt.replace(/[:.]/g, "-")}.json`;
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      finalStatus = "error";
+      finalMessageKey = "management.localStorageExportError";
+    } finally {
+      const release = () => {
+        localStorageTransferState.exportPending = false;
+        setLocalStorageTransferStatus(
+          els.exportStatus,
+          finalStatus,
+          t(finalMessageKey),
+        );
+        updateLocalStorageTransferControls(els);
+      };
+      try {
+        schedule(release, LOCAL_STORAGE_EXPORT_GUARD_MS);
+      } catch {
+        release();
+      }
+    }
+  }
+
+  function previewTomosLocalStorageFile({ t, els }) {
+    const transfer = window.TOMOS_LOCAL_STORAGE_TRANSFER;
+    const file = els.fileInput?.files?.[0];
+    if (file && els.fileInput) els.fileInput.value = "";
+    if (
+      !file
+      || localStorageTransferState.readPending
+      || localStorageTransferState.applyPending
+      || !transfer?.previewTomosLocalStorageImport
+    ) return;
+    const fileSize = file.size;
+    const validFileSize = Number.isSafeInteger(fileSize)
+      && fileSize >= 0
+      && fileSize <= transfer.TOMOS_LOCAL_STORAGE_MAX_IMPORT_BYTES;
+    if (!validFileSize) {
+      localStorageTransferState.preview = null;
+      localStorageTransferState.status = "error";
+      renderLocalStorageImportPreview(els, null);
+      setLocalStorageTransferStatus(
+        els.importStatus,
+        "error",
+        t(
+          Number.isSafeInteger(fileSize)
+            && fileSize >= 0
+            && fileSize > transfer.TOMOS_LOCAL_STORAGE_MAX_IMPORT_BYTES
+            ? "management.localStorageImportTooLarge"
+            : "management.localStorageImportInvalid",
+        ),
+      );
+      updateLocalStorageTransferControls(els);
+      return;
+    }
+    const generation = ++localStorageTransferState.readGeneration;
+    localStorageTransferState.preview = null;
+    localStorageTransferState.status = "reading";
+    localStorageTransferState.readPending = true;
+    renderLocalStorageImportPreview(els, null);
+    setLocalStorageTransferStatus(
+      els.importStatus,
+      "reading",
+      t("management.localStorageImportReading"),
+    );
+    updateLocalStorageTransferControls(els);
+    const reader = new FileReader();
+    const finish = (preview, status, messageKey) => {
+      if (generation !== localStorageTransferState.readGeneration) return;
+      localStorageTransferState.preview = preview;
+      localStorageTransferState.status = status;
+      localStorageTransferState.readPending = false;
+      renderLocalStorageImportPreview(els, preview);
+      setLocalStorageTransferStatus(els.importStatus, status, t(messageKey));
+      updateLocalStorageTransferControls(els);
+    };
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(String(reader.result));
+        const preview = transfer.previewTomosLocalStorageImport(payload);
+        if (preview.status !== "ready") {
+          finish(null, "error", "management.localStorageImportInvalid");
+          return;
+        }
+        finish(preview, "ready", "management.localStorageImportReady");
+      } catch {
+        finish(null, "error", "management.localStorageImportInvalid");
+      }
+    };
+    reader.onerror = () => {
+      finish(null, "error", "management.localStorageImportInvalid");
+    };
+    try {
+      reader.readAsText(file);
+    } catch {
+      finish(null, "error", "management.localStorageImportInvalid");
+    }
+  }
+
+  function applyTomosLocalStorageFile({ t, els }) {
+    const transfer = window.TOMOS_LOCAL_STORAGE_TRANSFER;
+    if (
+      localStorageTransferState.applyPending
+      || localStorageTransferState.status !== "ready"
+      || !localStorageTransferState.preview
+      || !transfer?.applyTomosLocalStorageImport
+    ) return;
+    localStorageTransferState.applyPending = true;
+    updateLocalStorageTransferControls(els);
+    closeLocalStorageImportDialog(els);
+    const result = transfer.applyTomosLocalStorageImport(
+      localStorage,
+      localStorageTransferState.preview,
+      true,
+    );
+    localStorageTransferState.applyPending = false;
+    localStorageTransferState.preview = null;
+    if (result.status === "completed") {
+      localStorageTransferState.status = "completed";
+      setLocalStorageTransferStatus(
+        els.importStatus,
+        "completed",
+        t("management.localStorageImportCompleted", { count: result.importedCount }),
+      );
+    } else if (result.status === "rolled-back") {
+      localStorageTransferState.status = "error";
+      setLocalStorageTransferStatus(
+        els.importStatus,
+        "error",
+        t("management.localStorageImportRolledBack"),
+      );
+    } else if (result.status === "rollback-failed") {
+      localStorageTransferState.status = "error";
+      setLocalStorageTransferStatus(
+        els.importStatus,
+        "error",
+        t("management.localStorageImportRollbackFailed"),
+      );
+    } else {
+      localStorageTransferState.status = "error";
+      setLocalStorageTransferStatus(
+        els.importStatus,
+        "error",
+        t("management.localStorageImportError"),
+      );
+    }
+    updateLocalStorageTransferControls(els);
+  }
+
+  function bindLocalStorageTransferEvents({ t, schedule = setTimeout }) {
+    const els = localStorageTransferElements();
+    if (
+      !els.section
+      || els.section.dataset.localStorageTransferBound === "true"
+      || !window.TOMOS_LOCAL_STORAGE_TRANSFER
+    ) return;
+    els.section.dataset.localStorageTransferBound = "true";
+    els.exportAction?.addEventListener("click", () => {
+      exportTomosLocalStorage({ t, els, schedule });
+    });
+    els.chooseAction?.addEventListener("click", () => {
+      if (!els.fileInput?.disabled) els.fileInput?.click?.();
+    });
+    els.fileInput?.addEventListener("change", () => {
+      previewTomosLocalStorageFile({ t, els });
+    });
+    els.applyAction?.addEventListener("click", () => {
+      openLocalStorageImportDialog(els);
+    });
+    els.cancel?.addEventListener("click", () => {
+      closeLocalStorageImportDialog(els);
+    });
+    els.confirm?.addEventListener("click", () => {
+      applyTomosLocalStorageFile({ t, els });
+    });
+    els.dialog?.addEventListener("close", () => {
+      const origin = els.applyAction;
+      if (
+        origin
+        && !origin.hidden
+        && !origin.disabled
+        && origin.isConnected !== false
+        && (typeof origin.getClientRects !== "function" || origin.getClientRects().length > 0)
+      ) {
+        origin.focus?.();
+      }
+    });
+    updateLocalStorageTransferControls(els);
+  }
+
   function bindManagementEvents({
     els,
     state,
@@ -1534,6 +2286,8 @@ window.GEMMA_MANAGEMENT = (() => {
   }) {
     const afterMenuPanelOpen = () => onMenuPanelOpen?.();
     loadManagedStudyPackCatalog({ state, t });
+    bindMigrationEvents({ t });
+    bindLocalStorageTransferEvents({ t });
     els.settingsMenuToggle?.addEventListener("click", () => {
       setSidebarSettingsMode({ els, open: true });
     });
@@ -1778,5 +2532,10 @@ window.GEMMA_MANAGEMENT = (() => {
     installManagedStudyPack,
     removeManagedStudyPack,
     managedStudyPackInstallError,
+    migrationActionLabel,
+    migrationPreviewRows,
+    bindMigrationEvents,
+    bindLocalStorageTransferEvents,
+    refreshMigrationPreview,
   };
 })();

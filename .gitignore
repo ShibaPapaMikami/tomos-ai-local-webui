@@ -36,6 +36,8 @@ models/
 .gemma4-data/
 .worktrees/
 .superpowers/sdd/
+src-tauri/target/
+src-tauri/gen/schemas/
 
 # Local private user/company content. Never commit these.
 private-content/
@@ -45,6 +47,9 @@ downloads/
 dist/
 Asset/
 tmp/
+build/cache/
+# Generated portable runtime resources and release manifest.
+build/macos-runtime/
 *.zip
 *.tar
 *.tar.gz

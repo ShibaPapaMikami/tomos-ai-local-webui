@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import hashlib
+import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from app_paths import TomosPaths, ensure_data_directories
 from context_core import (
     ContextRecord,
     build_context,
@@ -206,6 +209,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert forgotten["record"]["metadata"]["deleteReason"] == "ユーザーが削除"
     assert forgotten["record"]["metadata"]["hardDeleteEligible"] is True
 
+    ensure_data_directories(TomosPaths.from_root(Path(tmp)))
     context_db = context_db_path(Path(tmp))
     save_result = save_context_record(context_db, memory_record)
     assert save_result["ok"] is True
@@ -222,12 +226,14 @@ with tempfile.TemporaryDirectory() as tmp:
     )["record"]
     save_context_record(context_db, other_memory)
 
+    before_read = hashlib.sha256(context_db.read_bytes()).hexdigest()
     saved_records = list_context_records(
         context_db,
         scope={"scopeType": "folder", "scopeId": "folder-1"},
     )
     assert len(saved_records) == 1
     assert saved_records[0].snippet == "ユーザーは短い箇条書きを好む"
+    assert hashlib.sha256(context_db.read_bytes()).hexdigest() == before_read
 
     forget_saved = forget_context_record(context_db, saved_records[0].id, reason="不要になった")
     assert forget_saved["ok"] is True
@@ -264,5 +270,41 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     assert rejected_update["ok"] is False
     assert rejected_update["needsReview"] is True
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    db_path = context_db_path(Path(tmp))
+    memory_record = remember(
+        {
+            "text": "更新前の記憶",
+            "memoryType": "fact",
+            "sourceType": "manual",
+            "sourceId": "wal-memory",
+        },
+        scope={"scopeType": "user", "scopeId": "local"},
+    )["record"]
+    save_context_record(db_path, memory_record)
+    writer = sqlite3.connect(db_path)
+    try:
+        assert writer.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+        writer.execute("PRAGMA wal_autocheckpoint = 0")
+        writer.execute(
+            """
+            UPDATE context_records
+            SET text = ?, snippet = ?
+            WHERE id = ?
+            """,
+            ("WAL最新の記憶", "WAL最新の記憶", memory_record["id"]),
+        )
+        writer.commit()
+        assert Path(f"{db_path}-wal").is_file()
+        records = list_context_records(
+            db_path,
+            scope={"scopeType": "user", "scopeId": "local"},
+        )
+        assert records[0].snippet == "WAL最新の記憶"
+    finally:
+        writer.close()
+
 
 print("context core tests passed")

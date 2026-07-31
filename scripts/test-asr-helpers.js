@@ -23,6 +23,7 @@ const {
   defaultAudioInputLooksVirtual,
   isVirtualAudioDeviceLabel,
   listAudioInputDevices,
+  micCaptureDebugState,
   preferredRealAudioInputDevice,
   renderAsrStatus,
   requestAsrSetup,
@@ -36,12 +37,27 @@ const {
   liveSpeechRecognitionAvailable,
   PARTIAL_TRANSCRIPTION_INTERVAL_SECONDS,
   audioSignalStats,
+  createWavPartialCapture,
   recordLiveSpeech,
+  recordAudio,
   hasAudibleSignal,
+  mergeAsrTranscript,
+  requestActiveVoiceStop,
+  shouldApplyAsrResult,
+  voiceActivityState,
+  voiceSignalLevel,
   supportedAudioMimeType,
   transcribeAudio,
   wavBlobFromFloat32,
 } = context.window.GEMMA_ASR;
+
+assert.equal(
+  micCaptureDebugState(
+    { readyState: "live", muted: false, enabled: true },
+    { state: "running" },
+  ),
+  "live / unmuted / enabled / audio: running",
+);
 
 function fakeClassList() {
   const enabled = new Set();
@@ -52,6 +68,104 @@ function fakeClassList() {
       else enabled.delete(name);
     },
   };
+}
+
+function createVadHarness() {
+  const intervals = new Map();
+  const timeouts = new Map();
+  let nextTimerId = 1;
+  const harness = {
+    nowMs: 0,
+    processor: null,
+    closeCount: 0,
+    trackStopCount: 0,
+  };
+  class FakeAudioContext {
+    constructor() {
+      this.sampleRate = 1000;
+      this.destination = {};
+    }
+    createMediaStreamSource() {
+      return { connect() {}, disconnect() {} };
+    }
+    createScriptProcessor() {
+      harness.processor = { connect() {}, disconnect() {}, onaudioprocess: null };
+      return harness.processor;
+    }
+    createGain() {
+      return { gain: { value: 1 }, connect() {}, disconnect() {} };
+    }
+    resume() {}
+    close() {
+      harness.closeCount += 1;
+    }
+  }
+  harness.root = {
+    AudioContext: FakeAudioContext,
+    performance: {
+      now: () => harness.nowMs,
+    },
+    setInterval(callback, ms) {
+      const id = nextTimerId++;
+      intervals.set(id, { callback, ms });
+      return id;
+    },
+    clearInterval(id) {
+      intervals.delete(id);
+    },
+    setTimeout(callback, ms) {
+      const id = nextTimerId++;
+      timeouts.set(id, { callback, ms });
+      return id;
+    },
+    clearTimeout(id) {
+      timeouts.delete(id);
+    },
+  };
+  harness.stream = {
+    getTracks() {
+      return [{
+        stop() {
+          harness.trackStopCount += 1;
+        },
+      }];
+    },
+  };
+  harness.feed = (nowMs, value, length = 500) => {
+    harness.nowMs = nowMs;
+    const samples = new Float32Array(length);
+    samples.fill(value);
+    harness.processor.onaudioprocess({
+      inputBuffer: { getChannelData: () => samples },
+    });
+  };
+  harness.fireIntervals = () => {
+    Array.from(intervals.values()).forEach(({ callback }) => callback());
+  };
+  harness.activeTimerCount = () => intervals.size + timeouts.size;
+  return harness;
+}
+
+class FakeMediaRecorder {
+  constructor(stream) {
+    this.stream = stream;
+    this.state = "inactive";
+    this.mimeType = "audio/webm";
+    this.listeners = {};
+    this.stopCount = 0;
+  }
+  addEventListener(name, handler) {
+    this.listeners[name] = handler;
+  }
+  start() {
+    this.state = "recording";
+  }
+  stop() {
+    if (this.state === "inactive") return;
+    this.stopCount += 1;
+    this.state = "inactive";
+    this.listeners.stop?.();
+  }
 }
 
 const statusEl = { textContent: "", hidden: true };
@@ -194,6 +308,31 @@ assert.match(defaultOnlyMicHtml, /data-asr-copy-mic-settings/);
 assert.match(defaultOnlyMicHtml, /chrome:\/\/settings\/content\/microphone/);
 assert.equal(composeLivePromptValue("既存", "音声", ""), "既存\n音声");
 assert.equal(composeLivePromptValue("", "", "途中"), "途中");
+assert.equal(mergeAsrTranscript({
+  baseText: "明日の",
+  partialText: "予定を",
+  finalText: "予定を教えて",
+}), "明日の 予定を教えて");
+assert.equal(mergeAsrTranscript({
+  baseText: "明日の",
+  partialText: "予定を",
+  finalText: "",
+}), "明日の 予定を");
+assert.equal(shouldApplyAsrResult({
+  activeSessionId: 4,
+  resultSessionId: 3,
+  stopped: false,
+}), false);
+assert.equal(shouldApplyAsrResult({
+  activeSessionId: 4,
+  resultSessionId: 4,
+  stopped: true,
+}), false);
+assert.equal(shouldApplyAsrResult({
+  activeSessionId: 4,
+  resultSessionId: 4,
+  stopped: false,
+}), true);
 assert.equal(normalizeMicGain(9), 3);
 assert.equal(normalizeMicGain(0.1), 0.5);
 assert.equal(normalizeMicGain("1.26"), 1.3);
@@ -209,11 +348,222 @@ const audioStats = audioSignalStats(new Float32Array([0, 0.5, -0.25]));
 assert.equal(audioStats.peak, 0.5);
 assert.equal(audioStats.rms, Math.sqrt((0.25 + 0.0625) / 3));
 assert.equal(audioStats.samples, 3);
+assert.equal(voiceSignalLevel({ rms: 0, peak: 0, phase: "idle" }), 0);
+assert.equal(voiceSignalLevel({ rms: 0.0015, peak: 0.005, phase: "idle" }), 1);
+assert.equal(voiceSignalLevel({ rms: 0.003, peak: 0.01, phase: "candidate" }), 2);
+assert.equal(voiceSignalLevel({ rms: 0.004, peak: 0.015, phase: "speaking" }), 3);
+assert.equal(voiceSignalLevel({ rms: 0.012, peak: 0.04, phase: "speaking" }), 4);
+assert.equal(voiceSignalLevel({ rms: Number.NaN, peak: -1, phase: "bad" }), 0);
 assert.equal(hasAudibleSignal(new Float32Array([0, 0.001, -0.001])), false);
 assert.equal(hasAudibleSignal(new Float32Array([0, 0.03, 0])), true);
+assert.equal(
+  hasAudibleSignal(new Float32Array([0, 0, 0, 0, 0.012, 0, 0, 0])),
+  true,
+);
 const wavBlob = wavBlobFromFloat32(new Float32Array([0, 0.5, -0.5]), 16000, Blob);
 assert.equal(wavBlob.type, "audio/wav");
 assert.equal(wavBlob.size, 50);
+
+let vad = {
+  phase: "idle",
+  candidateStartedAtMs: null,
+  speechStartedAtMs: null,
+  lastAudibleAtMs: null,
+};
+let result = voiceActivityState({
+  state: vad,
+  nowMs: 0,
+  rms: 0.02,
+  peak: 0.08,
+});
+assert.equal(result.state.phase, "candidate");
+assert.equal(result.action, "none");
+assert.equal(vad.phase, "idle");
+
+result = voiceActivityState({
+  state: result.state,
+  nowMs: 200,
+  rms: 0.02,
+  peak: 0.08,
+});
+assert.equal(result.state.phase, "speaking");
+assert.equal(result.action, "speech-start");
+
+result = voiceActivityState({
+  state: result.state,
+  nowMs: 900,
+  rms: 0,
+  peak: 0,
+});
+assert.equal(result.action, "speech-finalize");
+assert.equal(result.state.phase, "idle");
+
+const measuredMacVoice = voiceActivityState({
+  state: vad,
+  nowMs: 0,
+  rms: 0.0035,
+  peak: 0.012,
+});
+assert.equal(measuredMacVoice.state.phase, "candidate");
+assert.equal(measuredMacVoice.action, "none");
+
+let shortSound = voiceActivityState({ state: vad, nowMs: 0, rms: 0.02, peak: 0.08 });
+shortSound = voiceActivityState({ state: shortSound.state, nowMs: 100, rms: 0.02, peak: 0.08 });
+assert.equal(shortSound.state.phase, "candidate");
+assert.equal(shortSound.action, "none");
+
+const briefSilence = voiceActivityState({
+  state: result.state = {
+    phase: "speaking",
+    candidateStartedAtMs: 0,
+    speechStartedAtMs: 200,
+    lastAudibleAtMs: 200,
+  },
+  nowMs: 500,
+  rms: 0,
+  peak: 0,
+});
+assert.equal(briefSilence.state.phase, "speaking");
+assert.equal(briefSilence.action, "none");
+
+const stopped = voiceActivityState({
+  state: briefSilence.state,
+  nowMs: 900,
+  rms: 0,
+  peak: 0,
+});
+assert.equal(stopped.state.phase, "idle");
+assert.equal(stopped.action, "speech-finalize");
+
+for (const value of [NaN, -0.02, undefined]) {
+  const silent = voiceActivityState({ state: vad, nowMs: 0, rms: value, peak: value });
+  assert.equal(silent.state.phase, "idle");
+  assert.equal(silent.action, "none");
+}
+
+const silentHarness = createVadHarness();
+let silentPartialCount = 0;
+let silentFinalCount = 0;
+const silentCapture = createWavPartialCapture({
+  stream: silentHarness.stream,
+  root: silentHarness.root,
+  intervalSeconds: 3,
+  now: () => silentHarness.nowMs,
+  onPartialBlob: () => {
+    silentPartialCount += 1;
+  },
+  onFinalBlob: () => {
+    silentFinalCount += 1;
+  },
+});
+silentCapture.start();
+silentHarness.feed(0, 0);
+silentHarness.feed(900, 0);
+silentHarness.fireIntervals();
+silentCapture.stop();
+assert.equal(silentPartialCount + silentFinalCount, 0);
+
+const signalHarness = createVadHarness();
+const signalUpdates = [];
+const signalCapture = createWavPartialCapture({
+  stream: signalHarness.stream,
+  root: signalHarness.root,
+  now: () => signalHarness.nowMs,
+  onAudioLevel: (value) => signalUpdates.push(value),
+});
+signalCapture.start();
+signalHarness.feed(0, 0);
+signalHarness.feed(100, 0.0015);
+signalHarness.feed(200, 0.05);
+signalHarness.feed(400, 0.005);
+const updatesBeforeThrottleBurst = signalUpdates.length;
+for (let nowMs = 410; nowMs < 500; nowMs += 10) {
+  signalHarness.feed(nowMs, 0.005);
+}
+assert.equal(signalUpdates.length, updatesBeforeThrottleBurst);
+signalHarness.feed(500, 0.05);
+signalCapture.stop();
+assert.deepEqual(signalUpdates.map((item) => item.level), [0, 1, 2, 3, 4]);
+assert.equal(signalUpdates.every((item) => (
+  Number.isFinite(item.rms)
+  && Number.isFinite(item.peak)
+  && ["idle", "candidate", "speaking"].includes(item.phase)
+)), true);
+
+const shortHarness = createVadHarness();
+let shortRequestCount = 0;
+const shortCapture = createWavPartialCapture({
+  stream: shortHarness.stream,
+  root: shortHarness.root,
+  intervalSeconds: 3,
+  now: () => shortHarness.nowMs,
+  onPartialBlob: () => {
+    shortRequestCount += 1;
+  },
+  onFinalBlob: () => {
+    shortRequestCount += 1;
+  },
+});
+shortCapture.start();
+shortHarness.feed(0, 0.05);
+shortHarness.feed(100, 0.05);
+shortHarness.feed(180, 0);
+shortHarness.fireIntervals();
+shortCapture.stop();
+assert.equal(shortRequestCount, 0);
+
+const speechHarness = createVadHarness();
+let speechPartialCount = 0;
+let speechFinalCount = 0;
+const speechCapture = createWavPartialCapture({
+  stream: speechHarness.stream,
+  root: speechHarness.root,
+  intervalSeconds: 3,
+  now: () => speechHarness.nowMs,
+  onPartialBlob: (blob) => {
+    assert.equal(blob.type, "audio/wav");
+    speechPartialCount += 1;
+  },
+  onFinalBlob: (blob) => {
+    assert.equal(blob.type, "audio/wav");
+    speechFinalCount += 1;
+  },
+});
+speechCapture.start();
+speechHarness.feed(0, 0.05);
+speechHarness.fireIntervals();
+assert.equal(speechPartialCount, 0);
+speechHarness.feed(200, 0.05);
+speechHarness.fireIntervals();
+assert.equal(speechPartialCount, 1);
+speechHarness.feed(500, 0);
+assert.equal(speechFinalCount, 0);
+speechHarness.feed(850, 0);
+assert.equal(speechFinalCount, 1);
+speechHarness.feed(1600, 0);
+speechHarness.fireIntervals();
+assert.equal(speechFinalCount, 1);
+speechCapture.stop();
+
+let unsupportedVadCloseCount = 0;
+class UnsupportedVadAudioContext {
+  constructor() {
+    this.sampleRate = 1000;
+  }
+  createMediaStreamSource() {
+    return { connect() {}, disconnect() {} };
+  }
+  close() {
+    unsupportedVadCloseCount += 1;
+  }
+}
+const unsupportedVadCapture = createWavPartialCapture({
+  stream: { getTracks: () => [] },
+  root: { AudioContext: UnsupportedVadAudioContext },
+  onFinalBlob() {},
+});
+assert.equal(unsupportedVadCapture, null);
+assert.equal(unsupportedVadCloseCount, 1);
 
 renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "checking" });
 assert.equal(statusEl.textContent, "composer.voiceChecking:");
@@ -223,6 +573,34 @@ assert.equal(voiceInput.classList.enabled.has("recording"), true);
 renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "partial", seconds: 4 });
 assert.equal(statusEl.textContent, "composer.voicePartialTranscribing:4");
 assert.equal(voiceInput.classList.enabled.has("recording"), true);
+const signalStatusEl = { textContent: "", hidden: true, dataset: {} };
+renderAsrStatus({
+  els: { composerStatus: signalStatusEl, voiceInput },
+  t,
+  status: "input",
+  signalLevel: 1,
+});
+assert.equal(signalStatusEl.textContent, "composer.voiceInputDetected:");
+assert.equal(signalStatusEl.dataset.voiceLevel, "1");
+renderAsrStatus({
+  els: { composerStatus: signalStatusEl, voiceInput },
+  t,
+  status: "stopped",
+  signalLevel: null,
+});
+assert.equal("voiceLevel" in signalStatusEl.dataset, false);
+renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "waiting" });
+assert.equal(statusEl.textContent, "composer.voiceWaitingForSpeech:");
+assert.equal(voiceInput.classList.enabled.has("recording"), true);
+renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "speech" });
+assert.equal(statusEl.textContent, "composer.voiceSpeechDetected:");
+assert.equal(voiceInput.classList.enabled.has("recording"), true);
+renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "finalizing" });
+assert.equal(statusEl.textContent, "composer.voiceFinalizing:");
+assert.equal(voiceInput.classList.enabled.has("recording"), false);
+renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "stopped" });
+assert.equal(statusEl.textContent, "composer.voiceStopped:");
+assert.equal(voiceInput.classList.enabled.has("recording"), false);
 renderAsrStatus({ els: { composerStatus: statusEl, voiceInput }, t, status: "idle" });
 assert.equal(statusEl.hidden, true);
 assert.equal(voiceInput.classList.enabled.has("recording"), false);
@@ -363,6 +741,341 @@ clickHandler({ preventDefault() {} });
   assert.equal(postedBody.model, "nvidia/nemotron-3.5-asr-streaming-0.6b");
   assert.equal(postedBody.audioBase64, "abc123");
 
+  const recordSignalHarness = createVadHarness();
+  const recordSignalUpdates = [];
+  const recordSignalPromise = recordAudio({
+    root: recordSignalHarness.root,
+    navigatorImpl: {
+      mediaDevices: {
+        getUserMedia: async () => recordSignalHarness.stream,
+      },
+    },
+    mediaRecorderFactory: (stream) => new FakeMediaRecorder(stream),
+    onAudioLevel: (value) => recordSignalUpdates.push(value),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  recordSignalHarness.feed(0, 0);
+  recordSignalHarness.feed(100, 0.0015);
+  recordSignalHarness.feed(200, 0.05);
+  recordSignalHarness.feed(400, 0.005);
+  recordSignalHarness.feed(1100, 0);
+  await recordSignalPromise;
+  assert.deepEqual(recordSignalUpdates.map((item) => item.level), [0, 1, 2, 3, 0]);
+
+  const vadFinalHarness = createVadHarness();
+  let vadFinalRecorder = null;
+  let vadFinalRequestCount = 0;
+  let vadFinalTranscript = "";
+  const vadFinalStatusEl = { textContent: "", hidden: true, dataset: {} };
+  const vadFinalResultPromise = handleVoiceInputClick({
+    els: {
+      prompt: { value: "議事録", focus() {} },
+      voiceInput: boundVoiceButton,
+      composerStatus: vadFinalStatusEl,
+    },
+    t,
+    getPartialMode: () => "off",
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    recorder: (options) => recordAudio({
+      ...options,
+      root: vadFinalHarness.root,
+      navigatorImpl: {
+        mediaDevices: {
+          getUserMedia: async () => vadFinalHarness.stream,
+        },
+      },
+      mediaRecorderFactory: (stream) => {
+        vadFinalRecorder = new FakeMediaRecorder(stream);
+        return vadFinalRecorder;
+      },
+    }),
+    base64Encoder: async () => "vad-final",
+    fetchImpl: async (url) => {
+      if (url === "/api/asr/status") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            available: true,
+            runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+            recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+          }),
+        };
+      }
+      vadFinalRequestCount += 1;
+      return {
+        ok: true,
+        json: async () => ({ ok: true, text: "確定結果" }),
+      };
+    },
+    onTranscript: (text) => {
+      vadFinalTranscript = text;
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  vadFinalHarness.feed(0, 0);
+  assert.equal(vadFinalStatusEl.textContent, "composer.voiceWaitingForSpeech:");
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "0");
+  vadFinalHarness.feed(100, 0.0015);
+  assert.equal(vadFinalStatusEl.textContent, "composer.voiceInputDetected:");
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "1");
+  vadFinalHarness.feed(200, 0.05);
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "2");
+  vadFinalHarness.feed(400, 0.005);
+  assert.equal(vadFinalStatusEl.textContent, "composer.voiceSpeechDetected:");
+  assert.equal(vadFinalStatusEl.dataset.voiceLevel, "3");
+  vadFinalHarness.fireIntervals();
+  assert.equal(vadFinalRequestCount, 0);
+  vadFinalHarness.feed(700, 0);
+  assert.equal(vadFinalRequestCount, 0);
+  vadFinalHarness.feed(1100, 0);
+  assert.equal(vadFinalStatusEl.textContent, "composer.voiceFinalizing:");
+  const vadFinalResult = await vadFinalResultPromise;
+  assert.equal(vadFinalResult.text, "確定結果");
+  assert.equal(vadFinalRequestCount, 1);
+  assert.equal(vadFinalTranscript, "確定結果");
+  assert.equal(vadFinalRecorder.stopCount, 1);
+  assert.equal(vadFinalHarness.trackStopCount, 1);
+  assert.equal(vadFinalHarness.closeCount, 1);
+
+  const browserFinalizeHarness = createVadHarness();
+  let browserFinalizeRecognition = null;
+  let browserFinalizePreviewPromise = null;
+  let browserFinalizeSignal = null;
+  class BrowserFinalizeRecognition {
+    constructor() {
+      this.stopCount = 0;
+      browserFinalizeRecognition = this;
+    }
+    start() {}
+    stop() {
+      this.stopCount += 1;
+      this.onend?.();
+    }
+  }
+  browserFinalizeHarness.root.webkitSpeechRecognition = BrowserFinalizeRecognition;
+  const browserFinalizePromise = handleVoiceInputClick({
+    els: {
+      prompt: { value: "ブラウザ", focus() {} },
+      voiceInput: boundVoiceButton,
+      composerStatus: { textContent: "", hidden: true },
+    },
+    t,
+    speechRoot: browserFinalizeHarness.root,
+    getPartialMode: () => "browser",
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    recorder: (options) => recordAudio({
+      ...options,
+      root: browserFinalizeHarness.root,
+      navigatorImpl: {
+        mediaDevices: {
+          getUserMedia: async () => browserFinalizeHarness.stream,
+        },
+      },
+      mediaRecorderFactory: (stream) => new FakeMediaRecorder(stream),
+    }),
+    liveRecorder: (options) => {
+      browserFinalizePreviewPromise = recordLiveSpeech(options);
+      return browserFinalizePreviewPromise;
+    },
+    base64Encoder: async () => "browser-final",
+    fetchImpl: async (url, options = {}) => {
+      if (url === "/api/asr/status") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            available: true,
+            runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+            recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+          }),
+        };
+      }
+      browserFinalizeSignal = options.signal;
+      return {
+        ok: true,
+        json: async () => ({ ok: true, text: "ブラウザ確定" }),
+      };
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  browserFinalizeHarness.feed(0, 0.05);
+  browserFinalizeHarness.feed(200, 0.05);
+  browserFinalizeHarness.feed(850, 0);
+  await browserFinalizePromise;
+  assert.equal(browserFinalizeRecognition.stopCount, 1);
+  await browserFinalizePreviewPromise;
+  assert.equal(browserFinalizeSignal.aborted, false);
+  assert.equal(browserFinalizeHarness.activeTimerCount(), 0);
+
+  const cancelHarness = createVadHarness();
+  let cancelRequestCount = 0;
+  const cancelPrompt = { value: "元の入力", focus() {} };
+  const cancelStatusEl = { textContent: "", hidden: true, dataset: {} };
+  const cancelResultPromise = handleVoiceInputClick({
+    els: {
+      prompt: cancelPrompt,
+      voiceInput: boundVoiceButton,
+      composerStatus: cancelStatusEl,
+    },
+    t,
+    getPartialMode: () => "off",
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    recorder: (options) => recordAudio({
+      ...options,
+      root: cancelHarness.root,
+      navigatorImpl: {
+        mediaDevices: {
+          getUserMedia: async () => cancelHarness.stream,
+        },
+      },
+      mediaRecorderFactory: (stream) => new FakeMediaRecorder(stream),
+    }),
+    fetchImpl: async (url) => {
+      if (url === "/api/asr/status") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            available: true,
+            runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+            recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+          }),
+        };
+      }
+      cancelRequestCount += 1;
+      return { ok: true, json: async () => ({ ok: true, text: "反映禁止" }) };
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  cancelHarness.feed(0, 0);
+  cancelHarness.feed(900, 0);
+  assert.equal(requestActiveVoiceStop(), true);
+  assert.equal(requestActiveVoiceStop(), false);
+  await cancelResultPromise;
+  assert.equal(cancelRequestCount, 0);
+  assert.equal(cancelPrompt.value, "元の入力");
+  assert.equal(cancelStatusEl.textContent, "composer.voiceStopped:");
+  cancelHarness.feed(1200, 0.05);
+  assert.equal(cancelStatusEl.textContent, "composer.voiceStopped:");
+  assert.equal("voiceLevel" in cancelStatusEl.dataset, false);
+  assert.equal(cancelHarness.trackStopCount, 1);
+  assert.equal(cancelHarness.closeCount, 1);
+
+  const pendingPermissionHarness = createVadHarness();
+  let resolvePendingStream = null;
+  let pendingRecorderStartCount = 0;
+  const pendingStreamPromise = new Promise((resolve) => {
+    resolvePendingStream = resolve;
+  });
+  const pendingPermissionPromise = handleVoiceInputClick({
+    els: {
+      prompt: { value: "権限待ち", focus() {} },
+      voiceInput: boundVoiceButton,
+      composerStatus: { textContent: "", hidden: true },
+    },
+    t,
+    getPartialMode: () => "off",
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    recorder: (options) => recordAudio({
+      ...options,
+      root: pendingPermissionHarness.root,
+      navigatorImpl: {
+        mediaDevices: {
+          getUserMedia: () => pendingStreamPromise,
+        },
+      },
+      mediaRecorderFactory: (stream) => {
+        pendingRecorderStartCount += 1;
+        return new FakeMediaRecorder(stream);
+      },
+    }),
+    fetchImpl: async (url) => {
+      if (url === "/api/asr/status") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            available: true,
+            runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+            recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+          }),
+        };
+      }
+      throw new Error("停止後にSTT requestを送ってはいけない");
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(requestActiveVoiceStop(), true);
+  resolvePendingStream(pendingPermissionHarness.stream);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(pendingRecorderStartCount, 0);
+  const pendingPermissionResult = await pendingPermissionPromise;
+  assert.equal(pendingPermissionResult.stopped, true);
+  assert.equal(pendingPermissionHarness.trackStopCount, 1);
+  assert.equal(pendingPermissionHarness.activeTimerCount(), 0);
+
+  const browserCancelHarness = createVadHarness();
+  let browserCancelRecognition = null;
+  let browserCancelPreviewPromise = null;
+  class BrowserCancelRecognition {
+    constructor() {
+      this.stopCount = 0;
+      browserCancelRecognition = this;
+    }
+    start() {}
+    stop() {
+      this.stopCount += 1;
+      this.onend?.();
+    }
+  }
+  browserCancelHarness.root.webkitSpeechRecognition = BrowserCancelRecognition;
+  const browserCancelPromise = handleVoiceInputClick({
+    els: {
+      prompt: { value: "取消", focus() {} },
+      voiceInput: boundVoiceButton,
+      composerStatus: { textContent: "", hidden: true },
+    },
+    t,
+    speechRoot: browserCancelHarness.root,
+    getPartialMode: () => "browser",
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    recorder: (options) => recordAudio({
+      ...options,
+      root: browserCancelHarness.root,
+      navigatorImpl: {
+        mediaDevices: {
+          getUserMedia: async () => browserCancelHarness.stream,
+        },
+      },
+      mediaRecorderFactory: (stream) => new FakeMediaRecorder(stream),
+    }),
+    liveRecorder: (options) => {
+      browserCancelPreviewPromise = recordLiveSpeech(options);
+      return browserCancelPreviewPromise;
+    },
+    fetchImpl: async (url) => {
+      if (url === "/api/asr/status") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            available: true,
+            runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+            recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+          }),
+        };
+      }
+      throw new Error("cancel後にfinal requestを送ってはいけない");
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(requestActiveVoiceStop(), true);
+  await browserCancelPromise;
+  assert.equal(browserCancelRecognition.stopCount, 1);
+  await browserCancelPreviewPromise;
+  assert.equal(browserCancelHarness.activeTimerCount(), 0);
+
   let recorderCalled = false;
   const voiceStatusEl = { textContent: "", hidden: true };
   const needsSetupResult = await handleVoiceInputClick({
@@ -450,8 +1163,10 @@ clickHandler({ preventDefault() {} });
     getPartialMode: () => "nemotron",
     recorder: async ({ onPartialBlob, partialIntervalSeconds }) => {
       assert.equal(partialIntervalSeconds, 3);
-      await onPartialBlob({ type: "audio/webm", size: 12, marker: "partial" });
-      assert.equal(previewPrompt.value, "既存\n途中結果");
+      await onPartialBlob({ type: "audio/webm", size: 12, marker: "partial-1" });
+      assert.equal(previewPrompt.value, "既存 予定を");
+      await onPartialBlob({ type: "audio/webm", size: 12, marker: "partial-2" });
+      assert.equal(previewPrompt.value, "既存 予定を教えて");
       return { type: "audio/webm", size: 24, marker: "final" };
     },
     base64Encoder: async (blob) => blob.marker,
@@ -473,7 +1188,11 @@ clickHandler({ preventDefault() {} });
         ok: true,
         json: async () => ({
           ok: true,
-          text: body.audioBase64 === "partial" ? "途中結果" : "最終結果",
+          text: body.audioBase64 === "partial-1"
+            ? "予定を"
+            : body.audioBase64 === "partial-2"
+              ? "予定を教えて"
+              : "最終結果",
         }),
       };
     },
@@ -490,6 +1209,121 @@ clickHandler({ preventDefault() {} });
   assert.equal(previewTranscript, "最終結果");
   assert.equal(previewPrompt.value, "既存\n最終結果");
   assert.equal(previewResizeCount >= 2, true);
+
+  let resolveStoppedFinalResponse = null;
+  let stoppedFinalSignal = null;
+  let stoppedTranscriptCount = 0;
+  const stoppedPrompt = { value: "下書き", focus() {} };
+  const stoppedFinalPending = new Promise((resolve) => {
+    resolveStoppedFinalResponse = resolve;
+  });
+  const stoppedFinalPromise = handleVoiceInputClick({
+    els: { prompt: stoppedPrompt, voiceInput: boundVoiceButton, composerStatus: voiceStatusEl },
+    t,
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    getPartialMode: () => "local",
+    recorder: async ({ onPartialBlob }) => {
+      await onPartialBlob({ type: "audio/webm", size: 12, marker: "stopped-partial" });
+      assert.equal(stoppedPrompt.value, "下書き 途中");
+      return { type: "audio/webm", size: 24, marker: "stopped-final" };
+    },
+    base64Encoder: async (blob) => blob.marker,
+    fetchImpl: async (url, options = {}) => {
+      if (url === "/api/asr/status") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            available: true,
+            runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+            recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+          }),
+        };
+      }
+      const body = JSON.parse(options.body);
+      if (body.audioBase64 === "stopped-partial") {
+        return { ok: true, json: async () => ({ ok: true, text: "途中" }) };
+      }
+      stoppedFinalSignal = options.signal;
+      return stoppedFinalPending;
+    },
+    onTranscript: () => {
+      stoppedTranscriptCount += 1;
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(requestActiveVoiceStop(), true);
+  assert.equal(requestActiveVoiceStop(), false);
+  assert.equal(stoppedPrompt.value, "下書き");
+  assert.equal(stoppedFinalSignal.aborted, true);
+  resolveStoppedFinalResponse({
+    ok: true,
+    json: async () => ({ ok: true, text: "停止後の結果" }),
+  });
+  await stoppedFinalPromise;
+  assert.equal(stoppedTranscriptCount, 0);
+  assert.equal(stoppedPrompt.value, "下書き");
+
+  let resolveStaleResponse = null;
+  let resolveNewRecorder = null;
+  let staleTranscriptCount = 0;
+  const staleResponsePending = new Promise((resolve) => {
+    resolveStaleResponse = resolve;
+  });
+  const oldSessionPromise = handleVoiceInputClick({
+    els: { prompt: { value: "旧", focus() {} }, voiceInput: boundVoiceButton, composerStatus: voiceStatusEl },
+    t,
+    getPartialMode: () => "off",
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    recorder: async () => ({ type: "audio/webm", size: 24, marker: "old-final" }),
+    base64Encoder: async (blob) => blob.marker,
+    fetchImpl: async (url) => {
+      if (url === "/api/asr/status") {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            available: true,
+            runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+            recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+          }),
+        };
+      }
+      return staleResponsePending;
+    },
+    onTranscript: () => {
+      staleTranscriptCount += 1;
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const newSessionPromise = handleVoiceInputClick({
+    els: { prompt: { value: "新", focus() {} }, voiceInput: boundVoiceButton, composerStatus: voiceStatusEl },
+    t,
+    getPartialMode: () => "off",
+    getSelectedModel: () => "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    recorder: () => new Promise((resolve) => {
+      resolveNewRecorder = resolve;
+    }),
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        available: true,
+        runnableModels: ["nvidia/nemotron-3.5-asr-streaming-0.6b"],
+        recommendedModel: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      }),
+    }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  resolveStaleResponse({
+    ok: true,
+    json: async () => ({ ok: true, text: "古い結果" }),
+  });
+  await oldSessionPromise;
+  assert.equal(staleTranscriptCount, 0);
+  assert.equal(requestActiveVoiceStop(), true);
+  resolveNewRecorder(null);
+  await newSessionPromise;
 
   let liveResizeCount = 0;
   const livePrompt = { value: "メモ", focus() {} };
@@ -579,6 +1413,38 @@ clickHandler({ preventDefault() {} });
   assert.equal(livePrompt.value, "メモ\nリアルタイム入力");
   assert.equal(liveResizeCount > 0, true);
 
+  let delayedRecognition = null;
+  class FakeDelayedRecognition {
+    constructor() {
+      delayedRecognition = this;
+    }
+    start() {}
+    stop() {
+      this.onend?.();
+    }
+  }
+  const delayedPrompt = { value: "停止前", focus() {} };
+  let allowDelayedPreview = true;
+  const delayedResultPromise = recordLiveSpeech({
+    els: { prompt: delayedPrompt, voiceInput: liveButton, composerStatus: voiceStatusEl },
+    t,
+    root: context.window,
+    recognitionFactory: FakeDelayedRecognition,
+    shouldApplyResult: () => allowDelayedPreview,
+  });
+  allowDelayedPreview = false;
+  delayedRecognition.onresult({
+    resultIndex: 0,
+    results: [{
+      0: { transcript: "停止後の途中結果" },
+      length: 1,
+      isFinal: true,
+    }],
+  });
+  delayedRecognition.onend();
+  await delayedResultPromise;
+  assert.equal(delayedPrompt.value, "停止前");
+
   let liveStopHandler = null;
   let stopCalledWithoutEnd = false;
   class FakeRecognitionWithoutEnd {
@@ -612,6 +1478,106 @@ clickHandler({ preventDefault() {} });
   assert.equal(stopCalledWithoutEnd, true);
   assert.equal(forcedStopResult.live, true);
   assert.equal(forcedStopResult.ok, false);
+
+  let stoppedStandaloneRecognition = null;
+  let stoppedStandaloneHandler = null;
+  class FakeStoppedStandaloneRecognition {
+    constructor() {
+      stoppedStandaloneRecognition = this;
+    }
+    start() {}
+    stop() {}
+  }
+  const stoppedStandalonePrompt = { value: "停止済み", focus() {} };
+  const stoppedStandalonePromise = recordLiveSpeech({
+    els: { prompt: stoppedStandalonePrompt, voiceInput: liveButton, composerStatus: voiceStatusEl },
+    t,
+    root: context.window,
+    recognitionFactory: FakeStoppedStandaloneRecognition,
+    stopElement: {
+      addEventListener(name, handler) {
+        if (name === "click") stoppedStandaloneHandler = handler;
+      },
+      removeEventListener() {},
+    },
+  });
+  stoppedStandaloneHandler();
+  stoppedStandaloneRecognition.onresult({
+    resultIndex: 0,
+    results: [{
+      0: { transcript: "遅延結果" },
+      length: 1,
+      isFinal: true,
+    }],
+  });
+  assert.equal(stoppedStandalonePrompt.value, "停止済み");
+  stoppedStandaloneRecognition.onend();
+  await stoppedStandalonePromise;
+
+  let settledStandaloneRecognition = null;
+  class FakeSettledStandaloneRecognition {
+    constructor() {
+      settledStandaloneRecognition = this;
+    }
+    start() {}
+    stop() {}
+  }
+  const settledStandalonePrompt = { value: "完了済み", focus() {} };
+  const settledStandalonePromise = recordLiveSpeech({
+    els: { prompt: settledStandalonePrompt, voiceInput: liveButton, composerStatus: voiceStatusEl },
+    t,
+    root: context.window,
+    recognitionFactory: FakeSettledStandaloneRecognition,
+  });
+  settledStandaloneRecognition.onend();
+  await settledStandalonePromise;
+  settledStandaloneRecognition.onresult({
+    resultIndex: 0,
+    results: [{
+      0: { transcript: "完了後の遅延結果" },
+      length: 1,
+      isFinal: true,
+    }],
+  });
+  assert.equal(settledStandalonePrompt.value, "完了済み");
+
+  let unsupportedVadTrackStopCount = 0;
+  let unsupportedVadRecordStartCount = 0;
+  const unsupportedVadStream = {
+    getTracks() {
+      return [{
+        stop() {
+          unsupportedVadTrackStopCount += 1;
+        },
+      }];
+    },
+  };
+  await assert.rejects(recordAudio({
+    root: {
+      AudioContext: UnsupportedVadAudioContext,
+      setInterval,
+      clearInterval,
+      setTimeout,
+      clearTimeout,
+    },
+    navigatorImpl: {
+      mediaDevices: {
+        getUserMedia: async () => unsupportedVadStream,
+      },
+    },
+    mediaRecorderFactory: (stream) => {
+      const recorder = new FakeMediaRecorder(stream);
+      const originalStart = recorder.start.bind(recorder);
+      recorder.start = () => {
+        unsupportedVadRecordStartCount += 1;
+        originalStart();
+      };
+      return recorder;
+    },
+  }), /voice activity detection/i);
+  assert.equal(unsupportedVadRecordStartCount, 0);
+  assert.equal(unsupportedVadTrackStopCount, 1);
+  assert.equal(unsupportedVadCloseCount, 2);
 
   let liveFetchCalled = false;
   const liveClickPrompt = { value: "", focus() {} };

@@ -569,7 +569,10 @@ assert.match(appSource, /hasImages: images\.length > 0/);
 assert.match(appSource, /"chat\.imageModelRequired"/);
 assert.match(appSource, /"chat\.standardModelRequired"/);
 assert.match(appSource, /if \(!canSendModelRequest\(requestOptions, requestModel\)\)/);
-assert.match(appSource, /async function sendMessage\(text\) \{\s*if \(state\.busy \|\| !\(await prepareComposerMessageForSend\(text\)\)\) return false;/);
+assert.match(
+  appSource,
+  /els\.composer\.addEventListener\("submit", async \(event\) => \{[\s\S]*?if \(\(!text[\s\S]*?\|\| state\.busy\) return;\s*stopTtsPlayback\(\{ discard: true \}\);/,
+);
 assert.match(appSource, /if \(state\.composerModel\) return modelForTask\("coding", true\);/);
 assert.match(appSource, /function shouldKeepNoteArticleInChat\(text\)/);
 assert.match(appSource, /function noteArticleRequestBudget\(text, baseContext\)/);
@@ -1504,6 +1507,7 @@ assert.match(indexSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(indexSource, /\/models\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(indexSource, /\/settings\.js\?v=0\.8\.236-download-progress/);
 assert.match(indexSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
+assert.match(indexSource, /\/local-storage-transfer\.js\?v=0\.8\.236-download-progress/);
 assert.match(indexSource, /\/management\.js\?v=0\.8\.236-download-progress/);
 assert.match(indexSource, /\/download-progress\.js\?v=0\.8\.236-download-progress/);
 assert.match(indexSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);
@@ -1519,6 +1523,7 @@ assert.match(serviceWorkerSource, /\/utils\.js\?v=0\.8\.209-tomos53/);
 assert.match(serviceWorkerSource, /\/models\.js\?v=0\.8\.235-strict-purpose/);
 assert.match(serviceWorkerSource, /\/settings\.js\?v=0\.8\.236-download-progress/);
 assert.match(serviceWorkerSource, /\/sidebar\.js\?v=0\.8\.219-searchfix/);
+assert.match(serviceWorkerSource, /\/local-storage-transfer\.js\?v=0\.8\.236-download-progress/);
 assert.match(serviceWorkerSource, /\/management\.js\?v=0\.8\.236-download-progress/);
 assert.match(serviceWorkerSource, /\/download-progress\.js\?v=0\.8\.236-download-progress/);
 assert.match(serviceWorkerSource, /\/workspace\.js\?v=0\.8\.225-note-no-save/);

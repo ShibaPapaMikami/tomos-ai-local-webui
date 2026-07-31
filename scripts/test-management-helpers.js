@@ -46,7 +46,61 @@ const {
   contextMemoryListModel,
   managedStudyPackInstallError,
   internetLayerSetupDisplayLines,
+  migrationActionLabel,
+  migrationPreviewRows,
 } = context.window.GEMMA_MANAGEMENT;
+
+assert.equal(migrationActionLabel("idle"), "内容を確認");
+assert.equal(migrationActionLabel("ready"), "選択したデータをコピー");
+assert.equal(migrationActionLabel("copying"), "コピーしています");
+assert.equal(migrationActionLabel("completed"), "コピーが完了しました");
+assert.equal(migrationActionLabel("error"), "もう一度確認");
+assert.equal(migrationActionLabel("rollback"), "元に戻しています");
+
+const migrationRows = migrationPreviewRows({
+  items: [
+    {
+      kind: "knowledge",
+      totalFiles: 3,
+      totalBytes: 1536,
+      latestMtime: 1720000000,
+      conflict: true,
+      source: "/Users/private/legacy/index.sqlite",
+      destination: "/Users/private/managed/knowledge.sqlite",
+      contents: "do-not-render",
+    },
+    {
+      kind: "study-packs",
+      totalFiles: 0,
+      totalBytes: 0,
+      latestMtime: 0,
+    },
+  ],
+});
+assert.deepEqual(
+  JSON.parse(JSON.stringify(migrationRows)),
+  [
+    {
+      kind: "knowledge",
+      name: "長期記憶",
+      count: "3件",
+      size: "1.5 KB",
+      updatedAt: "2024/07/03 18:46",
+      conflict: "既存データあり",
+      selectable: true,
+    },
+    {
+      kind: "study-packs",
+      name: "教材パック",
+      count: "0件",
+      size: "0 B",
+      updatedAt: "更新なし",
+      conflict: "未確認",
+      selectable: false,
+    },
+  ],
+);
+assert.doesNotMatch(JSON.stringify(migrationRows), /Users\/private|do-not-render/);
 
 assert.equal(
   managedStudyPackInstallError({ status: 404 }, {}, (key) => key),
@@ -184,6 +238,17 @@ const labels = {
   "management.internetLayerDoctorMissing": "エージェントリーチ未導入",
   "management.internetLayerDoctorError": "診断エラー: {error}",
   "management.internetLayerApiMissingShort": "アプリ本体の更新が必要です",
+  "management.localStorageExportCompleted": "設定ファイルを書き出しました。",
+  "management.localStorageExportError": "設定ファイルを書き出せませんでした。",
+  "management.localStorageExporting": "設定ファイルを書き出しています。",
+  "management.localStorageImportReading": "設定ファイルを確認しています。",
+  "management.localStorageImportReady": "取り込む内容を確認しました。",
+  "management.localStorageImportInvalid": "TOMOSの設定ファイルとして読み込めませんでした。",
+  "management.localStorageImportTooLarge": "設定ファイルは10 MiB以下を選択してください。",
+  "management.localStorageImportCompleted": "{count}件を取り込みました。画面を再読み込みしてください。",
+  "management.localStorageImportRolledBack": "取り込みに失敗したため、元の設定へ戻しました。",
+  "management.localStorageImportRollbackFailed": "取り込みと復元に失敗しました。アプリを閉じずにサポートへ連絡してください。",
+  "management.localStorageImportError": "設定を取り込めませんでした。",
   "studyPack.mode.codeReviewShort": "コードレビュー",
   "studyPack.mode.makeReadableShort": "読みやすくする",
 };
@@ -222,10 +287,21 @@ const appJs = fs.readFileSync("web/app.js", "utf8");
 assert.match(indexHtml, /id="note-article-pack-card"/);
 assert.match(indexHtml, /id="note-article-pack-action"/);
 assert.match(indexHtml, /note記事作成サポート/);
+assert.match(indexHtml, /id="legacy-data-migration"/);
+assert.match(indexHtml, /id="migration-preview-action"/);
+assert.match(indexHtml, /id="migration-apply-action"[^>]*disabled/);
+assert.match(indexHtml, /id="migration-rollback-action"[^>]*hidden/);
+assert.match(indexHtml, /id="migration-status"[^>]*aria-live="polite"/);
+assert.match(indexHtml, /id="migration-confirm-dialog"/);
+assert.match(indexHtml, /元データは削除されません/);
+assert.match(i18nJs, /"management\.migrationTitle": "古いTOMOSデータ"/);
+assert.match(stylesCss, /\.migration-section/);
+assert.match(stylesCss, /\.migration-item/);
 assert.match(i18nJs, /management\.noteArticlePackInstallConfirm/);
 assert.match(managementJs, /loadManagedStudyPackCatalog/);
 assert.match(managementJs, /installManagedStudyPack/);
 assert.match(managementJs, /removeManagedStudyPack/);
+assert.match(appJs, /event\.key !== "Escape"[\s\S]*GEMMA_MANAGEMENT\?\.handleEscapeKey/);
 const personRelationshipJs = fs.readFileSync("web/person-relationship.js", "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -487,9 +563,17 @@ assert.equal(
 );
 assert.match(i18nJs, /"management\.needsFolderSetup": "フォルダー編集で有効にしてください"/);
 assert.match(i18nJs, /"management\.prepareCodeUnderstanding": "準備する"/);
-assert.match(indexHtml, /src="\/i18n\.js\?v=0\.8\.235-strict-purpose"/);
+assert.match(
+  indexHtml,
+  /src="\/i18n\.js\?v=[^"]+"/,
+  "management UI should load the shared i18n script",
+);
 assert.match(indexHtml, /src="\/download-progress\.js\?v=0\.8\.236-download-progress"/);
-assert.match(indexHtml, /href="\/styles\.css\?v=0\.8\.236-download-progress"/);
+assert.match(
+  indexHtml,
+  /href="\/styles\.css\?v=[^"]+"/,
+  "management UI should load the shared stylesheet",
+);
 assert.match(fs.readFileSync("web/management.js", "utf8"), /onMenuPanelOpen/);
 const codegraphCardStart = indexHtml.indexOf('data-i18n="management.codeUnderstanding"');
 const codegraphCardEnd = indexHtml.indexOf('id="codegraph-plugin-toggle"', codegraphCardStart);
@@ -977,6 +1061,618 @@ async function runNotePackImportTest() {
   }
 }
 
-Promise.all([runImportTests(), runNotePackImportTest()]).then(() => {
+class MigrationTestElement {
+  constructor(tagName, id, ownerDocument) {
+    this.tagName = tagName.toUpperCase();
+    this.id = id;
+    this.ownerDocument = ownerDocument;
+    this.dataset = {};
+    this.children = [];
+    this.listeners = new Map();
+    this.attributes = new Map();
+    this.hidden = false;
+    this.disabled = false;
+    this.checked = false;
+    this.open = false;
+    this.isConnected = true;
+    this.visible = true;
+    this.textContent = "";
+    this.files = [];
+    this.value = "";
+    this.clickCount = 0;
+  }
+
+  addEventListener(type, handler) {
+    const handlers = this.listeners.get(type) || [];
+    handlers.push(handler);
+    this.listeners.set(type, handlers);
+  }
+
+  dispatch(type) {
+    for (const handler of this.listeners.get(type) || []) {
+      handler({ type, target: this, preventDefault() {} });
+    }
+  }
+
+  click() {
+    if (!this.disabled) {
+      this.clickCount += 1;
+      this.dispatch("click");
+    }
+  }
+
+  focus() {
+    this.ownerDocument.activeElement = this;
+  }
+
+  append(...children) {
+    this.children.push(...children);
+  }
+
+  appendChild(child) {
+    this.children.push(child);
+    return child;
+  }
+
+  remove() {
+    this.isConnected = false;
+  }
+
+  replaceChildren(...children) {
+    this.children = [...children];
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(name);
+    if (name === "open") this.open = false;
+  }
+
+  hasAttribute(name) {
+    return name === "open" ? this.open || this.attributes.has(name) : this.attributes.has(name);
+  }
+
+  showModal() {
+    this.open = true;
+  }
+
+  close() {
+    if (!this.open) return;
+    this.open = false;
+    this.dispatch("close");
+  }
+
+  getClientRects() {
+    return this.visible && !this.hidden ? [{}] : [];
+  }
+
+  querySelectorAll(selector) {
+    const descendants = [];
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (node.tagName === "INPUT" && node.dataset?.migrationKind) descendants.push(node);
+      for (const child of node.children || []) visit(child);
+    };
+    for (const child of this.children) visit(child);
+    if (selector === 'input[data-migration-kind]:checked') {
+      return descendants.filter((input) => input.checked);
+    }
+    if (selector === 'input[data-migration-kind]') return descendants;
+    return [];
+  }
+}
+
+function createMigrationDomHarness(fetchImpl) {
+  const elements = new Map();
+  const document = {
+    activeElement: null,
+    createElement(tagName) {
+      return new MigrationTestElement(tagName, "", document);
+    },
+    querySelector(selector) {
+      return selector.startsWith("#") ? elements.get(selector.slice(1)) || null : null;
+    },
+  };
+  [
+    ["legacy-data-migration", "section"],
+    ["migration-list", "div"],
+    ["migration-status", "p"],
+    ["migration-preview-action", "button"],
+    ["migration-apply-action", "button"],
+    ["migration-rollback-action", "button"],
+    ["migration-confirm-dialog", "dialog"],
+    ["migration-confirm-cancel", "button"],
+    ["migration-confirm-apply", "button"],
+    ["settings-panel", "section"],
+  ].forEach(([id, tagName]) => {
+    elements.set(id, new MigrationTestElement(tagName, id, document));
+  });
+  elements.get("migration-status").setAttribute("aria-live", "polite");
+  elements.get("migration-apply-action").disabled = true;
+  elements.get("migration-rollback-action").hidden = true;
+  const testContext = {
+    window: {},
+    document,
+    localStorage: {
+      getItem: () => null,
+      setItem() {},
+    },
+    fetch: fetchImpl,
+    console,
+  };
+  vm.createContext(testContext);
+  vm.runInContext(managementJs, testContext, { filename: "web/management.js" });
+  const migrationApi = testContext.window.GEMMA_MANAGEMENT;
+  migrationApi.bindMigrationEvents({ t });
+  return { api: migrationApi, document, elements };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function migrationResponse(payload) {
+  return {
+    ok: true,
+    async json() {
+      return payload;
+    },
+  };
+}
+
+async function flushMigrationPromises() {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+function createLocalStorageTransferDomHarness(storageImpl) {
+  const elements = new Map();
+  const readers = [];
+  const blobs = [];
+  const objectUrls = [];
+  const revokedUrls = [];
+  const scheduled = [];
+  class TestFileReader {
+    constructor() {
+      this.result = null;
+      readers.push(this);
+    }
+
+    readAsText(file) {
+      this.file = file;
+      if (file?.throwOnRead) throw new Error("private read failure");
+    }
+
+    succeed(text) {
+      this.result = text;
+      this.onload?.();
+    }
+
+    fail() {
+      this.onerror?.();
+    }
+  }
+  class TestBlob {
+    constructor(parts, options) {
+      this.parts = parts;
+      this.type = options?.type || "";
+      blobs.push(this);
+    }
+  }
+  const document = {
+    activeElement: null,
+    body: null,
+    createElement(tagName) {
+      return new MigrationTestElement(tagName, "", document);
+    },
+    querySelector(selector) {
+      return selector.startsWith("#") ? elements.get(selector.slice(1)) || null : null;
+    },
+  };
+  document.body = new MigrationTestElement("body", "body", document);
+  [
+    ["local-storage-transfer", "section"],
+    ["local-storage-export-action", "button"],
+    ["local-storage-export-status", "p"],
+    ["local-storage-import-choose", "button"],
+    ["local-storage-import-file", "input"],
+    ["local-storage-import-preview", "dl"],
+    ["local-storage-import-accepted-count", "dd"],
+    ["local-storage-import-rejected-count", "dd"],
+    ["local-storage-import-exported-at", "dd"],
+    ["local-storage-import-apply", "button"],
+    ["local-storage-import-status", "p"],
+    ["local-storage-import-dialog", "dialog"],
+    ["local-storage-import-cancel", "button"],
+    ["local-storage-import-confirm", "button"],
+  ].forEach(([id, tagName]) => {
+    elements.set(id, new MigrationTestElement(tagName, id, document));
+  });
+  elements.get("local-storage-import-preview").hidden = true;
+  elements.get("local-storage-import-apply").disabled = true;
+  elements.get("local-storage-export-status").setAttribute("aria-live", "polite");
+  elements.get("local-storage-import-status").setAttribute("aria-live", "polite");
+  elements.get("local-storage-import-choose").textContent = "書き出したファイルを選択";
+  const testContext = {
+    window: {
+      URL: {
+        createObjectURL(blob) {
+          objectUrls.push(blob);
+          return `blob:local-${objectUrls.length}`;
+        },
+        revokeObjectURL(url) {
+          revokedUrls.push(url);
+        },
+      },
+    },
+    document,
+    localStorage: storageImpl,
+    FileReader: TestFileReader,
+    Blob: TestBlob,
+    URL: null,
+    fetch: () => {
+      throw new Error("localStorage transfer must not use fetch");
+    },
+    console,
+  };
+  testContext.URL = testContext.window.URL;
+  vm.createContext(testContext);
+  vm.runInContext(
+    fs.readFileSync("web/local-storage-transfer.js", "utf8"),
+    testContext,
+    { filename: "web/local-storage-transfer.js" },
+  );
+  vm.runInContext(managementJs, testContext, { filename: "web/management.js" });
+  const api = testContext.window.GEMMA_MANAGEMENT;
+  api.bindLocalStorageTransferEvents({
+    t,
+    schedule(callback, delay) {
+      scheduled.push({ callback, delay });
+    },
+  });
+  return {
+    api,
+    blobs,
+    document,
+    elements,
+    objectUrls,
+    readers,
+    revokedUrls,
+    scheduled,
+  };
+}
+
+function localStorageImportJson(values) {
+  return JSON.stringify({
+    type: "tomos-local-storage-export",
+    version: 1,
+    exportedAt: "2026-07-27T00:00:00.000Z",
+    values,
+  });
+}
+
+async function runLocalStorageTransferDomTests() {
+  const data = new Map([
+    ["gemma4.theme", "light"],
+    ["gemma4.sessionToken", "do-not-export"],
+  ]);
+  const operations = [];
+  const storageImpl = {
+    getItem(key) {
+      operations.push(["get", key]);
+      return data.has(key) ? data.get(key) : null;
+    },
+    setItem(key, value) {
+      operations.push(["set", key, value]);
+      data.set(key, String(value));
+    },
+    removeItem(key) {
+      operations.push(["remove", key]);
+      data.delete(key);
+    },
+  };
+  const harness = createLocalStorageTransferDomHarness(storageImpl);
+  const exportAction = harness.elements.get("local-storage-export-action");
+  exportAction.click();
+  exportAction.click();
+  assert.equal(harness.blobs.length, 1);
+  assert.equal(harness.blobs[0].type, "application/json");
+  const downloaded = harness.blobs[0].parts.join("");
+  assert.match(downloaded, /"gemma4\.theme": "light"/);
+  assert.doesNotMatch(downloaded, /sessionToken|do-not-export/);
+  assert.equal(harness.objectUrls.length, 1);
+  assert.equal(harness.revokedUrls.length, 1);
+  assert.equal(exportAction.disabled, true);
+  assert.equal(harness.elements.get("local-storage-export-status").dataset.state, "pending");
+  assert.equal(harness.scheduled.length, 1);
+  assert.equal(harness.scheduled[0].delay, 750);
+  harness.scheduled.shift().callback();
+  assert.equal(harness.elements.get("local-storage-export-status").dataset.state, "completed");
+  assert.equal(exportAction.disabled, false);
+  exportAction.click();
+  assert.equal(harness.blobs.length, 2, "export must be available after the guard releases");
+  harness.scheduled.shift().callback();
+
+  operations.length = 0;
+  const chooseAction = harness.elements.get("local-storage-import-choose");
+  const fileInput = harness.elements.get("local-storage-import-file");
+  chooseAction.click();
+  assert.equal(fileInput.clickCount, 1, "the visible button must explicitly open the hidden file input");
+  fileInput.value = "C:\\fakepath\\private-file-name.json";
+  fileInput.files = [{
+    name: "private-file-name.json",
+    size: 1024,
+  }];
+  fileInput.dispatch("change");
+  assert.equal(harness.readers.length, 1);
+  assert.equal(fileInput.value, "", "the native file basename must be cleared immediately");
+  assert.equal(fileInput.disabled, true);
+  harness.readers[0].succeed(localStorageImportJson({
+    "gemma4.theme": "dark",
+    "gemma4.sessionToken": "do-not-import",
+    "gemma4.workspacePath": "/private/path",
+  }));
+  assert.equal(fileInput.disabled, false);
+  assert.equal(operations.length, 0, "preview must not read or write localStorage");
+  assert.equal(harness.elements.get("local-storage-import-preview").hidden, false);
+  assert.equal(harness.elements.get("local-storage-import-accepted-count").textContent, "1");
+  assert.equal(harness.elements.get("local-storage-import-rejected-count").textContent, "2");
+  assert.match(harness.elements.get("local-storage-import-exported-at").textContent, /2026/);
+  assert.doesNotMatch(
+    JSON.stringify(Array.from(harness.elements.values()).map((element) => ({
+      textContent: element.textContent,
+      value: element.value,
+    }))),
+    /dark|do-not-import|private\/path|private-file-name/,
+  );
+
+  const applyAction = harness.elements.get("local-storage-import-apply");
+  assert.equal(applyAction.disabled, false);
+  applyAction.click();
+  const dialog = harness.elements.get("local-storage-import-dialog");
+  assert.equal(dialog.open, true);
+  assert.equal(harness.document.activeElement, harness.elements.get("local-storage-import-confirm"));
+  harness.elements.get("local-storage-import-cancel").click();
+  assert.equal(dialog.open, false);
+  assert.equal(harness.document.activeElement, applyAction);
+  assert.equal(operations.length, 0, "cancel must not read or write localStorage");
+
+  applyAction.click();
+  const confirm = harness.elements.get("local-storage-import-confirm");
+  confirm.click();
+  confirm.click();
+  assert.equal(
+    operations.filter(([operation]) => operation === "set").length,
+    1,
+    "confirmed import must only be applied once",
+  );
+  assert.equal(data.get("gemma4.theme"), "dark");
+  assert.equal(harness.elements.get("local-storage-import-status").dataset.state, "completed");
+  assert.match(harness.elements.get("local-storage-import-status").textContent, /再読み込み/);
+
+  let setCount = 0;
+  const failingData = new Map([["gemma4.theme", "light"]]);
+  const failing = createLocalStorageTransferDomHarness({
+    getItem(key) {
+      return failingData.has(key) ? failingData.get(key) : null;
+    },
+    setItem() {
+      setCount += 1;
+      throw new Error(`private-value-${setCount}`);
+    },
+    removeItem() {},
+  });
+  const failingInput = failing.elements.get("local-storage-import-file");
+  failingInput.files = [{ size: 128 }];
+  failingInput.dispatch("change");
+  failing.readers[0].succeed(localStorageImportJson({ "gemma4.theme": "dark" }));
+  failing.elements.get("local-storage-import-apply").click();
+  failing.elements.get("local-storage-import-confirm").click();
+  assert.equal(failing.elements.get("local-storage-import-status").dataset.state, "error");
+  assert.doesNotMatch(
+    failing.elements.get("local-storage-import-status").textContent,
+    /private-value|dark|light/,
+  );
+
+  const readFailure = createLocalStorageTransferDomHarness(storageImpl);
+  const readFailureInput = readFailure.elements.get("local-storage-import-file");
+  readFailureInput.files = [{ size: 64, throwOnRead: true }];
+  assert.doesNotThrow(() => readFailureInput.dispatch("change"));
+  assert.equal(readFailureInput.disabled, false);
+  assert.equal(readFailure.elements.get("local-storage-import-status").dataset.state, "error");
+
+  const exactLimit = createLocalStorageTransferDomHarness(storageImpl);
+  const exactLimitInput = exactLimit.elements.get("local-storage-import-file");
+  exactLimitInput.files = [{ size: 10 * 1024 * 1024 }];
+  exactLimitInput.dispatch("change");
+  assert.equal(exactLimit.readers.length, 1, "a 10 MiB file must be read");
+
+  for (const invalidSize of [10 * 1024 * 1024 + 1, undefined, -1, 1.5, Number.NaN]) {
+    const invalidSizeHarness = createLocalStorageTransferDomHarness(storageImpl);
+    const invalidSizeInput = invalidSizeHarness.elements.get("local-storage-import-file");
+    invalidSizeInput.value = "C:\\fakepath\\private-file-name.json";
+    invalidSizeInput.files = [{ size: invalidSize }];
+    invalidSizeInput.dispatch("change");
+    assert.equal(
+      invalidSizeHarness.readers.length,
+      0,
+      `invalid file size ${String(invalidSize)} must be rejected before FileReader`,
+    );
+    assert.equal(invalidSizeInput.value, "");
+    assert.equal(invalidSizeHarness.elements.get("local-storage-import-status").dataset.state, "error");
+    assert.doesNotMatch(
+      invalidSizeHarness.elements.get("local-storage-import-status").textContent,
+      /private-file-name/,
+    );
+  }
+}
+
+function migrationPreview(previewId, kind = "knowledge") {
+  return {
+    ok: true,
+    preview: {
+      previewId,
+      items: [{
+        kind,
+        totalFiles: 2,
+        totalBytes: 2048,
+        latestMtime: 1_700_000_000,
+        errorCount: 0,
+        conflict: false,
+      }],
+    },
+  };
+}
+
+async function runMigrationDomTests() {
+  const firstPreview = deferred();
+  const firstCalls = [];
+  const first = createMigrationDomHarness((url, options = {}) => {
+    firstCalls.push({ url, options });
+    return firstPreview.promise;
+  });
+  const firstPreviewAction = first.elements.get("migration-preview-action");
+  const firstApplyAction = first.elements.get("migration-apply-action");
+  assert.equal(firstApplyAction.disabled, true);
+  assert.equal(first.elements.get("migration-status").attributes.get("aria-live"), "polite");
+  firstPreviewAction.click();
+  assert.equal(firstPreviewAction.disabled, true);
+  firstPreviewAction.click();
+  assert.equal(firstCalls.length, 1, "pending preview must not be sent twice");
+  firstPreview.resolve(migrationResponse(migrationPreview("a".repeat(64))));
+  await flushMigrationPromises();
+  const firstCheckbox = first.elements.get("migration-list")
+    .querySelectorAll('input[data-migration-kind]')[0];
+  assert.ok(firstCheckbox);
+  assert.equal(firstCheckbox.disabled, false);
+  assert.equal(firstApplyAction.disabled, true);
+  firstCheckbox.checked = true;
+  first.elements.get("migration-list").dispatch("change");
+  assert.equal(firstApplyAction.disabled, false);
+
+  const inverseA = deferred();
+  const inverseB = deferred();
+  const inverseQueue = [inverseA, inverseB];
+  const inverse = createMigrationDomHarness(() => inverseQueue.shift().promise);
+  inverse.api.refreshMigrationPreview({ t });
+  inverse.api.refreshMigrationPreview({ t });
+  inverseB.resolve(migrationResponse(migrationPreview("b".repeat(64), "contracts")));
+  await flushMigrationPromises();
+  inverseA.resolve(migrationResponse(migrationPreview("c".repeat(64), "knowledge")));
+  await flushMigrationPromises();
+  const inverseInputs = inverse.elements.get("migration-list")
+    .querySelectorAll('input[data-migration-kind]');
+  assert.equal(inverseInputs.length, 1);
+  assert.equal(inverseInputs[0].dataset.migrationKind, "contracts");
+  assert.equal(inverse.elements.get("migration-status").dataset.state, "ready");
+
+  const oldPreview = deferred();
+  const currentPreview = deferred();
+  const applyRequest = deferred();
+  const rollbackRequest = deferred();
+  const requests = [];
+  const workflow = createMigrationDomHarness((url, options = {}) => {
+    requests.push({ url, options });
+    if (url.endsWith("/preview")) {
+      return requests.filter((request) => request.url.endsWith("/preview")).length === 1
+        ? oldPreview.promise
+        : currentPreview.promise;
+    }
+    if (url.endsWith("/apply")) return applyRequest.promise;
+    return rollbackRequest.promise;
+  });
+  workflow.api.refreshMigrationPreview({ t });
+  workflow.api.refreshMigrationPreview({ t });
+  currentPreview.resolve(migrationResponse(migrationPreview("d".repeat(64))));
+  await flushMigrationPromises();
+  const selected = workflow.elements.get("migration-list")
+    .querySelectorAll('input[data-migration-kind]')[0];
+  selected.checked = true;
+  workflow.elements.get("migration-list").dispatch("change");
+  workflow.elements.get("migration-apply-action").click();
+  const dialog = workflow.elements.get("migration-confirm-dialog");
+  assert.equal(dialog.open, true);
+  assert.equal(workflow.document.activeElement, workflow.elements.get("migration-confirm-apply"));
+
+  const settingsPanel = workflow.elements.get("settings-panel");
+  assert.equal(workflow.api.handleEscapeKey({
+    els: { settingsPanel },
+    state: { workspaceOpen: false },
+  }), "migration-dialog");
+  assert.equal(settingsPanel.hidden, false);
+  dialog.close();
+  assert.equal(workflow.document.activeElement, workflow.elements.get("migration-apply-action"));
+
+  workflow.elements.get("migration-apply-action").click();
+  workflow.elements.get("migration-confirm-apply").click();
+  workflow.elements.get("migration-confirm-apply").click();
+  assert.equal(
+    requests.filter((request) => request.url.endsWith("/apply")).length,
+    1,
+    "apply must not be sent twice",
+  );
+  const applyBody = JSON.parse(
+    requests.find((request) => request.url.endsWith("/apply")).options.body,
+  );
+  assert.deepEqual(applyBody, {
+    previewId: "d".repeat(64),
+    approvedItems: ["knowledge"],
+  });
+  oldPreview.resolve(migrationResponse(migrationPreview("e".repeat(64), "contracts")));
+  await flushMigrationPromises();
+  assert.equal(workflow.elements.get("migration-status").dataset.state, "copying");
+  applyRequest.resolve(migrationResponse({
+    ok: true,
+    migration: { migrationId: "f".repeat(32) },
+  }));
+  await flushMigrationPromises();
+  assert.equal(workflow.elements.get("migration-status").dataset.state, "completed");
+  const rollbackAction = workflow.elements.get("migration-rollback-action");
+  assert.equal(rollbackAction.hidden, false);
+  rollbackAction.click();
+  rollbackAction.click();
+  assert.equal(
+    requests.filter((request) => request.url.endsWith("/rollback")).length,
+    1,
+    "rollback must not be sent twice",
+  );
+  assert.deepEqual(
+    JSON.parse(requests.find((request) => request.url.endsWith("/rollback")).options.body),
+    { migrationId: "f".repeat(32) },
+  );
+  rollbackRequest.resolve(migrationResponse({ ok: true, migration: { status: "rolled_back" } }));
+  await flushMigrationPromises();
+  assert.equal(rollbackAction.hidden, true);
+
+  const hiddenOriginPreview = deferred();
+  const hiddenOrigin = createMigrationDomHarness(() => hiddenOriginPreview.promise);
+  hiddenOrigin.elements.get("migration-confirm-dialog").showModal();
+  hiddenOrigin.elements.get("migration-confirm-apply").focus();
+  hiddenOrigin.elements.get("migration-apply-action").visible = false;
+  hiddenOrigin.elements.get("migration-confirm-dialog").close();
+  assert.notEqual(
+    hiddenOrigin.document.activeElement,
+    hiddenOrigin.elements.get("migration-apply-action"),
+  );
+}
+
+Promise.all([
+  runImportTests(),
+  runNotePackImportTest(),
+  runMigrationDomTests(),
+  runLocalStorageTransferDomTests(),
+]).then(() => {
   console.log("management helper tests passed");
+}).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
 });

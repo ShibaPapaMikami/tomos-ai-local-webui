@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+umask 077
+
+# 既存の単体公証手順。公開候補はrelease-gate-macos-tauri.shを使う。
+ROOT_DIR="$(cd "$(/usr/bin/dirname "$0")/.." && /bin/pwd -P)"
 cd "$ROOT_DIR"
 
 PKG_PATH="${1:-}"

@@ -9,6 +9,7 @@ import urllib.request
 import zipfile
 from io import BytesIO
 from pathlib import Path, PurePosixPath
+import migration_manager
 
 
 PACK_ID = "note-article-writing"
@@ -162,8 +163,10 @@ def install_pack_bytes(data: bytes, catalog_entry: dict, *, install_root: Path) 
     if hashlib.sha256(data).hexdigest() != expected_hash:
         raise ValueError("配布ファイルを確認できませんでした。")
     install_root = Path(install_root)
-    install_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="tomos-study-pack-", dir=install_root.parent) as tmp:
+    with migration_manager.managed_data_write_for_path(
+        install_root, "study-packs"
+    ):
+     with tempfile.TemporaryDirectory(prefix="tomos-study-pack-", dir=install_root.parent) as tmp:
         extract_root = Path(tmp) / "extract"
         extract_root.mkdir()
         try:
@@ -214,5 +217,10 @@ def install_pack(catalog_entry: dict, *, install_root: Path, progress_callback=N
 def remove_pack(pack_id: str, *, install_root: Path) -> dict:
     if pack_id != PACK_ID:
         raise ValueError("削除できない教材パックです。")
-    shutil.rmtree(_pack_dir(install_root, pack_id), ignore_errors=True)
+    with migration_manager.managed_data_write_for_path(
+        install_root, "study-packs"
+    ):
+        shutil.rmtree(
+            _pack_dir(install_root, pack_id), ignore_errors=True
+        )
     return {"ok": True, "id": pack_id, "status": "not-installed"}

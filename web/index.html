@@ -114,6 +114,61 @@
             <button class="ghost-button" id="settings-close" type="button" data-i18n="common.close">閉じる</button>
           </div>
           <div class="settings-meta" id="settings-meta">バージョン確認中</div>
+          <section class="migration-section" id="legacy-data-migration" aria-labelledby="migration-title">
+            <div class="migration-heading">
+              <div>
+                <strong id="migration-title" data-i18n="management.migrationTitle">古いTOMOSデータ</strong>
+                <span data-i18n="management.migrationHelp">以前の保存場所にあるデータを確認し、選んだものだけを現在のTOMOSへコピーします。</span>
+              </div>
+              <button class="ghost-button" id="migration-preview-action" type="button" data-i18n="management.migrationPreview">内容を確認</button>
+            </div>
+            <p class="migration-note" data-i18n="management.migrationPrivacy">ファイルの場所や保存内容、秘密情報はこの画面に表示しません。</p>
+            <div class="migration-list" id="migration-list" aria-label="コピーできる古いTOMOSデータ" data-i18n-aria-label="management.migrationListLabel">
+              <p class="migration-empty" data-i18n="management.migrationIdle">「内容を確認」を押すと、件数や容量だけを確認できます。</p>
+            </div>
+            <div class="migration-actions">
+              <button class="ghost-button primary-action" id="migration-apply-action" type="button" disabled data-i18n="management.migrationApply">選択したデータをコピー</button>
+              <button class="ghost-button" id="migration-rollback-action" type="button" hidden disabled data-i18n="management.migrationRollback">元に戻す</button>
+            </div>
+            <p class="migration-status" id="migration-status" role="status" aria-live="polite" aria-atomic="true" data-state="idle" data-i18n="management.migrationStatusIdle">まだ確認していません。</p>
+            <div class="local-storage-transfer" id="local-storage-transfer" aria-labelledby="local-storage-transfer-title">
+              <div class="local-storage-transfer-heading">
+                <strong id="local-storage-transfer-title" data-i18n="management.localStorageTransferTitle">ブラウザー版の設定を移す</strong>
+                <span data-i18n="management.localStorageTransferHelp">旧ブラウザー版で書き出した10 MiB以下のファイルを、アプリ版で選んで取り込みます。自動探索や外部送信は行いません。</span>
+              </div>
+              <div class="local-storage-transfer-group">
+                <p class="local-storage-transfer-warning" data-i18n="management.localStorageExportWarning">会話や設定がファイルへ含まれます。共有先と保存場所を確認してください。</p>
+                <div class="local-storage-transfer-actions">
+                  <button class="ghost-button" id="local-storage-export-action" type="button" data-i18n="management.localStorageExportAction">ブラウザー版の設定を書き出す</button>
+                </div>
+                <p class="migration-status" id="local-storage-export-status" role="status" aria-live="polite" aria-atomic="true" data-state="idle" data-i18n="management.localStorageExportIdle">まだ書き出していません。</p>
+              </div>
+              <div class="local-storage-transfer-group">
+                <div class="local-storage-transfer-actions">
+                  <button class="ghost-button" id="local-storage-import-choose" type="button" data-i18n="management.localStorageImportChoose">書き出したファイルを選択</button>
+                  <input id="local-storage-import-file" class="local-storage-file-input" type="file" accept="application/json,.json" tabindex="-1" aria-hidden="true" />
+                </div>
+                <dl class="local-storage-import-preview" id="local-storage-import-preview" hidden>
+                  <div>
+                    <dt data-i18n="management.localStorageImportAcceptedCount">対象件数</dt>
+                    <dd id="local-storage-import-accepted-count">0</dd>
+                  </div>
+                  <div>
+                    <dt data-i18n="management.localStorageImportRejectedCount">除外件数</dt>
+                    <dd id="local-storage-import-rejected-count">0</dd>
+                  </div>
+                  <div>
+                    <dt data-i18n="management.localStorageImportExportedAt">ファイル作成日時</dt>
+                    <dd id="local-storage-import-exported-at"></dd>
+                  </div>
+                </dl>
+                <div class="local-storage-transfer-actions">
+                  <button class="ghost-button primary-action" id="local-storage-import-apply" type="button" disabled data-i18n="management.localStorageImportApply">選択した設定を取り込む</button>
+                </div>
+                <p class="migration-status" id="local-storage-import-status" role="status" aria-live="polite" aria-atomic="true" data-state="idle" data-i18n="management.localStorageImportIdle">ファイルを選択してください。</p>
+              </div>
+            </div>
+          </section>
           <section class="pc-diagnostics-panel" id="pc-diagnostics" aria-label="PC診断"></section>
           <section class="search-capabilities-panel" id="search-capabilities" aria-label="フォルダー検索" data-i18n-aria-label="settings.workspaceSearch"></section>
           <section class="model-installer" id="model-installer" aria-label="モデルをダウンロード" data-i18n-aria-label="settings.modelDownload"></section>
@@ -170,6 +225,7 @@
               <p class="management-note" data-i18n="settings.externalLlmDeleteHelp">この削除はアプリに保存した接続先だけを消します。ダウンロード済みモデル本体は、Ollama・llama.cpp・Hugging Face cacheなど導入元で削除してください。</p>
             </details>
           </section>
+          <section class="external-llm-panel" id="tts-settings" aria-label="音声読み上げ" data-i18n-aria-label="settings.ttsTitle"></section>
           <label class="setting-field setting-wide">
             <span data-i18n="settings.systemPrompt">全体ルール</span>
             <select id="system-prompt-template" aria-label="全体ルールのテンプレート" data-i18n-aria-label="settings.systemPromptTemplate">
@@ -1275,10 +1331,32 @@
             <button class="send-button" id="send" type="submit" title="送信" aria-label="送信" data-i18n-title="common.send" data-i18n-aria-label="common.send">↑</button>
             <button class="stop-button" id="stop" type="button" title="停止" aria-label="停止" data-i18n-title="common.stop" data-i18n-aria-label="common.stop" hidden>■</button>
           </div>
-          <div class="composer-status" id="composer-status" hidden></div>
+          <div class="composer-status" id="composer-status" hidden aria-live="polite"></div>
         </form>
       </main>
     </div>
+
+    <dialog class="migration-confirm-dialog" id="migration-confirm-dialog" aria-labelledby="migration-confirm-title" aria-describedby="migration-confirm-description">
+      <form method="dialog">
+        <strong id="migration-confirm-title" data-i18n="management.migrationConfirmTitle">選択したデータをコピーしますか？</strong>
+        <p id="migration-confirm-description" data-i18n="management.migrationConfirmDescription">元データは削除されません。現在のTOMOSへ安全にコピーし、内容を検証します。</p>
+        <div class="migration-confirm-actions">
+          <button class="ghost-button" id="migration-confirm-cancel" type="button" data-i18n="common.cancel">キャンセル</button>
+          <button class="ghost-button primary-action" id="migration-confirm-apply" type="button" data-i18n="management.migrationConfirmApply">コピーを開始</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="migration-confirm-dialog" id="local-storage-import-dialog" aria-labelledby="local-storage-import-dialog-title" aria-describedby="local-storage-import-dialog-description">
+      <form method="dialog">
+        <strong id="local-storage-import-dialog-title" data-i18n="management.localStorageImportConfirmTitle">選択した設定を取り込みますか？</strong>
+        <p id="local-storage-import-dialog-description" data-i18n="management.localStorageImportConfirmDescription">現在のアプリ設定へ上書きされます。失敗した場合は、取り込み前の状態へ戻します。</p>
+        <div class="migration-confirm-actions">
+          <button class="ghost-button" id="local-storage-import-cancel" type="button" data-i18n="common.cancel">キャンセル</button>
+          <button class="ghost-button primary-action" id="local-storage-import-confirm" type="button" data-i18n="management.localStorageImportConfirmApply">取り込みを開始</button>
+        </div>
+      </form>
+    </dialog>
 
     <div class="undo-toast" id="undo-toast" hidden>
       <span id="undo-text"></span>
@@ -1349,6 +1427,7 @@
   <script src="/weather.js?v=0.8.209-tomos53"></script>
   <script src="/image-tools.js?v=0.8.209-tomos53"></script>
   <script src="/asr.js?v=0.8.236-download-progress"></script>
+  <script src="/tts.js?v=0.8.236-download-progress"></script>
   <script src="/attachments.js?v=0.8.209-tomos53"></script>
   <script src="/composer.js?v=0.8.209-tomos53"></script>
   <script src="/workspace.js?v=0.8.225-note-no-save"></script>
@@ -1359,9 +1438,10 @@
   <script src="/person-name-fortune.js?v=0.8.209-tomos53"></script>
   <script src="/person-relationship.js?v=0.8.209-tomos53"></script>
   <script src="/models.js?v=0.8.235-strict-purpose"></script>
-  <script src="/messages.js?v=0.8.211-listground1"></script>
+  <script src="/messages.js?v=0.8.236-download-progress"></script>
   <script src="/sidebar.js?v=0.8.219-searchfix"></script>
   <script src="/settings.js?v=0.8.236-download-progress"></script>
+    <script src="/local-storage-transfer.js?v=0.8.236-download-progress"></script>
     <script src="/management.js?v=0.8.236-download-progress"></script>
   <script src="/download-progress.js?v=0.8.236-download-progress"></script>
   <script src="/router.js?v=0.8.209-tomos53"></script>

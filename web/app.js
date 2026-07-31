@@ -163,6 +163,12 @@ const state = {
     searchCapabilities: null,
     pcDiagnostics: null,
   },
+  pcBenchmark: {
+    status: "idle",
+    result: null,
+    error: "",
+  },
+  pcBenchmarkRequestId: 0,
   asrStatus: {
     status: "checking",
     candidates: [],
@@ -175,6 +181,18 @@ const state = {
   micDevices: [],
   asrSetupJob: {},
   asrSetupTimer: null,
+  ttsStatus: {
+    enabled: false,
+    engine: "off",
+    ready: false,
+    supportsStreaming: false,
+    reason: "checking",
+  },
+  ttsPlayback: {
+    messageIndex: -1,
+    status: "idle",
+    error: "",
+  },
   enterToSend: localStorage.getItem("gemma4.enterToSend") === "true",
   weatherLocation: window.GEMMA_WEATHER?.loadSavedWeatherLocation?.() || null,
   lastDeleted: null,
@@ -191,6 +209,79 @@ let healthCheckPromise = null;
 let healthCheckCompleted = false;
 let lastCompletedStudyPackJob = "";
 let modelRequestPreparing = false;
+let ttsRequestSequence = 0;
+
+const ttsController = window.GEMMA_TTS?.createTtsController?.({
+  onStateChange: ({ status, error = "" }) => {
+    state.ttsPlayback.status = status;
+    state.ttsPlayback.error = error;
+    render();
+  },
+});
+
+async function refreshTtsStatus() {
+  try {
+    const response = await fetch("/api/tts/status");
+    const data = await response.json();
+    state.ttsStatus = data.tts || state.ttsStatus;
+  } catch {
+    state.ttsStatus = {
+      enabled: false,
+      engine: "off",
+      ready: false,
+      supportsStreaming: false,
+      reason: "unavailable",
+    };
+  }
+  renderTtsSettings();
+  render();
+}
+
+function renderTtsSettings() {
+  if (!els.ttsSettings) return;
+  const status = state.ttsStatus || {};
+  const engine = status.engine === "off" ? t("chat.ttsUnavailable") : status.engine;
+  els.ttsSettings.innerHTML = `
+    <div class="model-installer-title">
+      <strong>${escapeHtml(t("settings.ttsTitle"))}</strong>
+      <span>${escapeHtml(t("settings.ttsManualOnly"))}</span>
+    </div>
+    <p class="management-note">${escapeHtml(t("settings.ttsEngine"))}: ${escapeHtml(engine)}</p>
+  `;
+}
+
+async function playMessageTts(messageIndex, message) {
+  if (!ttsController || !state.ttsStatus?.ready) return false;
+  state.ttsPlayback = { messageIndex, status: "preparing", error: "" };
+  const requestId = `tts-${Date.now()}-${++ttsRequestSequence}`;
+  try {
+    return await ttsController.play({
+      requestId,
+      text: message.content,
+      voice: "default",
+      language: state.language === "en" ? "en" : "ja",
+      supportsStreaming: Boolean(state.ttsStatus.supportsStreaming),
+    });
+  } catch {
+    return false;
+  }
+}
+
+function stopTtsPlayback({ discard = false } = {}) {
+  ttsController?.stop?.({ clearReplay: discard });
+  if (discard) {
+    state.ttsPlayback = { messageIndex: -1, status: "idle", error: "" };
+    render();
+  }
+}
+
+async function replayTtsPlayback() {
+  try {
+    return await ttsController?.replay?.();
+  } catch {
+    return false;
+  }
+}
 
 const WORKSPACE_PLAN_TIMEOUT_MS = 120000;
 const WORKSPACE_FILE_TIMEOUT_MS = 300000;
@@ -298,6 +389,7 @@ const els = {
   attachImage: document.querySelector("#attach-image"),
   voiceInput: document.querySelector("#voice-input"),
   composerStatus: document.querySelector("#composer-status"),
+  ttsSettings: document.querySelector("#tts-settings"),
   send: document.querySelector("#send"),
   stop: document.querySelector("#stop"),
   newFolder: document.querySelector("#new-folder"),
@@ -3967,6 +4059,9 @@ function renderMessages() {
     saveWorkspaceTranscript,
     state,
     t,
+    playTts: playMessageTts,
+    stopTts: stopTtsPlayback,
+    replayTts: replayTtsPlayback,
   });
 }
 
@@ -5686,6 +5781,60 @@ async function performHealthCheck() {
   return true;
 }
 
+async function startPcBenchmark() {
+  if (state.pcBenchmark.status === "running") return;
+  const model = String(
+    state.appInfo?.pcDiagnostics?.recommendation?.recommended?.standard || "",
+  );
+  if (!model) {
+    state.pcBenchmark = {
+      status: "error",
+      result: null,
+      error: "benchmark_model_not_allowed",
+    };
+    renderSettingsMeta();
+    return;
+  }
+  const requestId = state.pcBenchmarkRequestId + 1;
+  state.pcBenchmarkRequestId = requestId;
+  state.pcBenchmark = {
+    status: "running",
+    result: null,
+    error: "",
+  };
+  renderSettingsMeta();
+  try {
+    const response = await fetch("/api/diagnostics/model-benchmark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok !== true || !data.benchmark) {
+      throw new Error(String(data.error || "benchmark_failed"));
+    }
+    if (requestId !== state.pcBenchmarkRequestId) return;
+    state.pcBenchmark = {
+      status: "complete",
+      result: data.benchmark,
+      error: "",
+    };
+  } catch (error) {
+    if (requestId !== state.pcBenchmarkRequestId) return;
+    const errorCode = String(error?.message || "");
+    state.pcBenchmark = {
+      status: "error",
+      result: null,
+      error: [
+        "benchmark_model_not_allowed",
+        "benchmark_in_progress",
+        "benchmark_localhost_required",
+      ].includes(errorCode) ? errorCode : "benchmark_failed",
+    };
+  }
+  renderSettingsMeta();
+}
+
 function checkHealth() {
   if (healthCheckPromise) return healthCheckPromise;
   healthCheckPromise = performHealthCheck()
@@ -6769,6 +6918,7 @@ els.composer.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = els.prompt.value.trim();
   if ((!text && state.pendingImages.length === 0 && state.pendingFiles.length === 0) || state.busy) return;
+  stopTtsPlayback({ discard: true });
   const hasPendingMedia = state.pendingImages.length > 0 || state.pendingFiles.length > 0;
   if (hasPendingMedia) {
     sendMessage(text || (state.pendingFiles.length > 0 ? (state.language === "en" ? "Read the attached file." : "添付ファイルを読んでください。") : (state.language === "en" ? "Describe this image." : "この画像を説明してください。")));
@@ -6832,6 +6982,7 @@ els.composer.addEventListener("submit", async (event) => {
 });
 
 els.stop.addEventListener("click", () => {
+  stopTtsPlayback({ discard: true });
   if (!state.abortController) return;
   state.progressLabel = t("progress.stopping");
   updateProgressTimer();
@@ -8073,6 +8224,9 @@ bindAsrUi?.({
   getPartialIntervalSeconds: () => state.partialIntervalSeconds,
   getPartialMode: () => state.partialMode,
 });
+els.voiceInput?.addEventListener("click", () => stopTtsPlayback({ discard: true }), { capture: true });
+window.addEventListener("hashchange", () => stopTtsPlayback({ discard: true }));
+window.addEventListener("pagehide", () => ttsController?.dispose?.());
 
 window.GEMMA_SIDEBAR?.bindSidebarEvents?.({
   els,
@@ -8083,6 +8237,7 @@ els.undoDelete.addEventListener("click", restoreLastDeleted);
 els.undoClose.addEventListener("click", hideUndo);
 
 els.newFolder.addEventListener("click", async () => {
+  stopTtsPlayback({ discard: true });
   createFolder(t("folder.new"));
   newSession();
   startFolderRename(activeFolder());
@@ -8090,6 +8245,7 @@ els.newFolder.addEventListener("click", async () => {
 });
 
 els.clearChat.addEventListener("click", () => {
+  stopTtsPlayback({ discard: true });
   const session = activeSession();
   if (!session) return;
   session.messages = [];
@@ -8162,6 +8318,7 @@ window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
   onMobileImport: importMobileChatJson,
   onMobilePendingImport: importPendingMobileChats,
   onMenuPanelOpen: () => {
+    stopTtsPlayback({ discard: true });
     if (window.GEMMA_SIDEBAR?.shouldHideSidebarAfterManagementOpen?.({
       isMobile: window.matchMedia("(max-width: 760px)").matches,
       sidebarHidden: state.sidebarHidden,
@@ -8171,6 +8328,7 @@ window.GEMMA_MANAGEMENT?.bindManagementEvents?.({
   },
   onPluginsChanged: render,
 });
+els.sidebar?.addEventListener("click", () => stopTtsPlayback({ discard: true }), { capture: true });
 
 els.modelInstaller.addEventListener("click", (event) => {
   const removeButton = event.target.closest("[data-model-remove]");
@@ -8183,10 +8341,22 @@ els.modelInstaller.addEventListener("click", (event) => {
   startModelPull(pullButton.dataset.modelPull);
 });
 els.pcDiagnostics?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-pc-diagnostics-refresh]");
-  if (!button) return;
-  button.disabled = true;
-  button.textContent = state.language === "en" ? "Checking..." : "診断中...";
+  const benchmarkButton = event.target.closest("[data-pc-benchmark-start]");
+  if (benchmarkButton) {
+    startPcBenchmark();
+    return;
+  }
+  const refreshButton = event.target.closest("[data-pc-diagnostics-refresh]");
+  if (!refreshButton) return;
+  if (state.pcBenchmark.status === "running") return;
+  refreshButton.disabled = true;
+  refreshButton.textContent = state.language === "en" ? "Checking..." : "診断中...";
+  state.pcBenchmarkRequestId += 1;
+  state.pcBenchmark = {
+    status: "idle",
+    result: null,
+    error: "",
+  };
   checkHealth();
 });
 els.contextMemoryRefresh?.addEventListener("click", loadContextMemory);
@@ -8327,11 +8497,13 @@ setThinkingMode(state.thinkingMode);
 syncModelInputs();
 renderSettingsMeta();
 renderAsrSettingsPanel();
+renderTtsSettings();
 renderWeatherLocationStatus();
 setEnterToSend(state.enterToSend);
 resizePrompt();
 refreshAsrStatus();
 refreshAsrSetupStatus();
+refreshTtsStatus();
 
 if (state.folders.length > 0 && sessionsForActiveFolder().length === 0) {
   newSession();
