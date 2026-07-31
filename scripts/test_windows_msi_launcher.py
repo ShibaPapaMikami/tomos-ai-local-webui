@@ -34,6 +34,14 @@ class WindowsMsiLauncherTest(unittest.TestCase):
     def test_launcher_exe_is_staged_for_windows_shortcuts(self) -> None:
         self.assertIn("Gemma4_12B_Launcher.exe", self.wxs)
 
+    def test_visible_msi_metadata_uses_tomos_branding(self) -> None:
+        self.assertIn('Name="TOMOS AI"', self.wxs)
+        self.assertIn('Manufacturer="ShibaPapa Studio"', self.wxs)
+        self.assertIn('Title="TOMOS AI"', self.wxs)
+        self.assertIn("A newer version of TOMOS AI is already installed.", self.wxs)
+        self.assertIn('UpgradeCode="7FAD4890-85D1-4C8D-A4AA-0B1B7E7F41A1"', self.wxs)
+        self.assertIn('<Directory Id="INSTALLFOLDER" Name="Gemma4_12B">', self.wxs)
+
     def test_shortcuts_target_launcher_exe_not_batch_files(self) -> None:
         self.assertIn('Target="[INSTALLFOLDER]Gemma4_12B_Launcher.exe"', self.wxs)
         self.assertIn('Arguments="web"', self.wxs)

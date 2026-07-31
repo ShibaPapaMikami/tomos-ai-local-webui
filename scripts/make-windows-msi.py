@@ -224,12 +224,12 @@ def generate_wxs(version: str) -> None:
     wxs = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-    Name="Gemma4_12B"
-    Manufacturer="Gemma4_12B Project"
+    Name="TOMOS AI"
+    Manufacturer="ShibaPapa Studio"
     Version="{html.escape(version)}"
     UpgradeCode="7FAD4890-85D1-4C8D-A4AA-0B1B7E7F41A1"
     Scope="perMachine">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Gemma4_12B is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of TOMOS AI is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <StandardDirectory Id="ProgramFilesFolder">
       <Directory Id="INSTALLFOLDER" Name="Gemma4_12B">
@@ -291,7 +291,7 @@ def generate_wxs(version: str) -> None:
         After="InstallFinalize"
         Condition="NOT Installed AND NOT REMOVE" />
     </InstallExecuteSequence>
-    <Feature Id="MainFeature" Title="Gemma4_12B" Level="1">
+    <Feature Id="MainFeature" Title="TOMOS AI" Level="1">
 {refs}
     </Feature>
   </Package>
