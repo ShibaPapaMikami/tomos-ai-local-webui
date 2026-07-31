@@ -4,9 +4,9 @@
 
 ## 起動
 
-- [ ] Apple Silicon Macへ公証済み `TOMOS_AI-v0.8.233-mac-arm64.pkg` をインストールできる
-- [ ] `/Applications/TOMOS AI.app` が専用ウィンドウで起動し、ブラウザーを自動表示しない
-- [ ] インストール前からある設定、Memory、Knowledge、教材パック、旧フォルダーを削除しない
+- [x] Apple Silicon Macへ公証済み `TOMOS_AI-v0.8.233-mac-arm64.pkg` をインストールできる
+- [x] `/Applications/TOMOS AI.app` が専用ウィンドウで起動し、ブラウザーを自動表示しない
+- [x] インストール前からある設定、Memory、Knowledge、教材パック、旧フォルダーを削除しない
 - [ ] Ollamaが未導入の場合は別途必要であることを日本語で案内する
 - [ ] Windows ZIP版で `Gemma4_12B_All_Start.bat` が起動する
 - [ ] Windows ZIP版で `Gemma4_12B_Web.bat` が起動する

@@ -129,7 +129,9 @@ Gate B2の検証証跡は [TOMOS Desktop Gate B2 検証報告](../../tomos-deskt
 Gate B3の検証証跡は [TOMOS Desktop Gate B3 検証報告](../../tomos-desktop-b3-gate-report-2026-07-28.ja.md) を正本とする。
 最終コードレビューで見つかった旧保存先、人物写真形式、WebPの復号前サイズ制限は追加修正と独立再レビューで解消した。Gate B3は合格としDesktop Cの開始を許可した。
 
-Gate Cは2026-07-31に合格した。成果物は `dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg`、容量は `45033304` bytes、SHA-256は `333f559e3967460a47bf11a73ee4e9e0301c5e0a55a0e08a429a35728424a238`、製品source commitは `53497ef93ebbd95d3c45bd6a7ba727da41b70675`、Apple notary submission IDは `716ce3c6-9f6d-4703-b42e-a2ccd0556757`。Developer ID Application、Developer ID Installer、Apple公証、stapler、Gatekeeper、全自動テストをreadbackした。後続の `27b8fe3` はTask 4完了チェックだけの文書commitで、製品コード差分を含まない。現在Macへの上書きインストール、push、GitHub Release公開は別承認まで実施しない。
+Gate Cは2026-07-31に合格した。成果物は `dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg`、容量は `45033304` bytes、SHA-256は `333f559e3967460a47bf11a73ee4e9e0301c5e0a55a0e08a429a35728424a238`、製品source commitは `53497ef93ebbd95d3c45bd6a7ba727da41b70675`、Apple notary submission IDは `716ce3c6-9f6d-4703-b42e-a2ccd0556757`。Developer ID Application、Developer ID Installer、Apple公証、stapler、Gatekeeper、全自動テストをreadbackした。後続の `27b8fe3` はTask 4完了チェックだけの文書commitで、製品コード差分を含まない。
+
+同日のDirector承認後、現在Macを `0.8.230` から `0.8.233` へ上書きし、PKG receipt、arm64、Developer ID、公証、専用ウィンドウ、localhost health `appVersion: 0.8.233`を実機確認した。インストール前後で既存dataは24ファイル、2368 KB、metadata SHA-256 `6a5d0568fb590116050714486b038704b6a81687cb16754d9b7f5043b35bf1fd`のまま一致し、既存チャットも画面に表示された。pushとGitHub Release公開は別承認まで実施しない。
 
 ## Ownership Boundary
 
