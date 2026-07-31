@@ -199,11 +199,11 @@ Expected: notary result `Accepted`、stapler validate成功、`spctl`が`Notariz
 - Modify: `docs/github-release-guide.ja.md`
 - Modify: `docs/superpowers/plans/2026-07-23-tomos-evolution-master.md`
 
-- [ ] **Step 1: release文書をTauri PKGへ更新する**
+- [x] **Step 1: release文書をTauri PKGへ更新する**
 
 学生向けMac成果物は`TOMOS_AI-v0.8.233-mac-arm64.pkg`と明記する。Apple Silicon専用、旧data非削除、Ollamaは別途必要、公証済みであることを書く。ZIPを初心者向けassetにしない。
 
-- [ ] **Step 2: 全自動testをfresh実行する**
+- [x] **Step 2: 全自動testをfresh実行する**
 
 Run:
 
@@ -224,7 +224,7 @@ git diff --check
 
 Expected: 全件exit 0。
 
-- [ ] **Step 3: 署名・公証をfresh readbackする**
+- [x] **Step 3: 署名・公証をfresh readbackする**
 
 Run:
 
@@ -237,10 +237,10 @@ codesign -dv --verbose=4 dist/signed/TOMOS\ AI.app
 shasum -a 256 dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg
 ```
 
-- [ ] **Step 4: Gate C判定**
+- [x] **Step 4: Gate C判定**
 
 全検証成功後だけマスター台帳のGate Cを`合格`へ更新する。PKG path、byte size、SHA-256、source commit、notary submission IDを記録する。
 
-- [ ] **Step 5: インストール承認を依頼する**
+- [x] **Step 5: インストール承認を依頼する**
 
 この工程では`installer`、`open /Applications/TOMOS AI.app`、既存app停止・上書きを実行しない。Directorへ現在Macへの上書きインストールを別途申請する。

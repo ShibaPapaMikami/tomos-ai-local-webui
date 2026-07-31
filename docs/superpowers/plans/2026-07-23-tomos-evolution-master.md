@@ -117,7 +117,7 @@
 | Gate B1 | Gate 3合格版 | Apple Silicon用Python同梱、app内resource | Desktop B2 | 合格 |
 | Gate B2 | Gate B1合格版 | localhost API session保護 | Desktop B3 | 合格 |
 | Gate B3 | Gate B2合格版 | app data、プレビュー、承認コピー移行 | Desktop C | 合格 |
-| Gate C | Gate B3合格版 | 署名・公証済みApple Silicon Mac PKG | 実機インストール確認 | 停止 |
+| Gate C | Gate B3合格版 | 署名・公証済みApple Silicon Mac PKG | 実機インストール確認 | 合格 |
 | Gate 4 | Gate C実機確認合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment E/VまたはDesktop D | 停止 |
 | Gate V0 / V1 | Gate 4合格版とcandidate承認 | 隔離音声adapter、実測、人評価 | 音声採用の別計画 | 停止 |
 | Gate E0 / E1 | Gate 4合格版とartifact承認 | local-onlyモデル比較結果 | モデル採用の別計画 | 停止 |
@@ -127,7 +127,9 @@
 
 Gate B2の検証証跡は [TOMOS Desktop Gate B2 検証報告](../../tomos-desktop-b2-gate-report-2026-07-27.ja.md) を正本とする。
 Gate B3の検証証跡は [TOMOS Desktop Gate B3 検証報告](../../tomos-desktop-b3-gate-report-2026-07-28.ja.md) を正本とする。
-最終コードレビューで見つかった旧保存先、人物写真形式、WebPの復号前サイズ制限は追加修正と独立再レビューで解消した。Gate B3は合格としDesktop Cの開始を許可する。ただし、Gate Cは停止を維持し、署名・公証・PKG作成は別承認まで実施しない。
+最終コードレビューで見つかった旧保存先、人物写真形式、WebPの復号前サイズ制限は追加修正と独立再レビューで解消した。Gate B3は合格としDesktop Cの開始を許可した。
+
+Gate Cは2026-07-31に合格した。成果物は `dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg`、容量は `45033304` bytes、SHA-256は `333f559e3967460a47bf11a73ee4e9e0301c5e0a55a0e08a429a35728424a238`、製品source commitは `53497ef93ebbd95d3c45bd6a7ba727da41b70675`、Apple notary submission IDは `716ce3c6-9f6d-4703-b42e-a2ccd0556757`。Developer ID Application、Developer ID Installer、Apple公証、stapler、Gatekeeper、全自動テストをreadbackした。後続の `27b8fe3` はTask 4完了チェックだけの文書commitで、製品コード差分を含まない。現在Macへの上書きインストール、push、GitHub Release公開は別承認まで実施しない。
 
 ## Ownership Boundary
 

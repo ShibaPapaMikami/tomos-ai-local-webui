@@ -4,8 +4,10 @@
 
 ## 起動
 
-- [ ] Macで `Gemma4_12B_全部起動.command` が起動する
-- [ ] Macで `Gemma4_12B_Web.command` が起動する
+- [ ] Apple Silicon Macへ公証済み `TOMOS_AI-v0.8.233-mac-arm64.pkg` をインストールできる
+- [ ] `/Applications/TOMOS AI.app` が専用ウィンドウで起動し、ブラウザーを自動表示しない
+- [ ] インストール前からある設定、Memory、Knowledge、教材パック、旧フォルダーを削除しない
+- [ ] Ollamaが未導入の場合は別途必要であることを日本語で案内する
 - [ ] Windows ZIP版で `Gemma4_12B_All_Start.bat` が起動する
 - [ ] Windows ZIP版で `Gemma4_12B_Web.bat` が起動する
 - [ ] Windows MSIでデスクトップに `TOMOS AI Web UI` ショートカットが作られる
@@ -18,15 +20,14 @@
 
 ## GitHub Release配布
 
-- [ ] `bash scripts/make-release-archives.sh` でMac/Windows ZIPを作成できる
-- [ ] `dist/TOMOS_AI-vX.X.X-mac.zip` が作成される
-- [ ] `dist/TOMOS_AI-vX.X.X-windows.zip` が作成される
-- [ ] 署名証明書を登録したMacで `TOMOS_AI-vX.X.X-mac.pkg` を作成し、Apple公証を通している
+- [ ] 学生向けMac成果物が `TOMOS_AI-v0.8.233-mac-arm64.pkg` である
+- [ ] Mac PKGがApple Silicon専用、Developer ID署名済み、Apple公証済みである
+- [ ] Mac PKGのSHA-256が配布元の値と一致する
+- [ ] Mac ZIPを初心者向けRelease assetや導入手順へ載せていない
+- [ ] Mac向け案内に、Ollamaは同梱されず別途必要であることを記載している
 - [ ] GitHub Actionsで `TOMOS_AI-vX.X.X-windows.msi` が作成される
-- [ ] ZIPに `.git/`、`ComfyUI/`、`.venv/`、`.venv-asr/`、モデルファイルが含まれていない
-- [ ] GitHub ReleaseにはmacOS用PKGとWindows用MSIだけを添付している
-- [ ] 初心者が迷わないよう、GitHub ReleaseにZIPを添付していない
-- [ ] GitHub自動生成のSource codeは削除できないため、学生向け案内ではPKGまたはMSIだけを指定している
+- [ ] GitHub ReleaseにはOS別の承認済みインストーラーと検証用SHA-256だけを添付している
+- [ ] GitHub自動生成のSource codeは削除できないため、学生向け案内では承認済みインストーラーだけを指定している
 - [ ] 古いReleaseを削除せず残している
 - [ ] 学生向け案内に、使うReleaseのURLとOS別インストーラー名を記載している
 

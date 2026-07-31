@@ -1,54 +1,45 @@
 # GitHub Release 配布手順
 
-このプロジェクトは、GitHub Releases にmacOS用PKGとWindows用MSIだけを添付して配布します。初心者が選択に迷わないよう、ZIPはGitHub Releaseへ掲載しません。アプリ本体は軽く保ち、Ollamaモデル、ComfyUI、画像モデル、ASR/OCRの大きなデータは同梱しません。
+学生向けMac版は、Apple Silicon専用の公証済みTauri PKG `TOMOS_AI-v0.8.233-mac-arm64.pkg`で配布します。ZIPは初心者向けRelease assetにしません。アプリへOllama本体やOllamaモデルは同梱しないため、利用にはOllamaが別途必要です。
 
-GitHubが自動表示する`Source code (zip)`と`Source code (tar.gz)`は削除できません。TOMOS側では追加のmacOS用ZIP・Windows用ZIPを添付せず、利用者にはPKGまたはMSIだけを案内します。
+GitHubが自動表示する`Source code (zip)`と`Source code (tar.gz)`は削除できません。TOMOS側では追加のmacOS用ZIPを添付せず、利用者には公証済みPKGを案内します。
 
 ## バージョン管理方針
 
-- タグ名は `v0.8.190` のようにアプリ版と合わせます。
-- 既存 Release は上書きせず残します。
+- タグ名はアプリ版に合わせ、今回のMac候補は `v0.8.233` とします。
+- 既存Releaseは上書きや削除をせず、前版へ戻せる状態を保ちます。
 - 授業前に安定版を決め、そのタグを学生へ案内します。
-- 不具合が出た場合は、前のReleaseのPKGまたはMSIへ戻せるようにします。
+- 新規作成、asset添付、公開はDirectorの承認後に行います。
 
-## 内部確認用ZIPを作る
+## ZIPの位置づけ
 
-ZIPは動作確認や緊急調査のためにローカルで作成できますが、GitHub Releaseには添付しません。
+`scripts/make-release-archives.sh`が作るZIPは、旧経路の保守・調査用です。学生向けMac導入ではZIPや`.command`を案内せず、公証済みPKGだけを案内します。
+
+## Macネイティブインストーラーを作る
+
+Developer ID Applicationで署名したTauri appから、Developer ID Installer署名付きPKGを作ります。
 
 ```sh
-bash scripts/make-release-archives.sh
+bash scripts/make-macos-tauri-pkg.sh
 ```
 
 作成されるファイル:
 
-- `dist/TOMOS_AI-vX.X.X-mac.zip`
-- `dist/TOMOS_AI-vX.X.X-windows.zip`
+- `dist/candidate/TOMOS_AI-v0.8.233-mac-arm64.pkg`
 
-バージョンを明示したい場合:
-
-```sh
-bash scripts/make-release-archives.sh 0.8.190
-```
-
-## ネイティブインストーラーを作る
-
-macOS版は、`TOMOS AI.app`を`Developer ID Application`証明書で署名し、`.pkg`を`Developer ID Installer`証明書で署名して作ります。
+公開候補はrelease gateでApple公証、チケット添付、Gatekeeper確認、SHA-256生成を一括実行します。
 
 ```sh
-bash scripts/make-mac-pkg.sh
+bash scripts/release-gate-macos-tauri.sh \
+  dist/candidate/TOMOS_AI-v0.8.233-mac-arm64.pkg
 ```
 
-作成されるファイル:
+成功時だけ、次の2ファイルが配布候補になります。
 
-- `dist/TOMOS_AI-vX.X.X-mac.pkg`
+- `dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg`
+- `dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg.sha256`
 
-公開前にApple公証を行います。
-
-```sh
-bash scripts/notarize-mac-pkg.sh dist/TOMOS_AI-vX.X.X-mac.pkg
-```
-
-この処理は署名確認、公証、チケット添付、Gatekeeper確認のいずれかが失敗すると停止します。
+署名確認、公証、チケット添付、Gatekeeper確認、SHA-256確認のいずれかが失敗した成果物は配布しません。
 
 公開前に、アプリとPKGを確認します。
 
@@ -65,51 +56,31 @@ Windows の `.msi` は GitHub Actions の Windows runner で作る想定です�
 python3 scripts/make-windows-msi.py --no-build
 ```
 
-GitHub Actions の `Build Windows installer` を手動実行すると、`.msi` のartifactを取得できます。手動実行時は `version` に `0.8.190` のようなアプリ版を入れてください。Actions の実行名、artifact名、ジョブ概要に同じバージョンが表示されます。Mac版は署名証明書を登録したMacで作成・公証します。
+Windows MSIの署名と学生向け配布はDesktop Phase Dで別途判定します。
 
-## ZIPに含めるもの
-
-- `server.py`
-- `search_tools.py`
-- `web/`
-- 起動ファイル
-- セットアップ用スクリプト
-- README
-- 学生向け導入手順
-- リリース前チェックリスト
-
-## ZIPに含めないもの
-
-- `.git/`
-- `ComfyUI/`
-- `.venv/`
-- `.venv-asr/`
-- `.gemma4-data/`
-- `.codegraph/`
-- Ollamaモデル
-- Hugging Face cache
-- `*.gguf`
-- `*.safetensors`
-- 生成済み画像や一時ファイル
+GitHub Actionsの`Build Windows installer`を手動実行すると、MSIのartifactを取得できます。Mac版は署名証明書を登録したMacで作成・公証します。
 
 ## GitHub Releaseに添付する
 
-GitHubの Releases 画面から新しい Release を作り、macOS用PKGとWindows用MSIだけを添付します。
+GitHub Releaseへ添付するMac assetは、公証済みPKGとSHA-256ファイルだけです。ZIP、candidate PKG、未署名PKGは添付しません。
 
 GitHub CLI を使う場合の例:
 
 ```sh
-gh release create v0.8.190 \
-  dist/TOMOS_AI-v0.8.190-mac.pkg \
-  dist/TOMOS_AI-v0.8.190-windows.msi \
-  --title "TOMOS AI v0.8.190" \
-  --notes "学生向け配布版。macOSはPKG、WindowsはMSIを利用してください。"
+gh release create v0.8.233 \
+  dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg \
+  dist/notarized/TOMOS_AI-v0.8.233-mac-arm64.pkg.sha256 \
+  --title "TOMOS AI v0.8.233" \
+  --notes "Apple Silicon専用の公証済みMac版。Ollamaは別途必要です。"
 ```
 
-実行前に `docs/release-checklist.ja.md` を確認します。
+これはコマンド例であり、Directorの公開承認前には実行しません。実行前に `docs/release-checklist.ja.md` を確認します。
 
 ## 学生向け配布
 
-macOSでは、Developer ID Installer署名とApple公証を通し、`spctl`で受け入れられたPKGだけを公開します。Gatekeeperの回避操作を学生へ案内しません。
+macOSでは、Developer ID署名、Apple公証、`stapler validate`、`spctl`、SHA-256がすべて合格したPKGだけを公開します。Gatekeeperの回避操作を学生へ案内しません。
 
-Windows MSIの署名と自動更新は別の段階で整備します。
+- 対応環境はApple Silicon Macです。
+- インストーラーは既存の設定、Memory、Knowledge、教材パック、旧フォルダーを削除しません。
+- Ollama本体とモデルは同梱しないため、別途準備が必要です。
+- 現在Macへの上書きインストールは、実機確認の別承認後に行います。
