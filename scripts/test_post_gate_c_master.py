@@ -26,7 +26,8 @@ def test_post_gate_c_source_of_truth() -> None:
     for gate in (
         "Gate R0",
         "Gate U0",
-        "Gate U1 / U2",
+        "Gate U1",
+        "Gate U2",
         "Gate U0F",
         "Gate M0",
         "Gate M1 / M2",
@@ -35,6 +36,23 @@ def test_post_gate_c_source_of_truth() -> None:
         "Gate REL0",
     ):
         assert gate in master
+    assert "| Gate U1 / U2 |" not in master
+
+
+def test_support_gate_ledger_order() -> None:
+    master = MASTER.read_text(encoding="utf-8")
+    ledger = master.split("## 進行台帳", 1)[1].split(
+        "台帳の状態は", 1
+    )[0]
+    require_in_order(
+        ledger,
+        [
+            "| Gate U0 | Gate R0合格版",
+            "| Gate U1 | U0、M0、D0合格版",
+            "| Gate U2 | Gate U1合格版",
+            "| Gate U0F | U2、M2、D3合格版",
+        ],
+    )
 
 
 def test_post_gate_c_phase_order() -> None:
@@ -96,6 +114,7 @@ def test_existing_detail_plans_remain_referenced() -> None:
 
 if __name__ == "__main__":
     test_post_gate_c_source_of_truth()
+    test_support_gate_ledger_order()
     test_post_gate_c_phase_order()
     test_existing_detail_plans_remain_referenced()
     print("post-Gate-C master contract tests passed")
