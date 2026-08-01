@@ -125,9 +125,10 @@
 | Gate B3 | Gate B2合格版 | app data、プレビュー、承認コピー移行 | Desktop C | 合格 |
 | Gate C | Gate B3合格版 | 署名・公証済みApple Silicon Mac PKG | 実機インストール確認 | 合格 |
 | Gate R0 | Gate C合格版と承認済み統合設計 | 正本、ownership、release manifest項目、baseline条件 | U0 / M0 / D0 | 合格 |
-| Gate U0 | Gate R0合格版 | OS別初心者ガイドの内部draftと文書契約 | U1 / U2 | 停止 |
-| Gate U1 / U2 | U0、M0、D0合格版 | 10秒以内の初回案内、安全な診断、第三者試験票 | Gate U0F | 停止 |
-| Gate U0F | U1、U2、M2、D3合格版 | 最終artifact名・SHAを反映した公開文書 | Gate REL0 | 停止 |
+| Gate U0 | Gate R0合格版 | OS別初心者ガイドの内部draftと文書契約 | Gate U1 | 停止 |
+| Gate U1 | U0、M0、D0合格版 | 10秒以内の初回4段階案内 | Gate U2 | 停止 |
+| Gate U2 | Gate U1合格版 | 安全な診断、起動失敗表示、第三者試験票 | Gate U0F | 停止 |
+| Gate U0F | U2、M2、D3合格版 | 最終artifact名・SHAを反映した公開文書 | Gate REL0 | 停止 |
 | Gate M0 | Gate R0合格版 | 版、source commit、tree、成果物manifestの一意対応 | Mac M1 / M2 | 停止 |
 | Gate M1 / M2 | Gate M0合格版 | Mac再生成、署名、公証、第三者試験 | Gate REL0 | 停止 |
 | Gate D0 | Gate R0合格版 | Windows署名、runtime、WebView2、保存先、rollback契約 | Windows D1 / D2 / D3 | 停止 |
