@@ -15,6 +15,9 @@
 - Apple Silicon版の製品runtime・データ移行・Mac配布設計は `docs/superpowers/specs/2026-07-26-tomos-macos-portable-runtime-and-notarized-pkg-design.md` とする。
 - 全体順序と工程の入口はこのファイルを唯一の正本とする。
 - 各工程の実装詳細は、このファイルから参照する工程別計画を正本とする。
+- Gate C後は承認済み統合設計に従い、R0で正本・担当・検証条件を固定してからU0、M0、D0へ進む。
+- 初心者向け正式ReleaseはGate REL0まで公開しない。OS単独previewは固有prerelease tagと別承認を必須にする。
+- Gate 4はU0、M0、D0合格後に実装を開始し、配布shared file統合後だけ製品へ統合する。
 - 現在の未コミット変更を編集、整形、削除、移動、commit対象へ追加しない。
 - 実装開始時は `superpowers:using-git-worktrees` を使い、Directorが指定した基準commitから専用worktreeを作る。
 - `main` と `origin/main` のahead/behindは工程開始時に再確認し、自動でrebase、merge、pull、pushしない。
@@ -44,6 +47,7 @@
 | --- | --- | --- |
 | 構想 | `docs/tomos-adoption-candidates-research-2026-07-23.ja.md` | 何を目指すか |
 | 全体順序 | `docs/superpowers/plans/2026-07-23-tomos-evolution-master.md` | どの順で進むか |
+| Gate C後の統合設計 | `docs/superpowers/specs/2026-08-01-tomos-post-gate-c-program-design.md` | R0、配布、サポート、Skill、Voice、Model、将来Gateの順序と承認境界 |
 | デスクトップアプリ設計 | `docs/superpowers/specs/2026-07-24-tomos-desktop-app-evolution-design.md` | PC版の完成形と安全境界 |
 | Apple Silicon配布設計 | `docs/superpowers/specs/2026-07-26-tomos-macos-portable-runtime-and-notarized-pkg-design.md` | Desktop B1からCの固定判断 |
 | Apple Silicon配布実装 | `docs/superpowers/plans/2026-07-26-tomos-desktop-b1-portable-runtime.md`、`2026-07-26-tomos-desktop-b2-api-session.md`、`2026-07-26-tomos-desktop-b3-data-migration.md`、`2026-07-26-tomos-desktop-c-macos-signing-pkg.md` | B1、B2、B3、Cの実装順序とGate |
@@ -102,7 +106,9 @@
 10. PC版はTauri、スマートフォン版はPWAとする。
 11. Tauriは既存 `web/` と `server.py` を再利用し、UIを全面的に作り直さない。
 12. Desktop A、Phase 1からPhase 3、Desktop B1からC、Phase 4を並行実装しない。
-13. 最初の配布可能なTauriアプリはApple Silicon専用 `0.8.233` とし、Gate Cと実機インストール確認後にPhase 4へ戻る。
+13. `0.8.233`はGate C検証済み成果物として保持し、現在の`origin/main`由来の正式配布物とは扱わない。
+14. 次の正式候補版は`0.8.234`以降とし、M0で版・source・tree・artifact manifestを固定する。
+15. Release laneとProduct laneは別worktreeで準備できるが、shared fileの実装とmergeはDirectorが直列化する。
 
 ## 進行台帳
 
@@ -118,10 +124,18 @@
 | Gate B2 | Gate B1合格版 | localhost API session保護 | Desktop B3 | 合格 |
 | Gate B3 | Gate B2合格版 | app data、プレビュー、承認コピー移行 | Desktop C | 合格 |
 | Gate C | Gate B3合格版 | 署名・公証済みApple Silicon Mac PKG | 実機インストール確認 | 合格 |
-| Gate 4 | Gate C実機確認合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment E/VまたはDesktop D | 停止 |
+| Gate R0 | Gate C合格版と承認済み統合設計 | 正本、ownership、release manifest項目、baseline条件 | U0 / M0 / D0 | 検証中 |
+| Gate U0 | Gate R0合格版 | OS別初心者ガイドの内部draftと文書契約 | U1 / U2 | 停止 |
+| Gate U1 / U2 | U0、M0、D0合格版 | 10秒以内の初回案内、安全な診断、第三者試験票 | Gate U0F | 停止 |
+| Gate U0F | U1、U2、M2、D3合格版 | 最終artifact名・SHAを反映した公開文書 | Gate REL0 | 停止 |
+| Gate M0 | Gate R0合格版 | 版、source commit、tree、成果物manifestの一意対応 | Mac M1 / M2 | 停止 |
+| Gate M1 / M2 | Gate M0合格版 | Mac再生成、署名、公証、第三者試験 | Gate REL0 | 停止 |
+| Gate D0 | Gate R0合格版 | Windows署名、runtime、WebView2、保存先、rollback契約 | Windows D1 / D2 / D3 | 停止 |
+| Gate D1 / D2 / D3 | Gate D0合格版 | Windows署名CI、実機、第三者試験 | Gate REL0 | 停止 |
+| Gate REL0 | Final Mac M2、D3、U0Fの合格版 | 同一版PKG/MSI、第三者smoke、公開物readback | 正式PCアプリ | 停止 |
+| Gate 4 | U0、M0、D0合格版 | Markdown Skill Manager、固定評価、承認昇格 | Experiment V、その後Experiment E | 停止 |
 | Gate V0 / V1 | Gate 4合格版とcandidate承認 | 隔離音声adapter、実測、人評価 | 音声採用の別計画 | 停止 |
 | Gate E0 / E1 | Gate 4合格版とartifact承認 | local-onlyモデル比較結果 | モデル採用の別計画 | 停止 |
-| Gate D | Gate C合格版 | 署名済みWindows MSI | PCアプリ正式候補 | 停止 |
 
 台帳の状態は `未着手 | 実装中 | 検証中 | 差し戻し | 合格 | 停止` の6値だけを使う。工程開始時とGate判定時にこの表を更新する。状態変更だけのcommitもDirector承認がない限り作成しない。
 
@@ -148,6 +162,10 @@ Gate Cは2026-07-31に合格した。成果物は `dist/notarized/TOMOS_AI-v0.8.
 | Desktop B3 app data・移行 | data path adapter、移行adapter、管理UI | モデル・音声engine採用 |
 | Desktop C Mac配布 | Tauri bundle、Mac署名、公証、PKG文書 | Windows配布、機能コード |
 | Desktop D Windows配布 | Tauri MSI、Windows署名、移行文書 | Mac配布、機能コード |
+| Gate R0 正本同期 | master計画、文書契約テスト、R0報告 | 製品コード、版番号、成果物 |
+| Gate U0 初心者文書 | README、OS別導入ガイド、Release文書テスト | installer、runtime、製品UI |
+| Gate M0 Mac追跡 | version、release manifest、Mac release文書 | Windows署名、Skill、Voice、Model |
+| Gate D0 Windows設計 | Windows配布spec、path/upgrade/rollback契約 | Mac署名、Skill、Voice、Model |
 
 共有ファイルを触る工程は必ず直列に実行する。Desktop A、Phase 1からPhase 3、Desktop B1からC、Phase 4、Desktop Dを並行実装しない。
 
@@ -173,13 +191,29 @@ Phase 0 基準線安定化
   -> Gate B3 新規・移行・rollback確認
   -> Desktop Phase C macOS署名・公証・PKG
   -> Gate C Mac新規/移行実機確認
-  -> Phase 4 Markdown Skill Manager
-  -> Gate 4 手動承認・固定評価・Memory非自動保存確認
-  -> Director承認時だけ任意で Experiment V または Experiment E
-  -> 実験する場合は選んだ実験のGateを閉じる
-  -> Desktop Phase D Windows署名・MSI
-  -> Gate D Windows新規/移行実機確認
-  -> 将来Gate P2P / Company Memory / VRMを別設計
+  -> Gate R0 正本・ownership・release manifest・baseline条件を固定
+  -> Gate U0 OS別初心者ガイドを一本化
+  -> Gate M0 Mac版・source・成果物対応を固定
+  -> Gate D0 Windows署名・runtime・保存・rollback設計を固定
+  -> Release lane:
+       Gate M1 / M2 Mac内部候補・第三者試験
+       Gate D1 / D2 / D3 Windows署名CI・実機・第三者試験
+       Final Mac M1 / M2 Windows最終release commitからMacを再生成・再試験
+  -> Support lane:
+       Gate U1 10秒以内の初回4段階案内
+       Gate U2 安全な診断・起動失敗表示・第三者試験票
+       Gate U0F 最終artifact名・SHAで公開文書を確定
+  -> Product lane:
+       Phase 4 Markdown Skill Manager
+       Gate 4 手動承認・固定評価・Memory非自動保存確認
+       Director承認時だけ Experiment V
+       Gate V0 / V1 candidate承認・隔離実測・人評価
+       Director承認時だけ Experiment E
+       Gate E0 / E1 artifact承認・local-only比較
+  -> Release laneのFinal Mac M2、D3とSupport laneのU0Fをreadback
+  -> Gate REL0 同一版PKG/MSI・第三者smoke・公開物readback
+  -> Product laneの必要Gateを別にreadback
+  -> 将来Gate Company Memory / P2P / VRMを別設計
 ```
 
 Experiment E / Vは任意で、Desktop Phase B1からCの必須条件ではない。実験する場合は1つずつ実行し、Desktop B1からC、Phase 4と同時に進めない。
@@ -193,7 +227,7 @@ Experiment E / Vは任意で、Desktop Phase B1からCの必須条件ではな�
 | Phase 1 | `0.8.231-pc-benchmark` | settings、i18n、styles、app、pwa、Service Worker cache | models、asr、management |
 | Phase 2 | `0.8.232-asr-vad` | asr、i18n、pwa、Service Worker cache | models、settings、styles、app、management |
 | Phase 3 | `0.8.233-tts-boundary` | 新規tts、i18n、styles、app、pwa、Service Worker cache | models、settings、asr、management |
-| Phase 4 | `0.8.234-skill-manager` | management、i18n、styles、app、pwa、Service Worker cache | models、settings、asr、tts |
+| Phase 4 | `0.8.235-skill-manager` | management、i18n、styles、app、pwa、Service Worker cache | models、settings、asr、tts |
 
 各工程で `scripts/test-pwa-assets.js` に工程専用定数を1つ追加し、更新対象だけをその定数で検証する。過去工程の定数を新しい版へ一括置換しない。`web/index.html`、`web/sw.js`、`web/pwa.js` の3箇所を同じTaskで更新し、Service Worker登録queryとcache名を工程の新しい版へ揃える。
 
@@ -454,11 +488,17 @@ Experiment E / Vは任意で、Desktop Phase B1からCの必須条件ではな�
 - モデルの自動削除
 - Agent-Reach本体変更
 
-着手条件:
+機能別着手条件:
 
-1. Phase 0、Desktop A、Phase 1から4、Desktop BからDの全Gateが合格している。
-2. 専用の設計書と実装計画がある。
-3. データ境界、外部通信、認証、失効、監査ログをDirectorが承認する。
+- Company Memoryのspec起票はGate REL0とGate 4の合格後。
+- P2Pのspec起票はGate REL0、Gate 4、CM0の合格後。
+- VRM0のspec起票はGate REL0合格後。Voice/Model比較は入口条件にしない。
+- VRM1はVRM0合格後、Phase 3 contractまたは別採用Gate承認済みengineだけを使う。
+
+共通条件:
+
+1. 専用の設計書と実装計画がある。
+2. データ境界、外部通信、認証、失効、監査ログをDirectorが承認する。
 
 ## Global Verification Matrix
 
@@ -626,7 +666,7 @@ docs: record TOMOS evolution verification
 
 ## Master Completion Criteria
 
-- Phase 0、Desktop A、Phase 1から3、Desktop B1からC、Phase 4、Desktop Dの全Gateが合格している。
+- Phase 0、Desktop A、Phase 1から3、Desktop B1からC、Phase 4、Gate D0からD3とGate REL0の全Gateが合格している。
 - PCの標準導線でブラウザーが開かず、Tauri専用windowにTOMOSが表示される。
 - スマートフォンPWAと問題調査用ブラウザーfallbackが維持されている。
 - アプリ終了時にowned processだけを停止し、ポート競合プロセスを停止しない。
@@ -638,5 +678,8 @@ docs: record TOMOS evolution verification
 - PC診断の理論値と実測値が混ざっていない。
 - 音声入力の暫定文字と確定文字が重複しない。
 - Skillが明示承認なしで `best_skill.md` へ昇格しない。
+- 初心者向け正式ReleaseのPKG/MSIは同じ版、tag、source commitから生成され、公開SHAと第三者試験SHAが一致している。
+- Ollama停止時も既存データ閲覧とSkill管理ができ、新しいAI回答は開始せず復旧案内を表示する。
+- データ・設定rollbackと、対象版が存在する場合のアプリ版rollbackを実証している。
 - すべての自動テストとPC・スマホ確認が合格している。
 - 未確認事項を完了扱いにしていない。
