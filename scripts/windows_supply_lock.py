@@ -99,6 +99,9 @@ _CREDENTIAL_PREFIX_PATTERN = re.compile(
     r"sk-[a-z][a-z0-9_-]{7,}|(?:AKIA|ASIA)[0-9A-Z]{16})",
     re.IGNORECASE,
 )
+_OFFICIAL_HTTP_RFC3161_URL_ALLOWLIST: frozenset[str] = frozenset(
+    {"http://timestamp.digicert.com"}
+)
 
 
 class ContractError(Exception):
@@ -186,6 +189,12 @@ def _require_https_url(value: object, field: str) -> str:
     ):
         raise ContractError("insecure_url", f"{field} must be an HTTPS URL")
     return url
+
+
+def _require_rfc3161_timestamp_url(value: object, field: str) -> str:
+    if isinstance(value, str) and value in _OFFICIAL_HTTP_RFC3161_URL_ALLOWLIST:
+        return value
+    return _require_https_url(value, field)
 
 
 def _require_architecture(value: object, field: str) -> str:
@@ -438,7 +447,7 @@ class TimestampLock:
                 f"{field}.digest must be sha256",
             )
         return cls(
-            rfc3161_url=_require_https_url(
+            rfc3161_url=_require_rfc3161_timestamp_url(
                 raw["rfc3161_url"],
                 f"{field}.rfc3161_url",
             ),

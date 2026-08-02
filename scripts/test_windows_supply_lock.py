@@ -159,11 +159,12 @@ class WindowsSupplyLockTest(unittest.TestCase):
         with assert_raises_code("invalid_type"):
             validate_fixture(nested_type)
 
-    def test_supply_lock_requires_https_urls(self) -> None:
+    def test_supply_and_license_urls_keep_https_only(self) -> None:
         for section, key in (
-            ("timestamp", "rfc3161_url"),
             ("python_runtime", "url"),
             ("python_runtime", "license_url"),
+            ("webview2", "url"),
+            ("webview2", "license_url"),
         ):
             with self.subTest(section=section, key=key):
                 raw = valid_fixture()
@@ -174,11 +175,45 @@ class WindowsSupplyLockTest(unittest.TestCase):
                     validate_fixture(raw)
 
         malformed = valid_fixture()
-        timestamp = malformed["timestamp"]
-        assert isinstance(timestamp, dict)
-        timestamp["rfc3161_url"] = "https://[invalid"
+        python_runtime = malformed["python_runtime"]
+        assert isinstance(python_runtime, dict)
+        python_runtime["url"] = "https://[invalid"
         with assert_raises_code("insecure_url"):
             validate_fixture(malformed)
+
+    def test_timestamp_allows_only_exact_official_digicert_http_url(self) -> None:
+        raw = valid_fixture()
+        timestamp = raw["timestamp"]
+        assert isinstance(timestamp, dict)
+        timestamp["rfc3161_url"] = "http://timestamp.digicert.com"
+        lock = validate_fixture(raw)
+        self.assertEqual(lock.timestamp.rfc3161_url, "http://timestamp.digicert.com")
+
+        for value, expected_code in (
+            ("http://timestamp.digicert.com/", "insecure_url"),
+            ("http://TIMESTAMP.DIGICERT.COM", "insecure_url"),
+            ("http://timestamp.digicert.com:80", "insecure_url"),
+            ("http://timestamp.digicert.com/rfc3161", "insecure_url"),
+            ("http://user@timestamp.digicert.com", "insecure_url"),
+            ("http://timestamp.digicert.com?", "sensitive_value"),
+            ("http://timestamp.digicert.com#", "sensitive_value"),
+            ("http://timestamp.digicert.com?token=fixture-secret", "sensitive_value"),
+            ("http://timestamp.digicert.com#fragment", "sensitive_value"),
+            ("http://sub.timestamp.digicert.com", "insecure_url"),
+            ("http://timestamp.digicert.com.example.invalid", "insecure_url"),
+            ("http://timestamp.fixture.invalid", "insecure_url"),
+            ("ftp://timestamp.digicert.com", "insecure_url"),
+            ("https:timestamp.digicert.com", "insecure_url"),
+            ("https://[invalid", "insecure_url"),
+            (" http://timestamp.digicert.com", "insecure_url"),
+        ):
+            with self.subTest(value=value):
+                raw = valid_fixture()
+                timestamp = raw["timestamp"]
+                assert isinstance(timestamp, dict)
+                timestamp["rfc3161_url"] = value
+                with assert_raises_code(expected_code):
+                    validate_fixture(raw)
 
     def test_supply_lock_requires_positive_sizes_and_sha256_values(self) -> None:
         invalid_size = valid_fixture()

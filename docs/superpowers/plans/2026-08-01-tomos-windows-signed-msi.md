@@ -30,6 +30,15 @@
 - certificate、timestamp、runtime、WebView2、dependency、secret、workflow、build、署名、
   実機、commit、pushはそれぞれ実行前に個別承認を得る。
 - 未確定のcertificate / runtime / WebView2値を推測しない。承認済みreadbackまで停止する。
+- 通常URLはHTTPS-onlyとし、RFC 3161 timestampだけは公式provider endpointのraw完全一致HTTP
+  allowlistを例外として許可する。初期allowlistは`http://timestamp.digicert.com`の1件だけとする。
+- RFC 3161の第一候補はDigiCert KeyLockerとする。cloud FIPS HSM、秘密鍵非export、SignTool / MSI /
+  GitHub Actions対応、keypair alias / fingerprint readbackを理由とする。SSL.com eSignerは価格重視の
+  条件付き代替候補とし、Microsoft Artifact Signingは日本Public Trust条件を確認できるまで候補外とする。
+- DigiCert購入、契約、trial、identity validation、secret設定は本計画の実装承認とは別の明示承認gateとする。
+- certificateのsubject、issuer、fingerprint、key identityなどの実値は発行前に作らず、未確定値は
+  `unresolved`として保持する。
+- このtimestamp provider選定の反映では、WebView2を含む今回範囲外の実装・供給値・検証経路を変更しない。
 
 ---
 
@@ -131,7 +140,9 @@ REQUIRED_KEYS = {
 ```
 
 `certificate`はprovider、subject、issuer、fingerprint、key_identity、valid_from、
-valid_until、storage_kindを持つ。`timestamp`はrfc3161_urlとdigestを持つ。
+valid_until、storage_kindを持つ。`timestamp`はrfc3161_urlとdigestを持つ。RFC 3161 URLは
+HTTPS-onlyを基本とし、固定allowlistに一致する公式timestamp endpointだけHTTPを許可する。
+allowlist外のURL、追加path、query、fragment、redirect先は拒否する。
 Python / WebView2はsource、version、artifact_name、url、size、sha256、license_name、
 license_url、license_sha256を持つ。
 
@@ -270,7 +281,7 @@ Expected: 全test pass、exit 0。
 Directorは次を別々に提示し、各操作の承認を得る。
 
 1. certificate provider / subject / issuer / fingerprint / key保管方式のreadback。
-2. RFC 3161 HTTPS timestamp URLのreadback。
+2. RFC 3161 timestamp URLと、HTTP例外を使う場合の公式endpoint raw完全一致allowlistのreadback。
 3. Windows x64 Python runtimeのsource / license / size / SHAのreadback。
 4. WebView2 x64 offline installerのsource / license / size / SHAのreadback。
 5. 現行WiX sourceと配布済みWindows MSIのUpgradeCode readback。
@@ -280,6 +291,10 @@ Directorは次を別々に提示し、各操作の承認を得る。
 ローカルにない場合は、取得元、artifact名、SHA、保存先を示して外部取得の個別承認を
 得る。現行WiXと配布済みMSIのUpgradeCodeがどちらも
 `7FAD4890-85D1-4C8D-A4AA-0B1B7E7F41A1`と一致するまでTask 2とTask 5を開始しない。
+
+証明書の実値は発行・readback前にlockへ入れず、`unresolved`のまま保持する。RFC 3161の
+応答を扱う署名検証Taskでは、timestamp tokenの署名、message imprint、TSA chainを必須で
+検証し、timestamp URLだけを確認して成功扱いにしない。
 
 - [ ] **Step 6: 承認済みevidenceからlockを作り検証する**
 
