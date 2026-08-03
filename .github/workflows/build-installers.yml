@@ -1,16 +1,16 @@
 name: Build Windows installer
-run-name: Build Windows installer (${{ inputs.version || github.ref_name }})
+run-name: Build unsigned Windows test installer (${{ inputs.channel }})
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "App version. Leave blank to read server.py."
-        required: false
-        default: ""
-  push:
-    tags:
-      - "v*"
+        description: "Test app version. This does not publish a Release."
+        required: true
+      channel:
+        description: "development_unsigned or private_test_unsigned"
+        required: true
+        default: "development_unsigned"
 
 jobs:
   windows-msi:
@@ -23,22 +23,47 @@ jobs:
         run: |
           dotnet tool install --global wix --version 4.0.6
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Validate unsigned inputs before build
+        id: validate-inputs
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          UNSIGNED_CHANNEL: ${{ inputs.channel }}
+        run: |
+          $sourceVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $requestedVersion = $env:REQUESTED_VERSION
+          $channel = $env:UNSIGNED_CHANNEL
+          if ($requestedVersion -ne $sourceVersion) {
+            throw "requested version does not match source version"
+          }
+          if ($channel -notin @("development_unsigned", "private_test_unsigned")) {
+            throw "invalid unsigned distribution channel"
+          }
+          "source_version=$sourceVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Build MSI
         shell: pwsh
         run: |
-          if ("${{ github.event.inputs.version }}") {
-            python scripts/make-windows-msi.py "${{ github.event.inputs.version }}"
-          } else {
-            python scripts/make-windows-msi.py
-          }
+          python scripts/make-windows-msi.py "${{ steps.validate-inputs.outputs.source_version }}"
+      - name: Label MSI as unsigned test-only
+        shell: pwsh
+        env:
+          SOURCE_VERSION: ${{ steps.validate-inputs.outputs.source_version }}
+        run: |
+          Copy-Item "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows.msi" "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows-UNSIGNED-TEST-ONLY.msi"
       - name: Write MSI summary
         shell: pwsh
+        env:
+          SOURCE_VERSION: ${{ steps.validate-inputs.outputs.source_version }}
+          UNSIGNED_CHANNEL: ${{ inputs.channel }}
         run: |
-          $version = "${{ inputs.version || github.ref_name }}".TrimStart("v")
-          "## TOMOS AI v$version" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "- Windows artifact: TOMOS_AI-v$version-windows.msi" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          $sourceVersion = $env:SOURCE_VERSION
+          $channel = $env:UNSIGNED_CHANNEL
+          "## TOMOS AI v$sourceVersion unsigned test build" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Channel: $channel" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "- Windows artifact: TOMOS_AI-v$sourceVersion-windows-UNSIGNED-TEST-ONLY.msi" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
       - name: Upload MSI
         uses: actions/upload-artifact@v4
         with:
-          name: tomos-ai-windows-msi-${{ inputs.version || github.ref_name }}
-          path: dist/*.msi
+          name: TOMOS-AI-UNSIGNED-TEST-ONLY-${{ inputs.channel }}-${{ steps.validate-inputs.outputs.source_version }}
+          path: dist/TOMOS_AI-v${{ steps.validate-inputs.outputs.source_version }}-windows-UNSIGNED-TEST-ONLY.msi
+          retention-days: 7

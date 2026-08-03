@@ -22,7 +22,7 @@
 - Microsoft Storeは将来候補としてread-only調査だけを行い、アカウント作成、本人確認、登録料支払い、package提出を行わない。
 - 有料の直接配布署名は、個人での一般公開、企業導入、またはStore不採用が確定した場合だけ別計画として再開する。
 - `scripts/windows_supply_lock.py`、`scripts/test_windows_supply_lock.py`、`docs/windows-release/**`の既存成果は削除、弱体化、署名済み判定への流用をしない。
-- version、source commit、tree、artifact SHAは混同せず、未署名成果物にもrelease manifestのsource-stage契約を適用する。
+- W1 private-testの実行後は`docs/windows-release/windows-unsigned-build-evidence.md`へsource version、source commit、tree、run ID、artifact name、size、SHA-256を記録する。M0 v1 0.8.234 manifestへW1 private-testの値を記録しない。
 - Memory、Knowledge、教材、設定、chat、modelをuninstallで削除しない。
 - secret、token、個人名、user名、full path、会話、Memory、Knowledgeをlogまたはartifactへ出さない。
 - dependency追加、workflow変更、Actions実行、artifact download、実機install、外部公開、commit、pushは個別承認を得る。
@@ -57,6 +57,7 @@ TOMOSのWindows版は開発・限定テスト状態を維持する。
 | Unsigned CI | `.github/workflows/build-installers.yml`、`scripts/test_windows_unsigned_distribution.py` | 手動build、誤公開防止、artifact表示 |
 | MSI build | `scripts/make-windows-msi.py`、`scripts/test_windows_msi_launcher.py` | WiX生成、version、identity、launcher |
 | 利用者文書 | `docs/native-installers.ja.md`、`docs/install-students.ja.md`、`docs/install-windows-students.ja.md`、`docs/release-checklist.ja.md` | 限定テストと正式公開を混同しない案内 |
+| W1 build証跡 | `docs/windows-release/windows-unsigned-build-evidence.md` | source version、source commit、tree、run ID、artifact name、size、SHA-256 |
 | 実機証跡 | `docs/windows-release/windows-unsigned-test-evidence.md` | MSI SHA、Windows版、警告、導入・更新・削除・再導入、データ保持 |
 | 将来調査 | `docs/windows-release/microsoft-store-readonly-assessment.md` | 個人適格性、費用、MSI / MSIX要件、署名、審査、公開境界 |
 
@@ -351,8 +352,10 @@ Expected: 限定テスト、警告、正式公開停止が確認でき、whitesp
 - Create after approved run: `docs/windows-release/windows-unsigned-build-evidence.md`
 
 **Interfaces:**
-- Consumes: W0合格、Task 2のworkflow commit、固定version / source commit / tree
-- Produces: 未署名MSI名、size、SHA-256、Actions run ID、source commit、tree
+- Consumes: W0合格、`codex/windows-unsigned-w1`のTask 2 workflow commit、固定version / source commit / tree
+- Produces: `docs/windows-release/windows-unsigned-build-evidence.md`へ記録するsource version、source commit、tree、run ID、artifact name、size、SHA-256
+
+W1 private-testの証跡はこの専用evidenceへだけ記録する。M0 v1 0.8.234 manifestへW1 private-testのversion、commit、tree、run ID、artifact name、size、SHA-256を記録しない。`scripts/release_manifest.py`は変更しない。
 
 - [ ] **Step 1: Actions実行前readbackを行う**
 
@@ -362,10 +365,12 @@ Run:
 git status --short --branch
 git rev-parse HEAD
 git rev-parse 'HEAD^{tree}'
+git fetch origin codex/windows-unsigned-w1
+git rev-parse origin/codex/windows-unsigned-w1
 python3 scripts/test-desktop-release-version.py
 ```
 
-Expected: clean、version整合、実行対象commitとtreeを表示。
+Expected: clean、version整合、実行対象commitとtreeを表示し、`origin/codex/windows-unsigned-w1`が承認済みHEADと一致する。一致しない場合はActionsを実行しない。
 
 - [ ] **Step 2: Actions実行の個別承認で停止する**
 
@@ -378,7 +383,7 @@ Run:
 
 ```bash
 gh workflow run build-installers.yml \
-  --ref codex/windows-free-distribution-plan \
+  --ref codex/windows-unsigned-w1 \
   -f version=0.8.233 \
   -f channel=private_test_unsigned
 ```
@@ -393,7 +398,7 @@ Run:
 ```bash
 TOMOS_RUN_ID="$(gh run list \
   --workflow build-installers.yml \
-  --branch codex/windows-free-distribution-plan \
+  --branch codex/windows-unsigned-w1 \
   --event workflow_dispatch \
   --limit 1 \
   --json databaseId \
