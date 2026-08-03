@@ -1,6 +1,6 @@
 # 学生向けインストール手順
 
-専門学校や授業で配布するときは、GitHub Releases から OS に合ったインストーラーを配布します。古いバージョンも Release として残るため、授業当日に動く版へ戻せます。
+専門学校や授業で配布するときは、承認済みの正式公開物だけを使います。Mac の正式公開は GitHub Releases から配布します。Windows の正式な公開経路は準備中です。
 
 ## 事前に必要なもの
 
@@ -13,36 +13,18 @@
 
 ## Mac
 
-1. GitHub Releases から `TOMOS_AI-vX.X.X-mac.zip` をダウンロードします。
-2. ZIP を展開します。
-3. `Gemma4_12B_全部起動.command` をダブルクリックします。
-4. macOS に止められた場合は、右クリックして `開く` を選びます。
-5. ブラウザーで `http://127.0.0.1:54876/` が開いたら成功です。
+1. GitHub Releases から、案内された `TOMOS_AI-vX.X.X-mac-arm64.pkg` をダウンロードします。
+2. `.pkg` をダブルクリックしてインストールします。
+3. 「アプリケーション」の `TOMOS AI` を開きます。
+4. TOMOS AI の画面が開いたら成功です。
 
-Web UI だけを起動したい場合は `Gemma4_12B_Web.command` を使います。
+Mac ZIP や `.command` ファイルは、学生向けの正式公開手順には含めません。
 
 ## Windows
 
-推奨は `.msi` です。
+正式なWindows公開経路は準備中です。一般利用者は、Windows用のMSIやZIPをGitHub Releaseから取得・実行しないでください。
 
-1. GitHub Releases から `TOMOS_AI-vX.X.X-windows.msi` をダウンロードします。
-2. `.msi` をダブルクリックしてインストールします。
-3. デスクトップの `TOMOS AI Web UI` を開きます。
-4. または、スタートメニューから `TOMOS AI > TOMOS AI Web UI` を開きます。
-5. ブラウザーで `http://127.0.0.1:54876/` が開いたら成功です。
-
-MSI 版では、Program Files 内の `.bat` ファイルを探して起動する必要はありません。
-デスクトップかスタートメニューのショートカットから起動してください。
-
-Windows に止められた場合は、`詳細情報` から実行します。
-
-ZIP 版は、MSI でうまく動かないときの予備です。
-
-1. GitHub Releases から `TOMOS_AI-vX.X.X-windows.zip` をダウンロードします。
-2. ZIP を右クリックして `すべて展開` します。
-3. `Gemma4_12B_Web.bat` をダブルクリックします。
-
-ZIP 版では `.bat` ファイルを直接使います。ComfyUI など周辺機能もまとめて起動したい場合だけ `Gemma4_12B_All_Start.bat` を使います。
+Directorから限定テストへの参加案内を受けた人だけは、[Windows限定テスト手順](install-windows-students.ja.md)に従ってください。この手順は正式公開ではありません。
 
 ## モデルの取得
 
@@ -83,7 +65,7 @@ Qwen 2.5 3Bは旧環境からの移行確認用で、標準AIや高速会話に�
 
 ## 古いバージョンへ戻す
 
-GitHub Releases には過去の ZIP も残します。新しい版で不具合が出た場合は、前回授業で使えた Release の ZIP をダウンロードして使ってください。
+Mac の正式公開版は GitHub Releases の過去のタグにも残します。新しい版で不具合が出た場合は、学校から案内された以前のMac PKGを使ってください。Windows の配布方法は、正式公開が承認されるまで学校またはDirectorの案内を待ってください。
 
 ## よくある困りごと
 

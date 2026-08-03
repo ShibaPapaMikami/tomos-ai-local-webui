@@ -1,6 +1,6 @@
 # リリース前チェックリスト
 
-学生がMac/Windowsで導入しやすい状態かを確認するためのチェックリストです。
+学生が正式公開されたMac版を導入しやすい状態かを確認するためのチェックリストです。Windows MSIは未署名のため、正式公開前の限定テストとして別管理します。
 
 ## 起動
 
@@ -8,13 +8,6 @@
 - [x] `/Applications/TOMOS AI.app` が専用ウィンドウで起動し、ブラウザーを自動表示しない
 - [x] インストール前からある設定、Memory、Knowledge、教材パック、旧フォルダーを削除しない
 - [ ] Ollamaが未導入の場合は別途必要であることを日本語で案内する
-- [ ] Windows ZIP版で `Gemma4_12B_All_Start.bat` が起動する
-- [ ] Windows ZIP版で `Gemma4_12B_Web.bat` が起動する
-- [ ] Windows MSIでデスクトップに `TOMOS AI Web UI` ショートカットが作られる
-- [ ] Windows MSIでスタートメニューに `TOMOS AI` フォルダーが作られる
-- [ ] スタートメニューから `TOMOS AI Web UI`、`TOMOS AI 全部起動`、`TOMOS AI 重い処理を停止` を選べる
-- [ ] Windows MSIのショートカットが `.bat` 直指定ではなく `Gemma4_12B_Launcher.exe` を指している
-- [ ] Windows MSI版は Program Files 内の `.bat` を探さなくても起動できる
 - [ ] 起動後、ブラウザーで `http://127.0.0.1:54876/` が開く
 - [ ] 設定画面にアプリ版、モデル状態、利用モデルが表示される
 
@@ -25,11 +18,24 @@
 - [ ] Mac PKGのSHA-256が配布元の値と一致する
 - [ ] Mac ZIPを初心者向けRelease assetや導入手順へ載せていない
 - [ ] Mac向け案内に、Ollamaは同梱されず別途必要であることを記載している
-- [ ] GitHub Actionsで `TOMOS_AI-vX.X.X-windows.msi` が作成される
-- [ ] GitHub ReleaseにはOS別の承認済みインストーラーと検証用SHA-256だけを添付している
+- [ ] GitHub Releaseには承認済みMacインストーラーと検証用SHA-256だけを添付している
 - [ ] GitHub自動生成のSource codeは削除できないため、学生向け案内では承認済みインストーラーだけを指定している
 - [ ] 古いReleaseを削除せず残している
-- [ ] 学生向け案内に、使うReleaseのURLとOS別インストーラー名を記載している
+- [ ] 学生向け案内に、Mac PKGのRelease URLとインストーラー名を記載している
+- [ ] Windows一般利用者向けに「正式なWindows公開経路は準備中」と表示している
+
+## Windows限定テスト（正式公開前）
+
+- [ ] Windows MSIが未署名であり、正式Release assetではないことを確認した
+- [ ] Directorが限定テスターへ `UNSIGNED-TEST-ONLY` を含むartifact名、MSI隣接notice、SHA-256を個別に案内した
+- [ ] artifact名の `UNSIGNED` と `TEST-ONLY`、MSI隣接noticeの `UNSIGNED` と `TEST ONLY` を確認した
+- [ ] テスターが案内されたartifact名、MSI隣接notice、SHA-256の一致を確認してからインストールした
+- [ ] Windowsの警告は、発行元を確認せず実行する案内や保護機能を無効にする案内をせずに扱った
+- [ ] Windows MSIでデスクトップに `TOMOS AI Web UI` ショートカットが作られる
+- [ ] Windows MSIでスタートメニューに `TOMOS AI` フォルダーが作られる
+- [ ] スタートメニューから `TOMOS AI Web UI`、`TOMOS AI 全部起動`、`TOMOS AI 重い処理を停止` を選べる
+- [ ] Windows MSIのショートカットが `.bat` 直指定ではなく `Gemma4_12B_Launcher.exe` を指している
+- [ ] Windows MSI版は Program Files 内の `.bat` を探さなくても起動できる
 
 ## モデル
 

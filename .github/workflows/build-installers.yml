@@ -50,6 +50,18 @@ jobs:
           SOURCE_VERSION: ${{ steps.validate-inputs.outputs.source_version }}
         run: |
           Copy-Item "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows.msi" "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows-UNSIGNED-TEST-ONLY.msi"
+      - name: Write unsigned MSI notice
+        shell: pwsh
+        env:
+          SOURCE_VERSION: ${{ steps.validate-inputs.outputs.source_version }}
+        run: |
+          @(
+            "UNSIGNED"
+            "TEST ONLY"
+            "This installer is not a production release."
+            "Do not disable Windows protection."
+            "Before use, verify the Director-provided MSI SHA-256."
+          ) | Set-Content -Path "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows-UNSIGNED-TEST-ONLY.NOTICE.txt" -Encoding utf8
       - name: Write MSI summary
         shell: pwsh
         env:
@@ -65,5 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TOMOS-AI-UNSIGNED-TEST-ONLY-${{ inputs.channel }}-${{ steps.validate-inputs.outputs.source_version }}
-          path: dist/TOMOS_AI-v${{ steps.validate-inputs.outputs.source_version }}-windows-UNSIGNED-TEST-ONLY.msi
+          path: |
+            dist/TOMOS_AI-v${{ steps.validate-inputs.outputs.source_version }}-windows-UNSIGNED-TEST-ONLY.msi
+            dist/TOMOS_AI-v${{ steps.validate-inputs.outputs.source_version }}-windows-UNSIGNED-TEST-ONLY.NOTICE.txt
           retention-days: 7

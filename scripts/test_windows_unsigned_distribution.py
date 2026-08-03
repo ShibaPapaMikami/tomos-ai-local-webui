@@ -64,6 +64,18 @@ jobs:
           SOURCE_VERSION: ${{ steps.validate-inputs.outputs.source_version }}
         run: |
           Copy-Item "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows.msi" "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows-UNSIGNED-TEST-ONLY.msi"
+      - name: Write unsigned MSI notice
+        shell: pwsh
+        env:
+          SOURCE_VERSION: ${{ steps.validate-inputs.outputs.source_version }}
+        run: |
+          @(
+            "UNSIGNED"
+            "TEST ONLY"
+            "This installer is not a production release."
+            "Do not disable Windows protection."
+            "Before use, verify the Director-provided MSI SHA-256."
+          ) | Set-Content -Path "dist/TOMOS_AI-v$env:SOURCE_VERSION-windows-UNSIGNED-TEST-ONLY.NOTICE.txt" -Encoding utf8
       - name: Write MSI summary
         shell: pwsh
         env:
@@ -79,7 +91,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TOMOS-AI-UNSIGNED-TEST-ONLY-${{ inputs.channel }}-${{ steps.validate-inputs.outputs.source_version }}
-          path: dist/TOMOS_AI-v${{ steps.validate-inputs.outputs.source_version }}-windows-UNSIGNED-TEST-ONLY.msi
+          path: |
+            dist/TOMOS_AI-v${{ steps.validate-inputs.outputs.source_version }}-windows-UNSIGNED-TEST-ONLY.msi
+            dist/TOMOS_AI-v${{ steps.validate-inputs.outputs.source_version }}-windows-UNSIGNED-TEST-ONLY.NOTICE.txt
           retention-days: 7
 """
 
@@ -89,6 +103,7 @@ EXPECTED_STEP_DESCRIPTORS = (
     "name: Validate unsigned inputs before build",
     "name: Build MSI",
     "name: Label MSI as unsigned test-only",
+    "name: Write unsigned MSI notice",
     "name: Write MSI summary",
     "name: Upload MSI",
 )
@@ -164,16 +179,43 @@ def validate_workflow_contract(text: str) -> None:
         in validate
     )
     assert SOURCE_VERSION in build
+    notice_position, notice = require_step(steps, "name: Write unsigned MSI notice")
+    assert build_position < notice_position
+    notice_path = (
+        'dist/TOMOS_AI-v$env:SOURCE_VERSION-windows-UNSIGNED-TEST-ONLY.NOTICE.txt'
+    )
+    assert notice.count("Set-Content") == 1
+    assert notice_path in notice
+    for required_label in (
+        '"UNSIGNED"',
+        '"TEST ONLY"',
+        '"This installer is not a production release."',
+        '"Do not disable Windows protection."',
+        '"Before use, verify the Director-provided MSI SHA-256."',
+    ):
+        assert required_label in notice
 
     run_blocks = [
         step.split("run: |\n", 1)[1]
         for _, _, step in steps
         if "shell: pwsh" in step
     ]
-    assert len(run_blocks) == 5
+    assert len(run_blocks) == 6
     assert all("${{ inputs." not in run for run in run_blocks)
     assert text.count("actions/upload-artifact@") == 1
-    assert "retention-days: 7" in require_step(steps, "name: Upload MSI")[1]
+    upload = require_step(steps, "name: Upload MSI")[1]
+    assert "retention-days: 7" in upload
+    assert upload.count("path:") == 1
+    assert (
+        "dist/TOMOS_AI-v"
+        + SOURCE_VERSION
+        + "-windows-UNSIGNED-TEST-ONLY.msi"
+    ) in upload
+    assert (
+        "dist/TOMOS_AI-v"
+        + SOURCE_VERSION
+        + "-windows-UNSIGNED-TEST-ONLY.NOTICE.txt"
+    ) in upload
     assert "0.8.233" not in text
     assert all(forbidden not in text for forbidden in FORBIDDEN_TEXT)
 
@@ -204,6 +246,7 @@ def mutation_cases() -> Iterable[tuple[str, str]]:
     normal_path = (
         "dist/TOMOS_AI-v" + SOURCE_VERSION + "-windows-UNSIGNED-TEST-ONLY.msi"
     )
+    notice_path = normal_path.replace(".msi", ".NOTICE.txt")
     replacements = (
         ("extra push trigger", "\njobs:\n", "\n  push:\n\njobs:\n"),
         (
@@ -234,6 +277,24 @@ def mutation_cases() -> Iterable[tuple[str, str]]:
         ),
         ("old upload action", "actions/upload-artifact@v4", "actions/upload-artifact@v3"),
         ("normal MSI upload", normal_path, normal_path.replace("-UNSIGNED-TEST-ONLY", "")),
+        ("notice name", notice_path, notice_path.replace(".NOTICE.txt", ".txt")),
+        ("missing unsigned label", '"UNSIGNED"', '"SIGNED"'),
+        ("missing test-only label", '"TEST ONLY"', '"TESTING ONLY"'),
+        (
+            "production release notice",
+            '"This installer is not a production release."',
+            '"This installer is a production release."',
+        ),
+        (
+            "disable Windows protection notice",
+            '"Do not disable Windows protection."',
+            '"Disable Windows protection."',
+        ),
+        (
+            "missing Director SHA-256 notice",
+            '"Before use, verify the Director-provided MSI SHA-256."',
+            '"Before use, verify the MSI checksum."',
+        ),
         (
             "unlabelled artifact",
             "TOMOS-AI-UNSIGNED-TEST-ONLY",
