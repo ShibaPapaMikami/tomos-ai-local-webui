@@ -6,9 +6,10 @@
 許可しない。将来のlock/build用入力では必要なバイトを再検証しなければならず、そのバイトは
 このリポジトリに保存していない。
 
-V310のHEAD-only検証は、公式URL、x64アーキテクチャ、成果物名、サイズ、およびWebView2
-EULAの到達可能性を再確認した。応答本文またはruntimeバイトは取得していない。以下で
-既存のバイト読取と記すSHA-256は承認済みの既存証跡であり、新しいV310のバイト検証ではない。
+V314では承認済みのHTTPS再取得とSHA-256再計算を行った。Python embedded ZIP、CPython
+LICENSE、WebView2 installer、およびWebView2 EULA応答を一時領域だけに取得して照合し、
+リポジトリには保存していない。ZIPとEXEは展開、実行、またはインストールしていない。
+将来のlock/buildでは、その時点で取得したバイトをlockのsize/SHA-256と再照合しなければならない。
 
 状態値: `confirmed` = 承認済みの読取結果が利用可能、`unresolved` = 発行または読取の
 事実が未取得、`blocked` = unresolvedの事実がconfirmedになるまで進めてはならない作業。
@@ -17,32 +18,39 @@ EULAの到達可能性を再確認した。応答本文またはruntimeバイト
 
 | 項目 | 値 | 状態 | 証跡メモ |
 | --- | --- | --- | --- |
-| リリースページ | https://www.python.org/downloads/release/python-3146/ | confirmed | 公式URLはV310 HEAD-only検証で再確認。 |
-| 取得元URL | https://www.python.org/ftp/python/3.14.6/python-3.14.6-embed-amd64.zip | confirmed | 公式URLはV310 HEAD-only検証で再確認。 |
+| リリースページ | https://www.python.org/downloads/release/python-3146/ | confirmed | 承認済みの公式リリースページ。 |
+| 取得元URL | https://www.python.org/ftp/python/3.14.6/python-3.14.6-embed-amd64.zip | confirmed | V314でHTTPS再取得した公式URL。 |
 | バージョン | `3.14.6` | confirmed | 承認済みの読取結果。 |
-| 成果物 | `python-3.14.6-embed-amd64.zip` | confirmed | V310 HEAD-only検証で再確認。 |
-| アーキテクチャ | `x64` | confirmed | V310 HEAD-only検証で再確認。 |
-| サイズ | `12570832` bytes | confirmed | V310 HEAD-only検証で再確認。 |
-| SHA-256 | `df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c` | confirmed | 承認済みの既存バイト読取ダイジェスト。lock/build用入力の作成時に再検証する。 |
+| 成果物 | `python-3.14.6-embed-amd64.zip` | confirmed | V314でHTTPS再取得した。 |
+| アーキテクチャ | `x64` | confirmed | 承認済みのx64成果物。 |
+| サイズ | `12570832` bytes | confirmed | V314で再取得したバイト数。 |
+| SHA-256 | `df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c` | confirmed | V314で再計算し、期待値と一致。 |
 | ライセンス | `PSF-2.0` | confirmed | 承認済みの読取結果。 |
-| ライセンスURL | https://raw.githubusercontent.com/python/cpython/v3.14.6/LICENSE | confirmed | 承認済みの読取結果。 |
-| ライセンスSHA-256 | `b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231` | confirmed | 承認済みの既存バイト読取ダイジェスト。lock/build用入力の作成時に再検証する。 |
-| リポジトリに保存したruntimeバイト | 未保存 | blocked | 将来のlock/build用入力より前に再検証が必要。 |
+| ライセンスURL | https://raw.githubusercontent.com/python/cpython/v3.14.6/LICENSE | confirmed | V314でHTTPS再取得した公式URL。 |
+| ライセンスサイズ | `13804` bytes | confirmed | V314で再取得したバイト数。 |
+| ライセンスSHA-256 | `b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231` | confirmed | V314で再計算し、期待値と一致。 |
+| リポジトリに保存したruntimeバイト | 未保存 | confirmed | V314の再取得物は一時領域だけにあり、リポジトリには保存していない。 |
 
 ## Microsoft Edge WebView2 runtime
 
 | 項目 | 値 | 状態 | 証跡メモ |
 | --- | --- | --- | --- |
-| 製品ページ | https://developer.microsoft.com/en-us/microsoft-edge/webview2 | confirmed | 公式URLはV310 HEAD-only検証で再確認。 |
-| 配布URL | https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d06c217f-cef1-471d-a639-fad978ef4a40/MicrosoftEdgeWebView2RuntimeInstallerX64.exe | confirmed | 正確な公式配布URLはV310 HEAD-only検証で再確認。 |
-| 候補バージョン | `150.0.4078.99` | confirmed | 承認済みの既存バイト読取候補。 |
-| 成果物 | `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` | confirmed | V310 HEAD-only検証で再確認。 |
-| アーキテクチャ | `x64` | confirmed | V310 HEAD-only検証で再確認。 |
-| サイズ | `203814608` bytes | confirmed | V310 HEAD-only検証で再確認。 |
-| SHA-256 | `477c6a0cf79d29fdbfca3ea337fabe952a439b5da38d025cd2c59cc65a87947d` | confirmed | 承認済みの既存バイト読取ダイジェスト。lock/build用入力の作成時に再検証する。 |
-| EULA URL | https://explore.microsoft.com/microsoft-edge/api/eula/webview2 | confirmed | 到達可能性はV310 HEAD-only検証で再確認。 |
-| 正規化済み `evergreenHtml` UTF-8 SHA-256 | `ce6fa83e57c338256e5cabe9e1eea83076c271b0fdb253408213eeb08859d7b6` | confirmed | 承認済みの既存正規化バイト読取ダイジェスト。lock/build用入力の作成時に再検証する。 |
-| リポジトリに保存したruntimeバイト | 未保存 | blocked | 将来のlock/build用入力より前に再検証が必要。 |
+| 製品ページ | https://developer.microsoft.com/en-us/microsoft-edge/webview2 | confirmed | 承認済みの公式製品ページ。 |
+| 配布URL | https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d06c217f-cef1-471d-a639-fad978ef4a40/MicrosoftEdgeWebView2RuntimeInstallerX64.exe | confirmed | V314でHTTPS再取得した正確な公式配布URL。 |
+| Runtimeバージョン | unresolved | unresolved | 内包Runtime payloadは展開せず、V314では確認していない。 |
+| 外装installer VERSIONINFO | `1.3.251.5` | confirmed | V314で最上位EXEのRT_VERSIONから静的に読取。内包Runtimeのバージョンではなく、lock versionには使用しない。 |
+| 成果物 | `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` | confirmed | V314でHTTPS再取得した。 |
+| アーキテクチャ | `x64` | confirmed | 成果物名および承認済みのx64配布URL。 |
+| サイズ | `203814608` bytes | confirmed | V314で再取得したバイト数。 |
+| SHA-256 | `477c6a0cf79d29fdbfca3ea337fabe952a439b5da38d025cd2c59cc65a87947d` | confirmed | V314で再計算し、期待値と一致。 |
+| EULA raw応答URL | https://explore.microsoft.com/microsoft-edge/api/eula/webview2 | confirmed | V314でHTTPS再取得した公式JSON応答URL。 |
+| EULA JSONサイズ | `24429` bytes | confirmed | V314で再取得したJSON応答のバイト数。 |
+| EULA JSON SHA-256 | `e15b53f476b66f8335c18436998256dc9862b210242a8e4c7f7e14d2de53591d` | confirmed | V314で再計算したraw JSON応答の取得証跡。lock用SHA-256ではない。 |
+| lock用 `license_name` | `MICROSOFT SOFTWARE LICENSE TERMS — MICROSOFT EDGE WEBVIEW2 RUNTIME` | confirmed | V314で確認した`evergreenHtml`の見出し。 |
+| lock用 `license_url` | https://explore.microsoft.com/microsoft-edge/api/eula/webview2 | confirmed | `license_name`と`license_sha256`の取得元となる公式JSON応答URL。 |
+| 正規化済み `evergreenHtml` UTF-8サイズ | `21639` bytes | confirmed | V314で追加改行なしに抽出したUTF-8バイト数。 |
+| lock用 `license_sha256` | `ce6fa83e57c338256e5cabe9e1eea83076c271b0fdb253408213eeb08859d7b6` | confirmed | 追加改行なしUTF-8の正規化済み`evergreenHtml`をlock採用値として固定。V314で再計算し、期待値と一致。 |
+| リポジトリに保存したruntimeバイト | 未保存 | confirmed | V314の再取得物は一時領域だけにあり、リポジトリには保存していない。 |
 
 ## Timestamp
 
@@ -69,6 +77,8 @@ EULAの到達可能性を再確認した。応答本文またはruntimeバイト
 
 | 項目 | 状態 | 証跡メモ |
 | --- | --- | --- |
-| Windows supply lock生成の完了 | blocked | 証明書の発行/読取およびruntime-byte再検証が未完了。 |
-| Task 2 | blocked | 再検証済み証跡からsupply lockを完成できるまで開始しない。 |
+| runtime-byte再検証 | confirmed | V314でPython embedded ZIPおよびWebView2 installerの再取得、サイズ・SHA-256再計算を完了。 |
+| WebView2内包Runtime version確認 | blocked | 内包Runtime payloadは展開せず未確認。外装installer VERSIONINFO `1.3.251.5`をlock versionに使用してはならない。 |
+| Windows supply lock生成の完了 | blocked | 証明書の発行/読取とWebView2内包Runtime版の両方がconfirmedになるまで生成しない。 |
+| Task 2 | blocked | 証明書の発行/読取とWebView2内包Runtime版の両方がconfirmedとなり、supply lockを完成できるまで開始しない。 |
 | 署名または公開 | blocked | この読取証跡は署名または公開を許可しない。 |
