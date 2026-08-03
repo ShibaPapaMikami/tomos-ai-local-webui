@@ -2,9 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 承認済みGate C後設計をマスター計画へ反映し、正本・担当・検証条件を一本化してU0、M0、D0を安全に開始できる状態にする。
+**Policy update 2026-08-03:** Windowsの有料署名D0からD3は必須工程から外して停止する。
+Gate W0からW2の未署名MSI開発・限定テストと、将来のGate S0を
+`docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md`へ分離した。
+矛盾時は最新のマスター計画と同計画を優先する。以下のTask手順は2026-08-01時点の
+履歴として保持し、現在の実装手順として実行しない。
 
-**Architecture:** 最初のtrancheは文書と文書契約テストだけを変更し、製品コード、版番号、成果物には触れない。R0合格後はU0、M0、D0を別worktree・別計画で進め、Gate 4以降は既存のSkill、Voice、Model計画へ引き渡す。
+**Goal:** 承認済みGate C後設計をマスター計画へ反映し、正本・担当・検証条件を一本化した
+2026-08-01時点の実行履歴を保持する。
+
+**Architecture:** 最初のtrancheは文書と文書契約テストだけを変更し、製品コード、版番号、
+成果物には触れなかった。現在の入口はマスター計画のU0、M0、W0とする。
 
 **Tech Stack:** Markdown、Python 3.11標準ライブラリ、Git、既存TOMOSテスト。
 

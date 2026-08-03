@@ -6,6 +6,17 @@
 
 **設計基準:** `origin/main@6df62c09cb64044ed76480e417706ca2167a72ae`
 
+## 2026-08-03 Windows配布方針の更新
+
+- 申請主体は個人とし、DigiCert / KeyLockerを契約しない。
+- WindowsはGate W0からW2で、未署名MSIの開発・限定テストを無料で進める。
+- 未署名MSIを正式版、署名済み、初心者向け正規版、SmartScreen回避済みとして公開しない。
+- Gate D0からD3は有料のWeb直接配布を選ぶ場合だけ再開する任意経路として停止する。
+- Microsoft StoreはGate S0のread-only評価後に、費用、実名表示、個人適格性、
+  package要件を示して別判断する。
+- Gate 4の入口はU0、M0、W0とし、有料コード署名を製品開発の開始条件にしない。
+- 詳細正本は`docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md`とする。
+
 ## 1. 目的
 
 Gate Cを通過したTOMOSを、初心者が安全に導入できるデスクトップアプリへ仕上げながら、次の機能を破綻なく追加する。
@@ -24,7 +35,7 @@ Gate Cを通過したTOMOSを、初心者が安全に導入できるデスクト
 | --- | --- | --- | --- |
 | 正本 | リモート`main`はPR #5、#6統合済み。手元`main`は大きく分岐し既存変更がある | `origin/main`の固定commitから工程ごとの専用worktreeを作る | R0 |
 | Macアプリ | v0.8.233は署名・公証・実機上書きまで合格 | 現在の正本と同じsourceから新しい版を再生成し、第三者の新規導入まで確認 | M0〜M2 |
-| Windowsアプリ | MSIの表示名はTOMOS。旧ランチャー方式と静的テストが中心 | Tauri専用window、Windows用runtime、署名MSI、更新・削除・再導入を実機確認 | D0〜D3 |
+| Windowsアプリ | MSIの表示名はTOMOS。旧ランチャー方式と静的テストが中心 | Tauri専用windowと未署名MSIをW0〜W2で限定テスト。一般公開はStoreまたは有料署名を別選択 | W0〜W2、将来S0またはD0〜D3 |
 | 初心者導入 | Macの旧ZIP案内とPKG方針が混在。安全な診断コピー画面がない | OS別1ページ、初回4段階、復旧手順、安全な診断情報を統一 | U0〜U2 |
 | Skill | 詳細計画はあるが製品実装は未開始 | Markdown正本、固定評価、手動review、承認時だけ昇格 | Gate 4 |
 | 音声出力 | 共通TTS境界とfixtureまで合格 | VibeVoice / Qwen3-TTSを隔離環境で比較。採用は別Gate | V0 / V1 |
@@ -148,6 +159,10 @@ Director
 
 #### Gate D0: Windows設計
 
+Gate D0からD3は2026-08-03以降、現在の必須工程ではない。有料のWeb直接配布を
+明示再承認した場合だけ、以下の契約を再開する。現在のWindows実装は
+`2026-08-03-tomos-windows-free-distribution.md`のGate W0からW2に従う。
+
 - code-signing証明書、timestamp方式、秘密情報の扱いを固定。
 - Windows Python runtimeの取得元、ライセンス、SHAを固定。
 - WebView2方針、install先、ユーザーデータ保存先を固定。
@@ -199,7 +214,8 @@ Stage UはStage Rと並行して設計・文書化できる。製品UIのshared 
 #### Gate U0: 文書の一本化
 
 - `README.ja.md`、学生向けガイド、Release案内から旧Mac ZIP中心の矛盾を除く。
-- MacはPKG、Windowsは署名済みMSIを初心者向け正規導線とする。
+- Macは公証済みPKGを正規導線とする。Windowsは未署名の限定テストと将来の正式公開を
+  分け、選択済み公開経路の合格前は「正式なWindows公開経路は準備中」と表示する。
 - 対応OS、CPU、空き容量、通信量、Ollama、更新、復旧をOS別1ページにまとめる。
 - GitHubのSource codeではなく、正確なPKG/MSIファイル名を案内する。
 
@@ -238,7 +254,8 @@ PCを確認
 - 診断生成時にユーザー名、絶対path、会話本文、環境変数、秘密情報を自動除外する。
 - Mac/Windowsのclean install、更新、削除・再導入、復旧が第三者試験に合格。
 - データの1世代rollbackと、対象版が存在する場合のアプリ版rollbackを別々に実証。
-- 初回Windows署名版はapp版rollbackを対象外と明記し、同版再導入とデータ・設定rollbackを実証。
+- 有料直接配布を再承認した場合の初回Windows署名版はapp版rollbackを対象外と明記し、
+  同版再導入とデータ・設定rollbackを実証。
 
 第三者試験票に必ず記録する:
 
@@ -254,7 +271,7 @@ PCを確認
 入口条件を次のように固定する。
 
 - Gate R0合格後: 既存計画との差分監査とテスト設計だけ開始可能。
-- Gate U0、M0、D0合格後: Skill専用worktreeで製品実装を開始可能。
+- Gate U0、M0、W0合格後: Skill専用worktreeで製品実装を開始可能。
 - 配布基盤のshared file変更がmergeされ、baselineが再合格した後: Skill変更を製品へ統合可能。
 
 Directorは入口条件とmerge queueをTask開始時にreadbackする。

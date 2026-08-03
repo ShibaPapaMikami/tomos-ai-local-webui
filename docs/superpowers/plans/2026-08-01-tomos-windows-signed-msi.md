@@ -2,6 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status update 2026-08-03:** 本計画は有料のWeb直接配布を選ぶ場合だけ再開する任意経路として
+保留する。現在の正本は
+`docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md`であり、
+未署名MSIによる開発・限定テストをGate W0からW2で進める。Task 1のcontractと既存の
+supply / UpgradeCode evidenceは削除しないが、certificate購入、DigiCert / KeyLocker契約、
+secret登録、signing job、signed candidate、D1からD3は明示再承認まで実行しない。
+
 **Goal:** 固定供給値、再現可能なMSI identity、安全なWindows runtime、署名CIを実装し、D1の署名済みWindows x64 MSI候補を作れる状態にする。
 
 **Architecture:** Task 4で承認済みのM0 schema contractを先に利用し、Windows供給値を外部readback後にlockする。供給検証、path / migration、MSI packaging、署名CIを独立したfail-closed componentに分け、unsigned testとsecretを使うsigning jobを分離する。D1では自動・静的検証までを担当し、install、uninstall、第三者試験はD2 / D3へ渡す。
@@ -32,10 +39,10 @@
 - 未確定のcertificate / runtime / WebView2値を推測しない。承認済みreadbackまで停止する。
 - 通常URLはHTTPS-onlyとし、RFC 3161 timestampだけは公式provider endpointのraw完全一致HTTP
   allowlistを例外として許可する。初期allowlistは`http://timestamp.digicert.com`の1件だけとする。
-- RFC 3161の第一候補はDigiCert KeyLockerとする。cloud FIPS HSM、秘密鍵非export、SignTool / MSI /
-  GitHub Actions対応、keypair alias / fingerprint readbackを理由とする。SSL.com eSignerは価格重視の
-  条件付き代替候補とし、Microsoft Artifact Signingは日本Public Trust条件を確認できるまで候補外とする。
-- DigiCert購入、契約、trial、identity validation、secret設定は本計画の実装承認とは別の明示承認gateとする。
+- DigiCert KeyLockerは過去の比較上の第一候補として証跡だけを保持するが、現在の採用候補、
+  dependency、購入対象ではない。
+- DigiCert購入、契約、trial、identity validation、secret設定は停止する。有料のWeb直接配布を
+  改めて選び、費用と個人情報を示した別計画が承認された場合だけ再評価する。
 - certificateのsubject、issuer、fingerprint、key identityなどの実値は発行前に作らず、未確定値は
   `unresolved`として保持する。
 - このtimestamp provider選定の反映では、WebView2を含む今回範囲外の実装・供給値・検証経路を変更しない。

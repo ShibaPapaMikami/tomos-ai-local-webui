@@ -6,6 +6,11 @@
 許可しない。将来のlock/build用入力では必要なバイトを再検証しなければならず、そのバイトは
 このリポジトリに保存していない。
 
+2026-08-03の方針変更により、申請主体は個人とし、DigiCert / KeyLockerを契約しない。
+本証跡は将来、有料のWeb直接配布を明示再承認した場合のread-only資料として保持する。
+現在のGate W0からW2は未署名MSIによる開発・限定テストであり、この文書の証明書欄を
+完成させることを開始条件にしない。
+
 V314では承認済みのHTTPS再取得とSHA-256再計算を行った。Python embedded ZIP、CPython
 LICENSE、WebView2 installer、およびWebView2 EULA応答を一時領域だけに取得して照合し、
 リポジトリには保存していない。ZIPとEXEは展開、実行、またはインストールしていない。
@@ -77,7 +82,7 @@ Windows trust policy、失効確認、timestamp trustを確認したものでは
 
 | 項目 | 値 | 状態 | 証跡メモ |
 | --- | --- | --- | --- |
-| 第一候補 | `DigiCert KeyLocker` | unresolved | 第一候補にすぎず、発行済み事業者の事実ではない。 |
+| 過去の比較候補 | `DigiCert KeyLocker` | unresolved | 現在は契約しない。将来の有料直接配布を再承認した場合だけ再評価する。 |
 | RFC 3161 URL | `http://timestamp.digicert.com` | confirmed | 承認済みの正確なエンドポイント。HTTP例外はこのraw exact URLだけに適用する。 |
 | ダイジェスト | `sha256` | confirmed | 承認済みtimestampダイジェスト。 |
 | Timestamp token、message imprint、およびTSA chain | 未読取 | blocked | 必須の署名検証はこの証跡記録の範囲外。 |
@@ -86,7 +91,7 @@ Windows trust policy、失効確認、timestamp trustを確認したものでは
 
 | 項目 | 値 | 状態 | 証跡メモ |
 | --- | --- | --- | --- |
-| 事業者 | DigiCertは第一候補 | unresolved | 事業者の購入および発行は未完了。 |
+| 事業者 | 未選定 | unresolved | DigiCertは現在の購入対象ではなく、事業者の購入および発行は行わない。 |
 | サブジェクト | 未発行 | unresolved | 発行および読取が必要。 |
 | 発行者 | 未発行 | unresolved | 発行および読取が必要。 |
 | SHA-256 fingerprint | 未発行 | unresolved | 発行および読取が必要。 |
@@ -100,6 +105,7 @@ Windows trust policy、失効確認、timestamp trustを確認したものでは
 | --- | --- | --- |
 | runtime-byte再検証 | confirmed | V314でPython embedded ZIPおよびWebView2 installerの再取得、サイズ・SHA-256再計算を完了。 |
 | WebView2内包Runtime version確認 | confirmed | V320静的構造解析で内包Runtime版`150.0.4078.99`を確認。外装installer VERSIONINFO `1.3.251.5`をlock versionに使用してはならない。 |
-| Windows supply lock生成の完了 | blocked | 証明書の発行/読取が完了し、lockを作成できるまで生成しない。 |
-| Task 2 | blocked | 証明書の発行/読取が完了し、supply lockを完成できるまで開始しない。 |
+| Windows有料署名用supply lock生成 | blocked | 有料直接配布を再承認し、証明書の発行/読取が完了するまで生成しない。 |
+| 有料署名計画Task 2 | blocked | Gate D0の明示再承認とsupply lock完成まで開始しない。 |
+| Gate W0からW2の方針 | confirmed | 証明書を使わず、未署名MSIの開発・限定テストとして別計画で進める。各Gateの実装・実機合格を意味しない。 |
 | 署名または公開 | blocked | この読取証跡は署名または公開を許可しない。 |

@@ -6,12 +6,19 @@
 
 **Entry:** Gate R0合格
 
-**Status:** 承認用design。未確定の供給元・証明書情報を外部readbackするまでD0合格にしない。
+**Status:** 2026-08-03に任意の有料直接配布経路として保留。申請主体は個人であり、
+DigiCert / KeyLockerを契約しない。現在のWindows正本は
+`docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md`である。
+本designのruntime、WebView2、UpgradeCode、データ保全、secret非露出の成果は保持するが、
+証明書取得、署名CI、D1からD3は明示再承認まで実行しない。
 
 ## Goal
 
 Windows x64版を署名済みMSIとして安全に配布するため、署名、runtime、WebView2、
 保存先、upgrade、rollback、CI secretの境界を固定する。
+
+このGoalは将来、有料のWeb直接配布を選んだ場合だけ有効になる。現在はGate W0からW2で
+未署名MSIを開発・限定テストし、正式公開、署名済み表示、SmartScreen回避済み表示を行わない。
 
 ## Source of Truth
 
@@ -25,6 +32,7 @@ Windows x64版を署名済みMSIとして安全に配布するため、署名、
 - `docs/tomos-post-gate-c-r0-gate-report-2026-08-01.ja.md`
 - `docs/superpowers/plans/2026-08-01-tomos-post-gate-c-program.md`
 - `docs/superpowers/plans/2026-08-01-tomos-release-traceability.md`
+- `docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md`
 - `docs/superpowers/specs/2026-07-26-tomos-macos-portable-runtime-and-notarized-pkg-design.md`
 
 Mac設計のデータ保全原則は参照するが、path、署名、installer、rollbackはWindows固有値で

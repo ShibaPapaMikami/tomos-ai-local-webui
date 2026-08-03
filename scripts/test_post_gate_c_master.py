@@ -5,6 +5,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MASTER = ROOT / "docs/superpowers/plans/2026-07-23-tomos-evolution-master.md"
 DESIGN = ROOT / "docs/superpowers/specs/2026-08-01-tomos-post-gate-c-program-design.md"
+FREE_WINDOWS_PLAN = (
+    ROOT
+    / "docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md"
+)
 
 
 def require_in_order(text: str, tokens: list[str]) -> None:
@@ -31,6 +35,10 @@ def test_post_gate_c_source_of_truth() -> None:
         "Gate U0F",
         "Gate M0",
         "Gate M1 / M2",
+        "Gate W0",
+        "Gate W1",
+        "Gate W2",
+        "Gate S0",
         "Gate D0",
         "Gate D1 / D2 / D3",
         "Gate REL0",
@@ -48,9 +56,9 @@ def test_support_gate_ledger_order() -> None:
         ledger,
         [
             "| Gate U0 | Gate R0合格版",
-            "| Gate U1 | U0、M0、D0合格版",
+            "| Gate U1 | U0、M0、W0合格版",
             "| Gate U2 | Gate U1合格版",
-            "| Gate U0F | U2、M2、D3合格版",
+            "| Gate U0F | U2、M2、選択済みWindows公開経路の合格版",
         ],
     )
 
@@ -67,15 +75,22 @@ def test_post_gate_c_phase_order() -> None:
             "Gate R0",
             "Gate U0",
             "Gate M0",
-            "Gate D0",
+            "Gate W0",
         ],
     )
     require_in_order(
         phase_order,
         [
-            "Release lane",
+            "Free Windows lane",
+            "Gate W1",
+            "Gate W2",
+        ],
+    )
+    require_in_order(
+        phase_order,
+        [
+            "Mac release lane",
             "Gate M1 / M2",
-            "Gate D1 / D2 / D3",
             "Final Mac M1 / M2",
             "Gate REL0",
         ],
@@ -99,6 +114,15 @@ def test_post_gate_c_phase_order() -> None:
             "Gate E0 / E1",
         ],
     )
+    require_in_order(
+        phase_order,
+        [
+            "将来のWindows公開判断",
+            "Gate S0",
+            "Gate D0 / D1 / D2 / D3",
+            "Gate REL0",
+        ],
+    )
 
 
 def test_existing_detail_plans_remain_referenced() -> None:
@@ -107,9 +131,11 @@ def test_existing_detail_plans_remain_referenced() -> None:
         "2026-07-23-tomos-markdown-skill-manager.md",
         "2026-07-23-tomos-voice-engine-evaluation-lab.md",
         "2026-07-23-tomos-model-evaluation-lab.md",
+        "2026-08-03-tomos-windows-free-distribution.md",
     ):
         assert filename in master
     assert DESIGN.is_file()
+    assert FREE_WINDOWS_PLAN.is_file()
 
 
 if __name__ == "__main__":
