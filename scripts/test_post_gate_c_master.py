@@ -173,7 +173,8 @@ def test_free_windows_plan_defines_structured_unsigned_workflow_contract() -> No
     assert "upload = uploads[0]" in free_plan
     assert (
         'assert artifact_upload_paths(upload) == [\n'
-        '        "dist/TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi"\n'
+        '        "dist/TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi",\n'
+        '        "dist/TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.NOTICE.txt",\n'
         "    ]"
     ) in free_plan
     assert (
