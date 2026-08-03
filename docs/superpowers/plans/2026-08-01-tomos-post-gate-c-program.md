@@ -12,7 +12,9 @@ Gate W0からW2の未署名MSI開発・限定テストと、将来のGate S0を
 2026-08-01時点の実行履歴を保持する。
 
 **Architecture:** 最初のtrancheは文書と文書契約テストだけを変更し、製品コード、版番号、
-成果物には触れなかった。現在の入口はマスター計画のU0、M0、W0とする。
+成果物には触れなかった。現在の入口はマスター計画のU0、M0、W0とし、Windowsの開発・
+限定テストはW0からW2を先に進める。以下のD0関連Taskは2026-08-01時点の履歴・将来任意
+経路であり、現行手順として実行しない。
 
 **Tech Stack:** Markdown、Python 3.11標準ライブラリ、Git、既存TOMOSテスト。
 
@@ -565,7 +567,7 @@ git commit -m "docs: record TOMOS post-Gate-C Gate R0"
 
 **Interfaces:**
 - Consumes: Gate R0合格報告
-- Produces: U0、U1、U2、M0の独立implementation plan、D0の承認用design
+- Produces: U0、U1、U2、M0、W0からW2の独立implementation plan。D0設計は将来の有料Web直接配布にだけ使う承認用design
 
 - [ ] **Step 1: ユーザー対応へU0計画を指示する**
 
@@ -585,11 +587,13 @@ scripts/test-student-install-docs.py
 
 必須条件:
 
-- Macは公証済みPKG、Windowsは署名済みMSI。
+- Macは公証済みPKGを正規導線とする。WindowsはW0からW2の未署名MSIを開発・限定テスト
+  専用とし、正式な初心者向けWindows導線はStoreまたは有料署名の別承認まで準備中とする。
 - ZIP、`.command`、`.bat`を初心者向け正規導線にしない。
 - GitHubの`Source code`を選ばない。
 - Ollamaは別途必要。
-- Windows署名済みMSIがGate D3に合格するまで正式版と表示しない。
+- 未署名MSIを正式版、署名済み、初心者向け正規版、SmartScreen回避済みとして表示しない。
+  将来の有料Web直接配布を選ぶ場合だけD0からD3を別承認で再開する。
 - U1のUI実装、U2の診断実装はこの計画へ混ぜない。
 - U0は内部draftと静的文書契約までで合格とし、実在しない版・SHAを書かない。
 - D3のartifact名・SHA readback後、U0Fで最終公開文面を確定する。
@@ -599,7 +603,7 @@ scripts/test-student-install-docs.py
 U1計画`docs/superpowers/plans/2026-08-01-tomos-first-run-onboarding.md`:
 
 - Ownerはユーザー対応。
-- 入口はU0、M0、D0合格。
+- 入口はU0、M0、W0合格。D0は有料Web直接配布を別承認した場合だけ使う将来任意経路とする。
 - 「PC確認→Ollama→標準AI→最初の質問」の4段階。
 - Ollama未導入・停止でも10.0秒以内に案内画面を表示。
 - 新しいAI回答は止めるが、既存データ閲覧とSkill管理を止めない。
@@ -651,9 +655,13 @@ docs/releases/
 - M0では署名、公証、artifact生成、公開を行わない。
 - 現v0.8.233 PKGを`origin/main`由来として再利用しない。
 
-- [ ] **Step 4: エンジニア2へD0設計を指示する**
+- [ ] **Step 4: エンジニア2へW0からW2を指示し、D0設計を将来任意経路として保留する**
 
-D0設計の必須判断:
+現行のWindows入口は`2026-08-03-tomos-windows-free-distribution.md`のW0、W1、W2とする。
+未署名MSIは開発・限定テストだけに使い、正式公開・初心者向け正規導線にはしない。
+Microsoft StoreのS0はread-only評価後に別判断する。
+
+将来、有料のWeb直接配布を選ぶ場合だけ再開するD0設計の必須判断:
 
 ```text
 Windows code-signing証明書とtimestamp
@@ -673,11 +681,12 @@ D0設計だけではcertificate取得、secret登録、workflow実行、実機in
 | Plan | Entry | Approval stop |
 | --- | --- | --- |
 | `2026-08-01-tomos-macos-v0.8.234-release.md` | M0合格 | Developer ID、公証、install、第三者試験 |
-| `2026-08-01-tomos-windows-signed-msi.md` | D0設計承認 | 依存、runtime取得、署名secret CI |
-| `2026-08-01-tomos-windows-real-machine-release.md` | D1合格 | install、uninstall、第三者試験 |
-| `2026-08-01-tomos-v0.8.234-release-publication.md` | Final Mac M2、D3、U0F合格 | tag、push、Release公開 |
+| `2026-08-03-tomos-windows-free-distribution.md` | W0 | 未署名MSIのbuild、限定テスト、Store read-only評価 |
+| `2026-08-01-tomos-windows-signed-msi.md` | 有料Web直接配布を選ぶ別承認後のD0 | 依存、runtime取得、署名secret CI |
+| `2026-08-01-tomos-windows-real-machine-release.md` | 将来D1合格 | install、uninstall、第三者試験 |
+| `2026-08-01-tomos-v0.8.234-release-publication.md` | Final Mac M2と選択済みWindows公開経路の合格 | tag、push、Release公開 |
 
-Windows D3後は最終release commitからMac M1/M2を再実行し、固定した最終PKG/MSIのSHAで第三者smokeを行う。再buildしたplatformは第三者smokeをやり直す。
+将来D3を選んだ場合は、最終release commitからMac M1/M2を再実行し、固定した最終PKG/MSIのSHAで第三者smokeを行う。再buildしたplatformは第三者smokeをやり直す。
 
 - [ ] **Step 6: Directorが5文書の境界を確認する**
 

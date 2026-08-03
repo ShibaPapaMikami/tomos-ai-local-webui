@@ -9,7 +9,7 @@
 supply / UpgradeCode evidenceは削除しないが、certificate購入、DigiCert / KeyLocker契約、
 secret登録、signing job、signed candidate、D1からD3は明示再承認まで実行しない。
 
-**Goal:** 固定供給値、再現可能なMSI identity、安全なWindows runtime、署名CIを実装し、D1の署名済みWindows x64 MSI候補を作れる状態にする。
+**Historical goal:** 固定供給値、再現可能なMSI identity、安全なWindows runtime、署名CIを実装し、D1の署名済みWindows x64 MSI候補を作れる状態にする構想を記録する。現行の開発・限定テストはGate W0からW2を先に進める。
 
 **Architecture:** Task 4で承認済みのM0 schema contractを先に利用し、Windows供給値を外部readback後にlockする。供給検証、path / migration、MSI packaging、署名CIを独立したfail-closed componentに分け、unsigned testとsecretを使うsigning jobを分離する。D1では自動・静的検証までを担当し、install、uninstall、第三者試験はD2 / D3へ渡す。
 
@@ -18,7 +18,7 @@ secret登録、signing job、signed candidate、D1からD3は明示再承認ま�
 ## Global Constraints
 
 - Ownerはエンジニア2。一つのTaskでshared fileを変更するownerは一人だけにする。
-- EntryはD0設計承認と、Task 4で承認済みのM0 schema / validator contract。
+- この文書のTask実行入口は、有料のWeb直接配布を別承認した後のD0設計承認と、Task 4で承認済みのM0 schema / validator contractである。現在の入口は`2026-08-03-tomos-windows-free-distribution.md`のW0、W1、W2とする。
 - 対象architectureはWindows x64。Product名はASCIIの`TOMOS AI`。
 - stable UpgradeCodeは`7FAD4890-85D1-4C8D-A4AA-0B1B7E7F41A1`。
 - ProductCode UUIDv5 namespaceは`C3C54504-8F05-5B59-AB5E-14E70A734EB8`。
@@ -49,7 +49,12 @@ secret登録、signing job、signed candidate、D1からD3は明示再承認ま�
 
 ---
 
-## Required Execution Order and Ownership Handoff
+## Historical / Future Optional Execution Order and Ownership Handoff
+
+以下は有料のWeb直接配布を改めて選んだ場合だけ使う将来任意経路である。現在の
+Windows作業、初心者導線、通常のrelease laneへこの順序を適用しない。未署名MSIの
+開発・限定テストは`2026-08-03-tomos-windows-free-distribution.md`のGate W0、W1、W2を
+正本として開始する。
 
 ```text
 M0 Task 1〜4: schema / validator contract

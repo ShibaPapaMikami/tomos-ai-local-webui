@@ -161,15 +161,48 @@ WORKFLOW = ROOT / ".github/workflows/build-installers.yml"
 
 def test_unsigned_workflow_is_manual_and_non_public() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
-    trigger = text.split("jobs:", 1)[0]
+    trigger = workflow_section(text)
+    uploads = artifact_upload_sections(text)
     assert "workflow_dispatch:" in trigger
-    assert "\n  push:" not in trigger
-    assert "UNSIGNED-TEST-ONLY" in text
-    assert "windows-UNSIGNED-TEST-ONLY.msi" in text
-    assert "actions/upload-artifact@" in text
+    assert "push:" not in trigger
+    assert "tags:" not in trigger
+    assert len(uploads) == 1
+    upload = uploads[0]
+    assert "actions/upload-artifact@" in upload
+    assert artifact_upload_paths(upload) == [
+        "dist/TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi"
+    ]
+    assert "TOMOS_AI-v0.8.233-windows.msi" not in upload
     assert "gh release" not in text
     assert "actions/create-release" not in text
     assert "softprops/action-gh-release" not in text
+
+
+def workflow_section(text: str) -> str:
+    return text.split("jobs:", 1)[0]
+
+
+def artifact_upload_sections(text: str) -> list[str]:
+    marker = "actions/upload-artifact@"
+    sections = []
+    cursor = 0
+    while True:
+        start = text.find(marker, cursor)
+        if start == -1:
+            return sections
+        next_step = text.find("\n      - name:", start)
+        end = len(text) if next_step == -1 else next_step
+        sections.append(text[start:end])
+        cursor = end
+
+
+def artifact_upload_paths(section: str) -> list[str]:
+    paths = []
+    for line in section.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("path:"):
+            paths.append(stripped.split(":", 1)[1].strip().strip("'\""))
+    return paths
 
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ Gate Cを通過したTOMOSを、初心者が安全に導入できるデスクト
 
 ### 3.3 今回変更する工程順
 
-既存マスターはGate 4を先に進める順序になっている。本設計では、初心者へ安全に配布できる版を先に確立するため、Gate C直後にStage R / Uを置き、Gate 4をその後に変更する。
+既存マスターはGate 4を先に進める順序になっている。本設計では、初心者へ安全に配布できる版を先に確立するため、Gate C直後にStage R / Uを置き、Gate 4をその後に変更する。Windowsの現行入口はW0、W1、W2であり、D0からD3は有料のWeb直接配布を別承認した場合だけ再開する履歴・将来任意経路である。
 
 この変更はGate C合格を取り消さず、Skill、Voice、Modelの合格条件も変えない。設計承認後に作る実装計画の最初のTaskでマスター台帳とPhase Orderを本設計に合わせる。文書の整合が完了するまでは製品コードの次工程を開始しない。
 
@@ -111,7 +111,7 @@ Director
 - Mac/Windows/Skillの対象ファイル所有者を確定。
 - baseline testの実行条件を記録。
 - fresh worktreeの`cargo test`に必要な生成済みmacOS runtimeがない場合、コード不良と混同せず、準備工程として扱う。
-- マスター台帳とPhase Orderを本設計に合わせたdoc-only変更が完了。
+- マスター台帳とPhase Orderを本設計に合わせたdoc-only変更が完了。Windowsの現行laneはW0、W1、W2であり、D0からD3は将来任意経路として明示されている。
 
 #### 共通rollback contract
 
@@ -157,7 +157,7 @@ Director
 - 公開済みtagの差し替えと、同じ版番号でのartifact交換を禁止する。
 - 公開後はasset、tag、SHA、署名、公証を再取得してreadbackする。
 
-#### Gate D0: Windows設計
+#### Gate D0: Windows設計（履歴・将来任意経路）
 
 Gate D0からD3は2026-08-03以降、現在の必須工程ではない。有料のWeb直接配布を
 明示再承認した場合だけ、以下の契約を再開する。現在のWindows実装は
@@ -170,7 +170,7 @@ Gate D0からD3は2026-08-03以降、現在の必須工程ではない。有料�
 - 直前の署名済みWindows版が存在するか確認する。存在しない初回版では「旧版へ戻せる」と表示せず、同版再導入とデータsnapshot復元だけを合格対象にする。
 - 証明書・依存・外部取得は実行前に個別承認を得る。
 
-#### Gate D1: Windows署名CI
+#### Gate D1: Windows署名CI（履歴・将来任意経路）
 
 - x64 Windows用runtimeとallowlist済み資源だけを同梱。
 - ブラウザーではなくTauri専用windowを起動。
@@ -178,7 +178,7 @@ Gate D0からD3は2026-08-03以降、現在の必須工程ではない。有料�
 - CIで版整合、テスト、署名者、timestamp、SHAを検証。
 - 未署名成果物を公開候補へ出さない。
 
-#### Gate D2: Windows実機
+#### Gate D2: Windows実機（履歴・将来任意経路）
 
 - Windows 11実機で新規、更新、削除、再導入を確認。
 - Ollama/Python/WebView2の有無、二重起動、ポート競合を確認。
@@ -187,7 +187,7 @@ Gate D0からD3は2026-08-03以降、現在の必須工程ではない。有料�
 - 再導入で既存データを再利用できる。
 - 直前の署名済み版が存在し、データschemaに互換性がある場合だけ、旧版へ戻す試験を合格条件に加える。
 
-#### Gate D3: Windows第三者試験
+#### Gate D3: Windows第三者試験（履歴・将来任意経路）
 
 - Windowsで学生役1名、教員役1名が配布URLだけで最初の質問まで完了。
 - 対応最小OSと現行OSで、新規、更新、依存なし、障害復旧を確認。
@@ -359,14 +359,14 @@ Stage Xは機能ごとに入口条件が異なる。本設計だけで実装を�
 
 1. R0正本・version・成果物対応
 2. U0文書矛盾解消
-3. Mac公開source整合とWindows D0設計
-4. 配布基盤の最小実装
+3. Mac公開source整合とWindows W0
+4. Windows W1 / W2の開発・限定テスト基盤
 5. Gate 4 Skill Manager
 6. Voice V0/V1
 7. Model E0/E1
 8. Company Memory / P2P / VRMの個別設計
 
-外部証明書、実機、第三者試験を待つ間は、別worktreeで次工程の読み取り・設計・テスト作成まで進められる。ただし前Gate合格を必要とする製品統合は行わない。
+W0の未署名MSI開発・限定テストを進めながら、別worktreeで次工程の読み取り・設計・テスト作成まで進められる。ただし前Gate合格を必要とする製品統合は行わない。D0からD3は有料Web直接配布を選ぶ別承認までmerge queueに入れない。
 
 ## 7. 承認境界
 
