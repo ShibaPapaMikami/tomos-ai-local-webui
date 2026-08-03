@@ -6,6 +6,17 @@
 
 **設計基準:** `origin/main@6df62c09cb64044ed76480e417706ca2167a72ae`
 
+## 2026-08-03 Windows配布方針の更新
+
+- 申請主体は個人とし、DigiCert / KeyLockerを契約しない。
+- WindowsはGate W0からW2で、未署名MSIの開発・限定テストを無料で進める。
+- 未署名MSIを正式版、署名済み、初心者向け正規版、SmartScreen回避済みとして公開しない。
+- Gate D0からD3は有料のWeb直接配布を選ぶ場合だけ再開する任意経路として停止する。
+- Microsoft StoreはGate S0のread-only評価後に、費用、実名表示、個人適格性、
+  package要件を示して別判断する。
+- Gate 4の入口はU0、M0、W0とし、有料コード署名を製品開発の開始条件にしない。
+- 詳細正本は`docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md`とする。
+
 ## 1. 目的
 
 Gate Cを通過したTOMOSを、初心者が安全に導入できるデスクトップアプリへ仕上げながら、次の機能を破綻なく追加する。
@@ -24,7 +35,7 @@ Gate Cを通過したTOMOSを、初心者が安全に導入できるデスクト
 | --- | --- | --- | --- |
 | 正本 | リモート`main`はPR #5、#6統合済み。手元`main`は大きく分岐し既存変更がある | `origin/main`の固定commitから工程ごとの専用worktreeを作る | R0 |
 | Macアプリ | v0.8.233は署名・公証・実機上書きまで合格 | 現在の正本と同じsourceから新しい版を再生成し、第三者の新規導入まで確認 | M0〜M2 |
-| Windowsアプリ | MSIの表示名はTOMOS。旧ランチャー方式と静的テストが中心 | Tauri専用window、Windows用runtime、署名MSI、更新・削除・再導入を実機確認 | D0〜D3 |
+| Windowsアプリ | MSIの表示名はTOMOS。旧ランチャー方式と静的テストが中心 | Tauri専用windowと未署名MSIをW0〜W2で限定テスト。一般公開はStoreまたは有料署名を別選択 | W0〜W2、将来S0またはD0〜D3 |
 | 初心者導入 | Macの旧ZIP案内とPKG方針が混在。安全な診断コピー画面がない | OS別1ページ、初回4段階、復旧手順、安全な診断情報を統一 | U0〜U2 |
 | Skill | 詳細計画はあるが製品実装は未開始 | Markdown正本、固定評価、手動review、承認時だけ昇格 | Gate 4 |
 | 音声出力 | 共通TTS境界とfixtureまで合格 | VibeVoice / Qwen3-TTSを隔離環境で比較。採用は別Gate | V0 / V1 |
@@ -57,7 +68,7 @@ Gate Cを通過したTOMOSを、初心者が安全に導入できるデスクト
 
 ### 3.3 今回変更する工程順
 
-既存マスターはGate 4を先に進める順序になっている。本設計では、初心者へ安全に配布できる版を先に確立するため、Gate C直後にStage R / Uを置き、Gate 4をその後に変更する。
+既存マスターはGate 4を先に進める順序になっている。本設計では、初心者へ安全に配布できる版を先に確立するため、Gate C直後にStage R / Uを置き、Gate 4をその後に変更する。Windowsの現行入口はW0、W1、W2であり、D0からD3は有料のWeb直接配布を別承認した場合だけ再開する履歴・将来任意経路である。
 
 この変更はGate C合格を取り消さず、Skill、Voice、Modelの合格条件も変えない。設計承認後に作る実装計画の最初のTaskでマスター台帳とPhase Orderを本設計に合わせる。文書の整合が完了するまでは製品コードの次工程を開始しない。
 
@@ -100,7 +111,7 @@ Director
 - Mac/Windows/Skillの対象ファイル所有者を確定。
 - baseline testの実行条件を記録。
 - fresh worktreeの`cargo test`に必要な生成済みmacOS runtimeがない場合、コード不良と混同せず、準備工程として扱う。
-- マスター台帳とPhase Orderを本設計に合わせたdoc-only変更が完了。
+- マスター台帳とPhase Orderを本設計に合わせたdoc-only変更が完了。Windowsの現行laneはW0、W1、W2であり、D0からD3は将来任意経路として明示されている。
 
 #### 共通rollback contract
 
@@ -146,7 +157,11 @@ Director
 - 公開済みtagの差し替えと、同じ版番号でのartifact交換を禁止する。
 - 公開後はasset、tag、SHA、署名、公証を再取得してreadbackする。
 
-#### Gate D0: Windows設計
+#### Gate D0: Windows設計（履歴・将来任意経路）
+
+Gate D0からD3は2026-08-03以降、現在の必須工程ではない。有料のWeb直接配布を
+明示再承認した場合だけ、以下の契約を再開する。現在のWindows実装は
+`2026-08-03-tomos-windows-free-distribution.md`のGate W0からW2に従う。
 
 - code-signing証明書、timestamp方式、秘密情報の扱いを固定。
 - Windows Python runtimeの取得元、ライセンス、SHAを固定。
@@ -155,7 +170,7 @@ Director
 - 直前の署名済みWindows版が存在するか確認する。存在しない初回版では「旧版へ戻せる」と表示せず、同版再導入とデータsnapshot復元だけを合格対象にする。
 - 証明書・依存・外部取得は実行前に個別承認を得る。
 
-#### Gate D1: Windows署名CI
+#### Gate D1: Windows署名CI（履歴・将来任意経路）
 
 - x64 Windows用runtimeとallowlist済み資源だけを同梱。
 - ブラウザーではなくTauri専用windowを起動。
@@ -163,7 +178,7 @@ Director
 - CIで版整合、テスト、署名者、timestamp、SHAを検証。
 - 未署名成果物を公開候補へ出さない。
 
-#### Gate D2: Windows実機
+#### Gate D2: Windows実機（履歴・将来任意経路）
 
 - Windows 11実機で新規、更新、削除、再導入を確認。
 - Ollama/Python/WebView2の有無、二重起動、ポート競合を確認。
@@ -172,7 +187,7 @@ Director
 - 再導入で既存データを再利用できる。
 - 直前の署名済み版が存在し、データschemaに互換性がある場合だけ、旧版へ戻す試験を合格条件に加える。
 
-#### Gate D3: Windows第三者試験
+#### Gate D3: Windows第三者試験（履歴・将来任意経路）
 
 - Windowsで学生役1名、教員役1名が配布URLだけで最初の質問まで完了。
 - 対応最小OSと現行OSで、新規、更新、依存なし、障害復旧を確認。
@@ -199,7 +214,8 @@ Stage UはStage Rと並行して設計・文書化できる。製品UIのshared 
 #### Gate U0: 文書の一本化
 
 - `README.ja.md`、学生向けガイド、Release案内から旧Mac ZIP中心の矛盾を除く。
-- MacはPKG、Windowsは署名済みMSIを初心者向け正規導線とする。
+- Macは公証済みPKGを正規導線とする。Windowsは未署名の限定テストと将来の正式公開を
+  分け、選択済み公開経路の合格前は「正式なWindows公開経路は準備中」と表示する。
 - 対応OS、CPU、空き容量、通信量、Ollama、更新、復旧をOS別1ページにまとめる。
 - GitHubのSource codeではなく、正確なPKG/MSIファイル名を案内する。
 
@@ -238,7 +254,8 @@ PCを確認
 - 診断生成時にユーザー名、絶対path、会話本文、環境変数、秘密情報を自動除外する。
 - Mac/Windowsのclean install、更新、削除・再導入、復旧が第三者試験に合格。
 - データの1世代rollbackと、対象版が存在する場合のアプリ版rollbackを別々に実証。
-- 初回Windows署名版はapp版rollbackを対象外と明記し、同版再導入とデータ・設定rollbackを実証。
+- 有料直接配布を再承認した場合の初回Windows署名版はapp版rollbackを対象外と明記し、
+  同版再導入とデータ・設定rollbackを実証。
 
 第三者試験票に必ず記録する:
 
@@ -254,7 +271,7 @@ PCを確認
 入口条件を次のように固定する。
 
 - Gate R0合格後: 既存計画との差分監査とテスト設計だけ開始可能。
-- Gate U0、M0、D0合格後: Skill専用worktreeで製品実装を開始可能。
+- Gate U0、M0、W0合格後: Skill専用worktreeで製品実装を開始可能。
 - 配布基盤のshared file変更がmergeされ、baselineが再合格した後: Skill変更を製品へ統合可能。
 
 Directorは入口条件とmerge queueをTask開始時にreadbackする。
@@ -342,14 +359,14 @@ Stage Xは機能ごとに入口条件が異なる。本設計だけで実装を�
 
 1. R0正本・version・成果物対応
 2. U0文書矛盾解消
-3. Mac公開source整合とWindows D0設計
-4. 配布基盤の最小実装
+3. Mac公開source整合とWindows W0
+4. Windows W1 / W2の開発・限定テスト基盤
 5. Gate 4 Skill Manager
 6. Voice V0/V1
 7. Model E0/E1
 8. Company Memory / P2P / VRMの個別設計
 
-外部証明書、実機、第三者試験を待つ間は、別worktreeで次工程の読み取り・設計・テスト作成まで進められる。ただし前Gate合格を必要とする製品統合は行わない。
+W0の未署名MSI開発・限定テストを進めながら、別worktreeで次工程の読み取り・設計・テスト作成まで進められる。ただし前Gate合格を必要とする製品統合は行わない。D0からD3は有料Web直接配布を選ぶ別承認までmerge queueに入れない。
 
 ## 7. 承認境界
 

@@ -6,8 +6,8 @@
 
 **Entry:** Gate R0合格
 
-**Goal:** Macは公証済みPKG、Windowsは署名済みMSIだけを初心者向け正規導線とする
-内部draftと静的文書契約を作る。
+**Goal:** Macの公証済みPKGと、Windowsの限定テスト・将来の正式公開を混同しない
+OS別内部draftと静的文書契約を作る。
 
 **Architecture:** 共通入口からOS別1ページへ分岐し、未確定artifact値を本文へ埋め込まず、
 U0Fで最終artifact名、URL、SHAを反映できる文書構造にする。
@@ -23,6 +23,7 @@ U0Fで最終artifact名、URL、SHAを反映できる文書構造にする。
 - `docs/superpowers/plans/2026-08-01-tomos-support-diagnostics.md`
 - `docs/superpowers/plans/2026-08-01-tomos-release-traceability.md`
 - `docs/superpowers/specs/2026-08-01-tomos-windows-signed-msi-design.md`
+- `docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md`
 
 矛盾時はマスター計画とGate R0報告を優先し、推測でartifact情報を補わない。
 
@@ -45,7 +46,8 @@ scripts/test-student-install-docs.py
 ### Read-only references
 
 - M0のversion、source、artifact追跡契約
-- D0からD3のWindows署名状態
+- W0からW2のWindows未署名限定テスト状態
+- Gate S0またはD0からD3の選択済みWindows公開状態
 - Gate Cで確認済みのMac v0.8.233事実
 - U1の初回4段階とU2の診断用語
 
@@ -63,13 +65,14 @@ scripts/test-student-install-docs.py
 
 - Gate R0合格報告
 - M0の版・source・artifact追跡契約
-- D0からD3のWindows署名判定
+- W0からW2のWindows未署名限定テスト判定
+- 選択済みWindows公開経路の判定
 - Mac署名・公証の確認済み表現
 
 ### Produces
 
 - Mac / WindowsのOS別1ページ
-- PKG / MSIだけを指す初心者向け内部draft
+- Mac PKG、Windows限定テスト、将来のWindows正式公開を分けた内部draft
 - U1 / U2が再利用する短い日本語用語
 - U0Fが最終artifact名、URL、SHAを反映する挿入位置
 - `scripts/test-student-install-docs.py`による静的契約
@@ -77,14 +80,16 @@ scripts/test-student-install-docs.py
 ## Fixed Decisions
 
 1. Mac正規導線はDeveloper ID署名・Apple公証済みPKGだけ。
-2. Windows正規導線はAuthenticode署名済みMSIだけ。
-3. ZIP、`.command`、`.bat`、GitHubの`Source code`を初心者へ選ばせない。
-4. Ollama本体とモデルは別途必要と明記する。
-5. 同梱Python版ではPythonの手動導入やターミナル操作を要求しない。
-6. WindowsはGate D3合格前に正式版、配布可能、検証済みと表示しない。
-7. U0合格は内部draftと静的文書契約まで。
-8. 実在しない版、artifact名、URL、SHAを確定値として書かない。
-9. D3後の最終値反映と公開文面確定はU0Fへ分離する。
+2. Windowsの現在経路は未署名MSIによる開発・限定テストだけとし、初心者向け正規導線と表示しない。
+3. Windows正式公開はGate S0後のMicrosoft Storeまたは明示再承認したD0からD3の
+   有料直接配布のどちらか一つが合格するまで準備中と表示する。
+4. ZIP、`.command`、`.bat`、GitHubの`Source code`を初心者へ選ばせない。
+5. Ollama本体とモデルは別途必要と明記する。
+6. 同梱Python版ではPythonの手動導入やターミナル操作を要求しない。
+7. 未署名MSIでは警告、発行元なし、SHA確認、限定テストであることを同じ画面に表示する。
+8. U0合格は内部draftと静的文書契約まで。
+9. 実在しない版、artifact名、URL、SHAを確定値として書かない。
+10. 選択済みWindows公開経路の合格後に、最終値反映と公開文面確定をU0Fで行う。
 
 ## Approval Stops
 
@@ -146,7 +151,8 @@ Expected: 旧導線または未作成OS別ページによりFAIL。
 
 - [ ] 共通入口をMac / Windowsの2択にする。
 - [ ] Macは署名・公証済みPKGの取得、導入、初回起動、更新、復旧を記述する。
-- [ ] Windowsは署名済みMSIの準備中draftとし、D3前は正式配布と表示しない。
+- [ ] Windowsは未署名MSIの限定テストdraftとし、選択済み公開経路の合格前は
+  「正式なWindows公開経路は準備中」と表示する。
 - [ ] GitHubの自動生成`Source code`を選ばない注意を記述する。
 - [ ] Ollama、必要容量、通信量、標準AI取得を事前条件として明示する。
 - [ ] 旧ZIP / scriptは開発・復旧用の既存経路として残し、初心者の正規手順から外す。
