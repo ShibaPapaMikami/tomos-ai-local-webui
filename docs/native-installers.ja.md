@@ -1,11 +1,12 @@
 # ネイティブインストーラー配布メモ
 
-Gemma4_12Bは、macOS用`.pkg`とWindows用`.msi`をGitHub Releaseで配布します。ZIPは内部確認用にだけ作成し、初心者向けのReleaseには掲載しません。
+Gemma4_12Bは、macOS用の署名・公証済み`.pkg`をGitHub Releaseで正式公開します。Windows用`.msi`は現在未署名のため、GitHub Releaseでの正式公開はしません。Windows MSIはDirectorが指定した開発者・限定テスターへの確認用artifactだけです。ZIPは内部確認用にだけ作成し、初心者向けのReleaseには掲載しません。
 
 ## 方針
 
 - ZIPは動作確認や緊急調査のためローカルにだけ残します。
 - `.pkg` と `.msi` は、ZIP と同じ軽量なアプリ本体から作ります。
+- Windows MSIは署名済みになるまで、一般利用者向けの推奨・正式公開物にしません。
 - Ollama モデル、GGUF、ComfyUI、Hugging Face キャッシュは同梱しません。
 - モデルはアプリ内の「言語モデル」から取得します。
 - 古いバージョンは GitHub Releases の古いタグに残します。
@@ -61,11 +62,13 @@ dotnet tool install --global wix --version 4.0.6
 python scripts/make-windows-msi.py
 ```
 
-作成されるファイル:
+ローカル確認用の中間MSIは配布・実行しません。GitHub Actionsで限定テストに渡すファイルは、次の名前です。
 
 ```text
-dist/TOMOS_AI-vX.X.X-windows.msi
+dist/TOMOS_AI-vX.X.X-windows-UNSIGNED-TEST-ONLY.msi
 ```
+
+限定テストでは、artifact名に `UNSIGNED` と `TEST-ONLY` が含まれ、MSIに隣接するnoticeに `UNSIGNED` と `TEST ONLY` が明記されていることを確認します。いずれかがない場合、そのMSIは配布・実行しません。
 
 MSI でインストールすると、以下の起動ショートカットを作ります。
 
@@ -77,24 +80,35 @@ MSI でインストールすると、以下の起動ショートカットを作�
 通常は `TOMOS AI Web UI` から起動します。ComfyUI など周辺機能もまとめて起動したい場合だけ `全部起動` を使います。
 ショートカットは `Gemma4_12B_Launcher.exe` を起動します。このランチャーが内部で既存の `.bat` を呼び出すため、学生が Program Files 内の `.bat` を探す必要はありません。
 
-ZIP版は開発者の内部確認用で、GitHub Releaseには掲載しません。
+ZIP版は開発者の内部確認用で、GitHub Releaseには掲載しません。未署名のWindows MSIも正式Releaseには掲載せず、限定テストではDirectorがartifact名、MSI隣接notice、SHA-256を個別に案内します。
 
 ## GitHub Actionsで作る
 
 `.github/workflows/build-installers.yml` を手動実行すると、Windows用MSIのartifactを作れます。公開用Mac PKGは、署名証明書を登録したMacで作成・公証します。
-手動実行時は `version` に `0.8.190` のようなアプリ版を入れてください。Actions の実行名、artifact 名、ジョブ概要に同じバージョンが表示されます。
+手動実行時は `version` に `0.8.190` のようなアプリ版を入れ、`channel` に `development_unsigned` または `private_test_unsigned` を指定します。Actionsの実行名は `Build unsigned Windows test installer (<channel>)` で、バージョンは含みません。
 
-- `tomos-ai-windows-msi-X.X.X`
+Actionsで表示されるartifact archive名:
 
-Release に添付する基本セット:
+- `TOMOS-AI-UNSIGNED-TEST-ONLY-<channel>-<version>`
+
+archive内のMSI名:
+
+- `TOMOS_AI-vX.X.X-windows-UNSIGNED-TEST-ONLY.msi`
+
+MSI隣接notice名:
+
+- `TOMOS_AI-vX.X.X-windows-UNSIGNED-TEST-ONLY.NOTICE.txt`
+
+正式Release に添付する基本セット:
 
 - `TOMOS_AI-vX.X.X-mac.pkg`
-- `TOMOS_AI-vX.X.X-windows.msi`
+
+Windows MSIはコード署名と正式公開承認が完了するまで、このセットに含めません。
 
 ## 注意
 
 - macOS PKGはDeveloper ID Installer署名とApple公証を通したものだけを公開します。
-- Windows MSIの署名は別途整備が必要です。Windowsで警告が出る可能性があります。
+- Windows MSIは未署名です。Windowsの警告を伴う可能性があるため、Directorがartifact名とSHA-256を案内した限定テスト以外では配布・実行しません。
 - モデルを同梱しないため、初回起動後に必要なモデルをアプリ内で取得します。
 
 ## 内部名の互換性
