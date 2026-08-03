@@ -11,6 +11,11 @@ LICENSE、WebView2 installer、およびWebView2 EULA応答を一時領域だけ
 リポジトリには保存していない。ZIPとEXEは展開、実行、またはインストールしていない。
 将来のlock/buildでは、その時点で取得したバイトをlockのsize/SHA-256と再照合しなければならない。
 
+V320では、V314で確認済みのWebView2外装installerを実行せず、LZMA resourceを一時領域で
+静的展開し、BCJ2復号後のtarを構造解析した。解析物は一時領域に残っているが、リポジトリには
+保存していない。以下の内包Runtime版確認は静的な版同一性の証拠であり、Windows実機install、
+Windows trust policy、失効確認、timestamp trustを確認したものではない。
+
 状態値: `confirmed` = 承認済みの読取結果が利用可能、`unresolved` = 発行または読取の
 事実が未取得、`blocked` = unresolvedの事実がconfirmedになるまで進めてはならない作業。
 
@@ -37,7 +42,7 @@ LICENSE、WebView2 installer、およびWebView2 EULA応答を一時領域だけ
 | --- | --- | --- | --- |
 | 製品ページ | https://developer.microsoft.com/en-us/microsoft-edge/webview2 | confirmed | 承認済みの公式製品ページ。 |
 | 配布URL | https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d06c217f-cef1-471d-a639-fad978ef4a40/MicrosoftEdgeWebView2RuntimeInstallerX64.exe | confirmed | V314でHTTPS再取得した正確な公式配布URL。 |
-| Runtimeバージョン | unresolved | unresolved | 内包Runtime payloadは展開せず、V314では確認していない。 |
+| Runtimeバージョン | `150.0.4078.99` | confirmed | V320でLZMA resourceを一時領域に静的展開し、BCJ2復号後のtarを構造解析して確認。`OfflineManifest.gup`のWebView2 entry、内部payload PEの実測値、固定・文字列VERSIONINFOが一致。 |
 | 外装installer VERSIONINFO | `1.3.251.5` | confirmed | V314で最上位EXEのRT_VERSIONから静的に読取。内包Runtimeのバージョンではなく、lock versionには使用しない。 |
 | 成果物 | `MicrosoftEdgeWebView2RuntimeInstallerX64.exe` | confirmed | V314でHTTPS再取得した。 |
 | アーキテクチャ | `x64` | confirmed | 成果物名および承認済みのx64配布URL。 |
@@ -51,6 +56,22 @@ LICENSE、WebView2 installer、およびWebView2 EULA応答を一時領域だけ
 | 正規化済み `evergreenHtml` UTF-8サイズ | `21639` bytes | confirmed | V314で追加改行なしに抽出したUTF-8バイト数。 |
 | lock用 `license_sha256` | `ce6fa83e57c338256e5cabe9e1eea83076c271b0fdb253408213eeb08859d7b6` | confirmed | 追加改行なしUTF-8の正規化済み`evergreenHtml`をlock採用値として固定。V314で再計算し、期待値と一致。 |
 | リポジトリに保存したruntimeバイト | 未保存 | confirmed | V314の再取得物は一時領域だけにあり、リポジトリには保存していない。 |
+
+### V320 内包payloadの静的照合
+
+| 項目 | 値 | 状態 | 証跡メモ |
+| --- | --- | --- | --- |
+| 解析境界 | LZMA resourceを一時領域で静的展開し、BCJ2復号後のtarを構造解析 | confirmed | 入力EXE、展開物、内部PEは実行・installしていない。 |
+| WebView2 app ID | `{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}` | confirmed | `OfflineManifest.gup`をXML構造として解析したWebView2 entry。 |
+| manifest version | `150.0.4078.99` | confirmed | WebView2 entryのmanifest version。 |
+| manifest package name | `MicrosoftEdgeWebview_X64_150.0.4078.99.exe` | confirmed | WebView2 entryのpackage name。 |
+| manifest package size | `197845840` bytes | confirmed | WebView2 entryのpackage size。 |
+| manifest package SHA-256 | `2d8f81e59e311a6dd77e0f79ae391120504475fa956038f1e1e35c3ada61848d` | confirmed | WebView2 entryのpackage SHA-256。 |
+| 内部payload PE size/SHA-256 | `197845840` bytes / `2d8f81e59e311a6dd77e0f79ae391120504475fa956038f1e1e35c3ada61848d` | confirmed | 静的抽出した内部payload PEの実測値がmanifestと一致。 |
+| 内部payload PE VERSIONINFO | 固定・文字列ともに`150.0.4078.99` | confirmed | `VS_FIXEDFILEINFO`および`StringFileInfo`のFileVersion/ProductVersionがすべて一致。 |
+| 内部payload PE Authenticode digest | 記録内digestと静的再計算値が一致 | confirmed | 版同一性を補強する静的証拠。Windows trust policy、失効、timestampの検証済みを意味しない。 |
+| Windows実機install、Windows trust policy、失効、timestamp trust | 未確認 | unresolved | 本証跡の静的解析対象外。 |
+| 一時解析物 | 未削除、リポジトリ未保存 | confirmed | 一時領域の解析物は削除しておらず、リポジトリにも保存していない。 |
 
 ## Timestamp
 
@@ -78,7 +99,7 @@ LICENSE、WebView2 installer、およびWebView2 EULA応答を一時領域だけ
 | 項目 | 状態 | 証跡メモ |
 | --- | --- | --- |
 | runtime-byte再検証 | confirmed | V314でPython embedded ZIPおよびWebView2 installerの再取得、サイズ・SHA-256再計算を完了。 |
-| WebView2内包Runtime version確認 | blocked | 内包Runtime payloadは展開せず未確認。外装installer VERSIONINFO `1.3.251.5`をlock versionに使用してはならない。 |
-| Windows supply lock生成の完了 | blocked | 証明書の発行/読取とWebView2内包Runtime版の両方がconfirmedになるまで生成しない。 |
-| Task 2 | blocked | 証明書の発行/読取とWebView2内包Runtime版の両方がconfirmedとなり、supply lockを完成できるまで開始しない。 |
+| WebView2内包Runtime version確認 | confirmed | V320静的構造解析で内包Runtime版`150.0.4078.99`を確認。外装installer VERSIONINFO `1.3.251.5`をlock versionに使用してはならない。 |
+| Windows supply lock生成の完了 | blocked | 証明書の発行/読取が完了し、lockを作成できるまで生成しない。 |
+| Task 2 | blocked | 証明書の発行/読取が完了し、supply lockを完成できるまで開始しない。 |
 | 署名または公開 | blocked | この読取証跡は署名または公開を許可しない。 |
