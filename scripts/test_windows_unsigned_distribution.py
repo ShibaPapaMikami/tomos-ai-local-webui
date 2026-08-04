@@ -9,6 +9,10 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/build-installers.yml"
 PLAN = ROOT / "docs/superpowers/plans/2026-08-03-tomos-windows-free-distribution.md"
 SOURCE_VERSION = "${{ steps.validate-inputs.outputs.source_version }}"
+APPROVED_COMMIT = "50e4068e0cffc8c1254ac3e01dbc691d860fb5f9"
+APPROVED_TREE = "bb6d741e5de5526d5b1730bd28c96156b4b0448e"
+IMMUTABLE_TAG = "w1-private-test-0.8.233-50e4068"
+IMMUTABLE_RULESET = "tomos-w1-private-test-immutable-tags"
 
 # Hand-derived contract. Do not generate this fixture from the workflow under test.
 EXPECTED_WORKFLOW = """\
@@ -399,13 +403,313 @@ def test_plan_contract() -> None:
         "記録しない",
     )
     assert all(item in plan for item in required_evidence)
-    branch = "codex/windows-unsigned-w1"
-    assert f"--ref {branch}" in plan
-    assert f"--branch {branch}" in plan
+
+
+def task4_section(plan: str) -> str:
+    start = plan.index("### Task 4:")
+    end = plan.index("### Task 5:", start)
+    return plan[start:end]
+
+
+def test_plan_rejects_movable_branch_ref_before_dispatch() -> None:
+    """Catch a dispatch edit that runs a branch moved after approval."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+    dispatch = task4[task4.index("**Step 5:") : task4.index("**Step 6:")]
+    assert f"実行ref `{IMMUTABLE_TAG}`" in task4
+    assert "refs/tags/$TOMOS_EXECUTION_TAG" in task4
+    assert "$TOMOS_EXECUTION_TAG^{commit}" in task4
+    assert APPROVED_COMMIT in task4
+    assert APPROVED_TREE in task4
+    assert IMMUTABLE_RULESET in task4
+    assert "restrict updates" in task4
+    assert "restrict deletions" in task4
+    assert "bypass actorなし" in task4
+    assert "Actions承認とは別の明示承認" in task4
+    assert f'"ref":"{IMMUTABLE_TAG}"' in dispatch
+    assert "codex/windows-unsigned-w1-task3" not in dispatch
+
+
+def test_plan_stops_before_dispatch_or_artifact_follow_up_on_gate_failure() -> None:
+    """Catch a shell edit that continues from a failed source or metadata gate."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+    step3_start = task4.index("**Step 3:")
+    step4_start = task4.index("**Step 4:", step3_start)
+    step5_start = task4.index("**Step 5:", step4_start)
+    step6_start = task4.index("**Step 6:", step5_start)
+    step3 = task4[step3_start:step4_start]
+    step5 = task4[step5_start:step6_start]
+    step6 = task4[step6_start:task4.index("**Step 7:", step6_start)]
+    assert "bash -euo pipefail" in step3
+    assert "bash -euo pipefail" in step5
+    assert "bash -euo pipefail" in step6
+    assert "--method POST" in step5
+    assert "jq -e" in step6
+    assert "jq -er" in step6
+
+
+def test_plan_accepts_only_the_exact_successful_rest_dispatched_run() -> None:
+    """Catch a run-selection edit that accepts a failed or different workflow run."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+    assert "actions/workflows/300666658/dispatches" in task4
+    assert "X-GitHub-Api-Version: 2026-03-10" in task4
+    assert "gh workflow run" not in task4
+    assert (
+        "--json databaseId,url,status,conclusion,headBranch,headSha,event,workflowName,createdAt"
+        in task4
+    )
+    for assertion in (
+        "databaseId == $run_id",
+        'status == "completed"',
+        'conclusion == "success"',
+        f'headBranch == "{IMMUTABLE_TAG}"',
+        f'headSha == "{APPROVED_COMMIT}"',
+        'event == "workflow_dispatch"',
+        'workflowName == "Build Windows installer"',
+        "https://github.com/ShibaPapaMikami/tomos-ai-local-webui/actions/runs/",
+    ):
+        assert assertion in task4
+
+
+def validate_task4_safety_contract(task4: str) -> None:
+    """Validate the operator-visible gates that prevent an unsafe W1 run."""
+    step3_start = task4.index("**Step 3:")
+    step4_start = task4.index("**Step 4:", step3_start)
+    step5_start = task4.index("**Step 5:", step4_start)
+    step6_start = task4.index("**Step 6:", step5_start)
+    step7_start = task4.index("**Step 7:", step6_start)
+    step8_start = task4.index("**Step 8:", step7_start)
+    step3 = task4[step3_start:step4_start]
+    step5 = task4[step5_start:step6_start]
+    step6 = task4[step6_start:step7_start]
+    step7 = task4[step7_start:step8_start]
+    step8 = task4[step8_start:]
+
+    for token in (
+        f"workflow source tree `{APPROVED_TREE}`",
+        "Actions承認とは別の明示承認",
+        "pre-notice commit `b3625373e6f0e71d9e1d0c1f175f4c10636d793f`は使用しない",
+        "GitHub Releaseへ添付せず、公開URLを作らない",
+    ):
+        assert token in task4
+    assert "archive_download_url" in task4
+    assert "保存、表示、公開しない" in task4
+    assert "bash -euo pipefail" in step3
+    for token in (
+        "bash -euo pipefail",
+        'git fetch origin "refs/tags/$TOMOS_EXECUTION_TAG:refs/tags/$TOMOS_EXECUTION_TAG"',
+        'test "$(git cat-file -t "refs/tags/$TOMOS_EXECUTION_TAG")" = "commit"',
+        'test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{commit}")" = "$TOMOS_APPROVED_COMMIT"',
+        'test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{tree}")" = "$TOMOS_APPROVED_TREE"',
+        "actions/workflows/300666658/dispatches",
+        "X-GitHub-Api-Version: 2026-03-10",
+        f'"ref":"{IMMUTABLE_TAG}"',
+        f'"version":"0.8.233"',
+        '"channel":"private_test_unsigned"',
+    ):
+        assert token in step5
+    for token in (
+        "bash -euo pipefail",
+        "databaseId == $run_id",
+        'status == "completed"',
+        'conclusion == "success"',
+        f'headBranch == "{IMMUTABLE_TAG}"',
+        f'headSha == "{APPROVED_COMMIT}"',
+        'event == "workflow_dispatch"',
+        'workflowName == "Build Windows installer"',
+        "total_count == 1",
+        "(.artifacts | length) == 1",
+        'name == "TOMOS-AI-UNSIGNED-TEST-ONLY-private_test_unsigned-0.8.233"',
+        "expired == false",
+        "size_in_bytes <= 10485760",
+        "jq -er '.artifacts[0].id",
+    ):
+        assert token in step6
+    assert "artifact downloadの別承認" in step7
+    for token in (
+        "MSI `TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi`",
+        "notice `TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.NOTICE.txt`",
+        "だけであることを確認する",
+    ):
+        assert token in step8
+
+
+def test_task4_safety_contract_rejects_realistic_regressions() -> None:
+    """Catch removal of immutable-ref, fail-fast, metadata, or download gates."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+    validate_task4_safety_contract(task4)
+    mutations = (
+        ("movable dispatch ref", f'"ref":"{IMMUTABLE_TAG}"', '"ref":"main"'),
+        ("non-fail-fast shell", "bash -euo pipefail", "bash"),
+        ("larger artifact cap", "size_in_bytes <= 10485760", "size_in_bytes <= 10485761"),
+        ("missing success conclusion", 'conclusion == "success"', 'conclusion == "failure"'),
+        ("download approval removed", "artifact downloadの別承認", "artifact download"),
+    )
+    for name, old, new in mutations:
+        assert old in task4, f"mutation anchor missing: {old!r}"
+        mutated = task4.replace(old, new, 1)
+        try:
+            validate_task4_safety_contract(mutated)
+        except AssertionError:
+            continue
+        raise AssertionError(f"unsafe Task 4 mutation was accepted: {name}")
+
+
+def test_plan_uses_the_verified_200_dispatch_response_as_the_run_id_source() -> None:
+    """Catch fallback to a guessed run list or a non-authoritative 204 response."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+    assert "HTTP 200" in task4
+    assert "workflow_run_id" in task4
+    assert "run_url" in task4
+    assert "html_url" in task4
+    assert "TOMOS_DISPATCH_RESPONSE" in task4
+    assert "TOMOS_RUN_ID" in task4
+    assert "https://api.github.com/repos/ShibaPapaMikami/tomos-ai-local-webui/actions/runs/" in task4
+    assert "TOMOS_PRE_DISPATCH_RUN_IDS" not in task4
+    assert "TOMOS_DISPATCH_UTC" not in task4
+    assert "gh run list" not in task4
+    assert "--include" not in task4
+    assert "204" not in task4
+    assert "type == \"array\" and length == 0" in task4
+
+    source_readback = task4.index("**Step 1: source branchと現況をread-only確認する**")
+    create_gate = task4.index("**Step 2: immutable tagとruleset作成の別承認で停止する**")
+    immutable_readback = task4.index("**Step 3: 作成後のimmutable tagとrulesetをreadbackする**")
+    actions_gate = task4.index("**Step 4: Actions実行の個別承認で停止する**")
+    dispatch = task4.index("**Step 5: 承認後だけREST dispatchを実行する**")
+    metadata = task4.index("**Step 6: runとartifactをread-only確認する**")
+    assert source_readback < create_gate < immutable_readback < actions_gate < dispatch < metadata
+
+
+def test_dispatch_response_contract_rejects_legacy_and_null_bypass_regressions() -> None:
+    """Catch reintroduction of 204, guessed runs, invalid ordering, or null bypass."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+
+    def validate(text: str) -> None:
+        assert "HTTP 200" in text
+        assert "204" not in text
+        assert "gh run list" not in text
+        assert "TOMOS_PRE_DISPATCH_RUN_IDS" not in text
+        assert "TOMOS_DISPATCH_UTC" not in text
+        assert text.count('type == "array" and length == 0') == 2
+        assert text.index("**Step 1: source branchと現況をread-only確認する**") < text.index(
+            "**Step 2: immutable tagとruleset作成の別承認で停止する**"
+        ) < text.index("**Step 3: 作成後のimmutable tagとrulesetをreadbackする**") < text.index(
+            "**Step 4: Actions実行の個別承認で停止する**"
+        ) < text.index("**Step 5: 承認後だけREST dispatchを実行する**")
+
+    validate(task4)
+    step2 = "**Step 2: immutable tagとruleset作成の別承認で停止する**"
+    step3 = "**Step 3: 作成後のimmutable tagとrulesetをreadbackする**"
+    swapped_order = task4.replace(step2, "__STEP_TWO__", 1).replace(step3, step2, 1).replace(
+        "__STEP_TWO__", step3, 1
+    )
+    mutations = (
+        ("legacy 204", "HTTP 200", "HTTP 204"),
+        ("run-list guessing", "TOMOS_RUN_ID", "gh run list; TOMOS_RUN_ID"),
+        ("null bypass accepted", 'type == "array" and length == 0', "length == 0"),
+        ("tag creation after readback", task4, swapped_order),
+    )
+    for name, old, new in mutations:
+        if name == "tag creation after readback":
+            mutated = new
+        else:
+            assert old in task4, f"mutation anchor missing: {old!r}"
+            mutated = task4.replace(old, new, 1)
+        try:
+            validate(mutated)
+        except (AssertionError, ValueError):
+            continue
+        raise AssertionError(f"unsafe dispatch response mutation was accepted: {name}")
+
+
+def test_dispatch_rechecks_the_immutable_ruleset_immediately_before_post() -> None:
+    """Catch a ruleset change during the Actions-approval wait before dispatch."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+    step5 = task4[task4.index("**Step 5:") : task4.index("**Step 6:")]
+
+    def validate(text: str) -> None:
+        for token in (
+            "TOMOS_RULESET_NAME",
+            "expected exactly one active tag ruleset",
+            '.name == "tomos-w1-private-test-immutable-tags"',
+            '.target == "tag"',
+            '.enforcement == "active"',
+            '.conditions.ref_name.include == [$tag]',
+            'index("update")',
+            'index("deletion")',
+            'type == "array" and length == 0',
+            "--method POST",
+        ):
+            assert token in text
+        assert text.count('.enforcement == "active"') == 2
+        assert text.index('type == "array" and length == 0') < text.index("--method POST")
+
+    validate(step5)
+    mutations = (
+        (
+            "ruleset identity changed",
+            '.name == "tomos-w1-private-test-immutable-tags"',
+            '.name == "another-ruleset"',
+        ),
+        ("ruleset disabled", '.enforcement == "active"', '.enforcement == "disabled"'),
+        ("null bypass accepted", 'type == "array" and length == 0', "length == 0"),
+        ("post before ruleset", "--method POST", "__POST__"),
+    )
+    for name, old, new in mutations:
+        assert old in step5, f"mutation anchor missing: {old!r}"
+        mutated = step5.replace(old, new, 1)
+        if name == "post before ruleset":
+            mutated = mutated.replace('type == "array" and length == 0', "--method POST", 1)
+        try:
+            validate(mutated)
+        except AssertionError:
+            continue
+        raise AssertionError(f"unsafe pre-dispatch ruleset mutation was accepted: {name}")
+
+
+def test_task4_contract_rejects_missing_step5_tag_identity_checks() -> None:
+    """Catch a dispatch edit that drops tag identity checks after approval waits."""
+    task4 = task4_section(PLAN.read_text(encoding="utf-8"))
+    mutations = (
+        (
+            "tag fetch",
+            'git fetch origin "refs/tags/$TOMOS_EXECUTION_TAG:refs/tags/$TOMOS_EXECUTION_TAG"',
+        ),
+        (
+            "tag object type",
+            'test "$(git cat-file -t "refs/tags/$TOMOS_EXECUTION_TAG")" = "commit"',
+        ),
+        (
+            "approved commit",
+            'test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{commit}")" = "$TOMOS_APPROVED_COMMIT"',
+        ),
+        (
+            "approved tree",
+            'test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{tree}")" = "$TOMOS_APPROVED_TREE"',
+        ),
+    )
+    for name, token in mutations:
+        assert task4.count(token) == 2, f"unexpected mutation anchor count: {name}"
+        first = task4.index(token)
+        second = task4.index(token, first + len(token))
+        mutated = task4[:second] + task4[second + len(token) :]
+        try:
+            validate_task4_safety_contract(mutated)
+        except AssertionError:
+            continue
+        raise AssertionError(f"unsafe Step 5 tag identity mutation was accepted: {name}")
 
 
 if __name__ == "__main__":
     test_current_workflow_passes_contract()
     test_all_unsafe_mutations_are_rejected()
     test_plan_contract()
+    test_plan_rejects_movable_branch_ref_before_dispatch()
+    test_plan_stops_before_dispatch_or_artifact_follow_up_on_gate_failure()
+    test_plan_accepts_only_the_exact_successful_rest_dispatched_run()
+    test_task4_safety_contract_rejects_realistic_regressions()
+    test_plan_uses_the_verified_200_dispatch_response_as_the_run_id_source()
+    test_dispatch_response_contract_rejects_legacy_and_null_bypass_regressions()
+    test_dispatch_rechecks_the_immutable_ruleset_immediately_before_post()
+    test_task4_contract_rejects_missing_step5_tag_identity_checks()
     print("Windows unsigned distribution contract tests passed")

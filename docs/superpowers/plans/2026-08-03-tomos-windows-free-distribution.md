@@ -22,7 +22,7 @@
 - Microsoft Storeは将来候補としてread-only調査だけを行い、アカウント作成、本人確認、登録料支払い、package提出を行わない。
 - 有料の直接配布署名は、個人での一般公開、企業導入、またはStore不採用が確定した場合だけ別計画として再開する。
 - `scripts/windows_supply_lock.py`、`scripts/test_windows_supply_lock.py`、`docs/windows-release/**`の既存成果は削除、弱体化、署名済み判定への流用をしない。
-- W1 private-testの実行後は`docs/windows-release/windows-unsigned-build-evidence.md`へsource version、source commit、tree、run ID、artifact name、size、SHA-256を記録する。M0 v1 0.8.234 manifestへW1 private-testの値を記録しない。
+- W1 private-testの実行後は`docs/windows-release/windows-unsigned-build-evidence.md`へworkflow ref、approved source commit / tree、source version、channel、runner、run ID / URL、artifact ID / name / retention、MSI名 / size / SHA-256、notice名 / size / SHA-256、notice固定文言確認を記録する。M0 v1 0.8.234 manifestへW1 private-testの値を記録しない。
 - Memory、Knowledge、教材、設定、chat、modelをuninstallで削除しない。
 - secret、token、個人名、user名、full path、会話、Memory、Knowledgeをlogまたはartifactへ出さない。
 - dependency追加、workflow変更、Actions実行、artifact download、実機install、外部公開、commit、pushは個別承認を得る。
@@ -57,7 +57,7 @@ TOMOSのWindows版は開発・限定テスト状態を維持する。
 | Unsigned CI | `.github/workflows/build-installers.yml`、`scripts/test_windows_unsigned_distribution.py` | 手動build、誤公開防止、artifact表示 |
 | MSI build | `scripts/make-windows-msi.py`、`scripts/test_windows_msi_launcher.py` | WiX生成、version、identity、launcher |
 | 利用者文書 | `docs/native-installers.ja.md`、`docs/install-students.ja.md`、`docs/install-windows-students.ja.md`、`docs/release-checklist.ja.md` | 限定テストと正式公開を混同しない案内 |
-| W1 build証跡 | `docs/windows-release/windows-unsigned-build-evidence.md` | source version、source commit、tree、run ID、artifact name、size、SHA-256 |
+| W1 build証跡 | `docs/windows-release/windows-unsigned-build-evidence.md` | workflow ref、approved source commit / tree、source version、channel、runner、run ID / URL、artifact ID / name / retention、MSI / noticeのname・size・SHA-256、notice固定文言確認 |
 | 実機証跡 | `docs/windows-release/windows-unsigned-test-evidence.md` | MSI SHA、Windows版、警告、導入・更新・削除・再導入、データ保持 |
 | 将来調査 | `docs/windows-release/microsoft-store-readonly-assessment.md` | 個人適格性、費用、MSI / MSIX要件、署名、審査、公開境界 |
 
@@ -171,7 +171,8 @@ def test_unsigned_workflow_is_manual_and_non_public() -> None:
     upload = uploads[0]
     assert "actions/upload-artifact@" in upload
     assert artifact_upload_paths(upload) == [
-        "dist/TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi"
+        "dist/TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi",
+        "dist/TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.NOTICE.txt",
     ]
     assert "TOMOS_AI-v0.8.233-windows.msi" not in upload
     assert "gh release" not in text
@@ -352,74 +353,160 @@ Expected: 限定テスト、警告、正式公開停止が確認でき、whitesp
 - Create after approved run: `docs/windows-release/windows-unsigned-build-evidence.md`
 
 **Interfaces:**
-- Consumes: W0合格、`codex/windows-unsigned-w1`のTask 2 workflow commit、固定version / source commit / tree
-- Produces: `docs/windows-release/windows-unsigned-build-evidence.md`へ記録するsource version、source commit、tree、run ID、artifact name、size、SHA-256
+- Consumes: W0合格、source branch `codex/windows-unsigned-w1-task3`、実行ref `w1-private-test-0.8.233-50e4068`、approved source commit `50e4068e0cffc8c1254ac3e01dbc691d860fb5f9`、approved source tree `bb6d741e5de5526d5b1730bd28c96156b4b0448e`、固定version `0.8.233`
+- Produces: `docs/windows-release/windows-unsigned-build-evidence.md`へ記録するworkflow ref、approved source commit / tree、workflow source tree `bb6d741e5de5526d5b1730bd28c96156b4b0448e`、source version、channel、runner、run ID / URL、artifact ID / name / retention、MSI / noticeのname・size・SHA-256、notice固定文言確認
 
 W1 private-testの証跡はこの専用evidenceへだけ記録する。M0 v1 0.8.234 manifestへW1 private-testのversion、commit、tree、run ID、artifact name、size、SHA-256を記録しない。`scripts/release_manifest.py`は変更しない。
 
-- [ ] **Step 1: Actions実行前readbackを行う**
+- [ ] **Step 1: source branchと現況をread-only確認する**
 
 Run:
 
 ```bash
 git status --short --branch
-git rev-parse HEAD
-git rev-parse 'HEAD^{tree}'
-git fetch origin codex/windows-unsigned-w1
-git rev-parse origin/codex/windows-unsigned-w1
+git fetch origin refs/heads/codex/windows-unsigned-w1-task3:refs/remotes/origin/codex/windows-unsigned-w1-task3
+git rev-parse origin/codex/windows-unsigned-w1-task3
+git rev-parse 'origin/codex/windows-unsigned-w1-task3^{tree}'
+git ls-remote --tags origin refs/tags/w1-private-test-0.8.233-50e4068
+gh api repos/ShibaPapaMikami/tomos-ai-local-webui/rulesets --paginate --jq 'length'
 python3 scripts/test-desktop-release-version.py
 ```
 
-Expected: clean、version整合、実行対象commitとtreeを表示し、`origin/codex/windows-unsigned-w1`が承認済みHEADと一致する。一致しない場合はActionsを実行しない。
+Expected: source branchのcommitが`50e4068e0cffc8c1254ac3e01dbc691d860fb5f9`、treeが`bb6d741e5de5526d5b1730bd28c96156b4b0448e`と一致する。現repo rulesetは`0`、予定tagは存在しない。いずれかが不一致なら停止し、pre-notice commit `b3625373e6f0e71d9e1d0c1f175f4c10636d793f`は使用しない。
 
-- [ ] **Step 2: Actions実行の個別承認で停止する**
+- [ ] **Step 2: immutable tagとruleset作成の別承認で停止する**
 
-Directorはworkflow、version、channel、Windows runner、想定artifact名、保持期間、
-課金有無を示す。承認前に`gh workflow run`を実行しない。
+軽量tag `w1-private-test-0.8.233-50e4068`をapproved commitへ作成し、active tag ruleset `tomos-w1-private-test-immutable-tags`を当該exact refだけにtargetする作業は、Actions承認とは別の明示承認を要する。rulesetは`restrict updates`と`restrict deletions`を持ち、bypass actorなしでなければならない。このTask 4ではtag/rulesetを作成しない。
 
-- [ ] **Step 3: 承認後だけworkflowを手動実行する**
-
-Run:
-
-```bash
-gh workflow run build-installers.yml \
-  --ref codex/windows-unsigned-w1 \
-  -f version=0.8.233 \
-  -f channel=private_test_unsigned
-```
-
-上記branchとversionがStep 1のreadbackと一致しない場合はworkflowを実行せず、
-本計画を最新の確定値へ更新してから再承認を得る。
-
-- [ ] **Step 4: runとartifactをread-only確認する**
+- [ ] **Step 3: 作成後のimmutable tagとrulesetをreadbackする**
 
 Run:
 
 ```bash
-TOMOS_RUN_ID="$(gh run list \
-  --workflow build-installers.yml \
-  --branch codex/windows-unsigned-w1 \
-  --event workflow_dispatch \
-  --limit 1 \
-  --json databaseId \
-  --jq '.[0].databaseId')"
-gh run view "$TOMOS_RUN_ID" --json status,conclusion,headSha,event,workflowName
-gh run view "$TOMOS_RUN_ID" --json artifacts
+bash -euo pipefail <<'TOMOS_STEP_3'
+readonly TOMOS_REPOSITORY="ShibaPapaMikami/tomos-ai-local-webui"
+readonly TOMOS_EXECUTION_TAG="w1-private-test-0.8.233-50e4068"
+readonly TOMOS_APPROVED_COMMIT="50e4068e0cffc8c1254ac3e01dbc691d860fb5f9"
+readonly TOMOS_APPROVED_TREE="bb6d741e5de5526d5b1730bd28c96156b4b0448e"
+readonly TOMOS_RULESET_NAME="tomos-w1-private-test-immutable-tags"
+git fetch origin "refs/tags/$TOMOS_EXECUTION_TAG:refs/tags/$TOMOS_EXECUTION_TAG"
+test "$(git cat-file -t "refs/tags/$TOMOS_EXECUTION_TAG")" = "commit"
+test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{commit}")" = "$TOMOS_APPROVED_COMMIT"
+test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{tree}")" = "$TOMOS_APPROVED_TREE"
+TOMOS_RULESET_ID="$(gh api "repos/$TOMOS_REPOSITORY/rulesets" --paginate | jq -er --arg name "$TOMOS_RULESET_NAME" '[.[] | select(.name == $name and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else error("expected exactly one active tag ruleset") end')"
+TOMOS_RULESET="$(gh api "repos/$TOMOS_REPOSITORY/rulesets/$TOMOS_RULESET_ID")"
+printf '%s\n' "$TOMOS_RULESET" | jq -e --arg tag "refs/tags/$TOMOS_EXECUTION_TAG" '
+  .name == "tomos-w1-private-test-immutable-tags"
+  and .target == "tag"
+  and .enforcement == "active"
+  and .conditions.ref_name.include == [$tag]
+  and ([.rules[].type] | index("update"))
+  and ([.rules[].type] | index("deletion"))
+  and (.bypass_actors | type == "array" and length == 0)
+' >/dev/null
+TOMOS_STEP_3
 ```
 
-Expected: `workflow_dispatch`、approved head SHA、success、
-`TOMOS-AI-UNSIGNED-TEST-ONLY-private_test_unsigned-0.8.233`。内部file名は
-`TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi`だけ。
+Expected: tag object typeが`commit`、commitとtreeがapproved値とexact一致し、rulesetが1件だけactiveで、exact tag、update/deletion制限、空のbypass actor配列を満たす。どれかが不一致ならActions承認前に停止する。
 
-- [ ] **Step 5: artifact downloadの別承認で停止する**
+- [ ] **Step 4: Actions実行の個別承認で停止する**
 
-download先、容量上限、期待artifact名、実行禁止、削除方法を示す。
-承認前にartifactを取得しない。
+Directorはworkflow ID `300666658` / name `Build Windows installer`、immutable workflow ref、approved source commit / tree、version、channel、標準`windows-2022` runner、想定artifact名、7日保持、課金範囲を示す。repositoryはpublicであり、GitHub公式文書上、public repositoryのstandard GitHub-hosted runnerは無料である。一方、artifact storageはstorage allowanceを消費し、account全体の課金状況は追加のユーザー範囲なしには未解決とする。現時点のrepository artifact総量は約29.8 MB、過去のWindows MSI artifactは約0.35 MBであり、無条件のゼロ費用保証はしない。承認前にREST dispatch endpointを実行しない。
 
-- [ ] **Step 6: 承認後にsize / SHAを記録する**
+- [ ] **Step 5: 承認後だけREST dispatchを実行する**
 
-取得したMSIは実行せず、name、size、SHA-256をbuild evidenceへ記録する。
-GitHub Releaseへ添付せず、公開URLを作らない。
+Run:
+
+```bash
+bash -euo pipefail <<'TOMOS_STEP_5'
+readonly TOMOS_REPOSITORY="ShibaPapaMikami/tomos-ai-local-webui"
+readonly TOMOS_EXECUTION_TAG="w1-private-test-0.8.233-50e4068"
+readonly TOMOS_APPROVED_COMMIT="50e4068e0cffc8c1254ac3e01dbc691d860fb5f9"
+readonly TOMOS_APPROVED_TREE="bb6d741e5de5526d5b1730bd28c96156b4b0448e"
+readonly TOMOS_RULESET_NAME="tomos-w1-private-test-immutable-tags"
+git fetch origin "refs/tags/$TOMOS_EXECUTION_TAG:refs/tags/$TOMOS_EXECUTION_TAG"
+test "$(git cat-file -t "refs/tags/$TOMOS_EXECUTION_TAG")" = "commit"
+test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{commit}")" = "$TOMOS_APPROVED_COMMIT"
+test "$(git rev-parse "refs/tags/$TOMOS_EXECUTION_TAG^{tree}")" = "$TOMOS_APPROVED_TREE"
+TOMOS_RULESET_ID="$(gh api "repos/$TOMOS_REPOSITORY/rulesets" --paginate | jq -er --arg name "$TOMOS_RULESET_NAME" '[.[] | select(.name == $name and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else error("expected exactly one active tag ruleset") end')"
+TOMOS_RULESET="$(gh api "repos/$TOMOS_REPOSITORY/rulesets/$TOMOS_RULESET_ID")"
+printf '%s\n' "$TOMOS_RULESET" | jq -e --arg tag "refs/tags/$TOMOS_EXECUTION_TAG" '
+  .name == "tomos-w1-private-test-immutable-tags"
+  and .target == "tag"
+  and .enforcement == "active"
+  and .conditions.ref_name.include == [$tag]
+  and ([.rules[].type] | index("update"))
+  and ([.rules[].type] | index("deletion"))
+  and (.bypass_actors | type == "array" and length == 0)
+' >/dev/null
+TOMOS_DISPATCH_RESPONSE="$(gh api --method POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2026-03-10" \
+  "repos/$TOMOS_REPOSITORY/actions/workflows/300666658/dispatches" \
+  --input - <<'JSON'
+{"ref":"w1-private-test-0.8.233-50e4068","inputs":{"version":"0.8.233","channel":"private_test_unsigned"}}
+JSON
+)"
+TOMOS_RUN_ID="$(printf '%s\n' "$TOMOS_DISPATCH_RESPONSE" | jq -er '.workflow_run_id | select(type == "number" and . > 0 and floor == .)')"
+printf '%s\n' "$TOMOS_DISPATCH_RESPONSE" | jq -e --argjson run_id "$TOMOS_RUN_ID" '
+  .workflow_run_id == $run_id
+  and .run_url == ("https://api.github.com/repos/ShibaPapaMikami/tomos-ai-local-webui/actions/runs/" + ($run_id | tostring))
+  and .html_url == ("https://github.com/ShibaPapaMikami/tomos-ai-local-webui/actions/runs/" + ($run_id | tostring))
+' >/dev/null
+printf 'export TOMOS_RUN_ID=%s\n' "$TOMOS_RUN_ID"
+TOMOS_STEP_5
+```
+
+Expected: tag commit/treeとactive exact-name rulesetをREST dispatch直前の同一fail-fast bash blockで再照合する。rulesetはexact include ref、update/deletion制限、空のbypass actor配列を満たす場合だけPOSTへ到達する。GitHub REST dispatchはHTTP 200と`workflow_run_id`、`run_url`、`html_url`を返し、responseのpositive integer run IDと両URLがexact一致する。Step 5が出力したexact `export TOMOS_RUN_ID=<positive integer>`を親の同一terminal shellへ貼り付けて実行してからStep 6を開始する。自動実行や別run探索はしない。run IDは公開metadataだが、他のJSON/raw response、token、pathは表示しない。
+
+- [ ] **Step 6: runとartifactをread-only確認する**
+
+Step 5が出力したexact `export TOMOS_RUN_ID=<positive integer>`を親の同一terminal shellへ貼り付けて実行してから、次だけを実行する。別runを探したり、response JSONを再利用したりしない。
+
+```bash
+bash -euo pipefail <<'TOMOS_STEP_6'
+: "${TOMOS_RUN_ID:?Step 5が出力したexport行を同一shellで実行してから続ける}"
+printf '%s' "$TOMOS_RUN_ID" | grep -Eq '^[1-9][0-9]*$'
+readonly TOMOS_REPOSITORY="ShibaPapaMikami/tomos-ai-local-webui"
+TOMOS_RUN_JSON="$(gh run view "$TOMOS_RUN_ID" --json databaseId,url,status,conclusion,headBranch,headSha,event,workflowName,createdAt)"
+printf '%s\n' "$TOMOS_RUN_JSON" | jq -e --argjson run_id "$TOMOS_RUN_ID" '
+  .databaseId == $run_id
+  and .status == "completed"
+  and .conclusion == "success"
+  and .headBranch == "w1-private-test-0.8.233-50e4068"
+  and .headSha == "50e4068e0cffc8c1254ac3e01dbc691d860fb5f9"
+  and .event == "workflow_dispatch"
+  and .workflowName == "Build Windows installer"
+  and .url == ("https://github.com/ShibaPapaMikami/tomos-ai-local-webui/actions/runs/" + ($run_id | tostring))
+' >/dev/null
+TOMOS_ARTIFACT_METADATA="$(gh api \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2026-03-10" \
+  "repos/$TOMOS_REPOSITORY/actions/runs/$TOMOS_RUN_ID/artifacts" \
+  --jq '{total_count, artifacts: [.artifacts[] | {id, name, size_in_bytes, expired, created_at, expires_at}]}')"
+printf '%s\n' "$TOMOS_ARTIFACT_METADATA" | jq -e '
+  .total_count == 1
+  and (.artifacts | length) == 1
+  and .artifacts[0].name == "TOMOS-AI-UNSIGNED-TEST-ONLY-private_test_unsigned-0.8.233"
+  and .artifacts[0].expired == false
+  and (.artifacts[0].size_in_bytes | type) == "number"
+  and .artifacts[0].size_in_bytes > 0
+  and .artifacts[0].size_in_bytes <= 10485760
+  and (.artifacts[0].size_in_bytes | floor) == .artifacts[0].size_in_bytes
+'
+TOMOS_ARTIFACT_ID="$(printf '%s\n' "$TOMOS_ARTIFACT_METADATA" | jq -er '.artifacts[0].id | select(type == "number" and . > 0 and floor == .)')"
+TOMOS_STEP_6
+```
+
+Expected: Step 5 responseのexact run IDをrun viewでdatabaseId、completed/success、headBranch、headSha、event、workflowName、expected run URLまで機械照合する。artifact API responseの`total_count`と`.artifacts | length`がexact 1、nameが`TOMOS-AI-UNSIGNED-TEST-ONLY-private_test_unsigned-0.8.233`、`expired`がfalse、`size_in_bytes`がpositive integerかつ`10485760`以下、artifact IDもpositive integerであることを確認する。artifact ID、name、size_in_bytes、expired、created_at、expires_atをevidenceへ記録する。workflow契約の`retention-days: 7`とAPIのcreated_at / expires_atは別々に記録し、APIにない`retention_days` fieldは使用しない。`archive_download_url`は保存、表示、公開しない。Step 6はmetadata確認だけであり、archive内部fileの確認やdownloadは行わない。
+
+- [ ] **Step 7: artifact downloadの別承認で停止する**
+
+Step 6のartifact API validationが合格し、`size_in_bytes`が`10485760`以下の場合だけ、別のdownload承認へ進む。承認時はartifact ID、一時directory、10 MiBのarchive安全上限、期待archive `TOMOS-AI-UNSIGNED-TEST-ONLY-private_test_unsigned-0.8.233`、期待するMSI `TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi`とnotice `TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.NOTICE.txt`、実行禁止、失敗・中断時を含むcleanup方法を示す。承認前にartifactを取得しない。
+
+- [ ] **Step 8: 承認後にsize / SHAを記録する**
+
+当該run用に新規作成したexact temp directoryだけをcleanup対象とし、取得前にsuccess・不一致・展開失敗・notice不一致・中断のすべてでcleanupされるtrapを設定する。取得したarchiveはmetadata確認後にも10 MiBを超えた場合は展開せず停止する。一時directoryへ展開し、MSI `TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.msi`とnotice `TOMOS_AI-v0.8.233-windows-UNSIGNED-TEST-ONLY.NOTICE.txt`だけであることを確認する。MSIは実行せず、MSI / noticeそれぞれのname、size、SHA-256をbuild evidenceへ記録する。noticeの固定文言`UNSIGNED`、`TEST ONLY`、`This installer is not a production release.`、`Do not disable Windows protection.`、`Before use, verify the Director-provided MSI SHA-256.`を確認して記録する。成功時も失敗・中断時もexact temp directoryをcleanupする。GitHub Releaseへ添付せず、公開URLを作らない。
 
 ---
 
